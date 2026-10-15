@@ -9,3 +9,6 @@ Cargo.lock.bak
 /scratch/
 /tmp/
 dist/
+
+# Agent worktrees
+.claude/worktrees/
