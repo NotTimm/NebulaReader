@@ -20,11 +20,89 @@ pub enum Background {
 
 impl Background {
     pub const ALL: [Background; 2] = [Background::Theme, Background::Black];
+}
 
-    pub fn label(self) -> &'static str {
+/// Typeface for books. The generic families resolve through fontconfig to
+/// the system's preferred serif/sans (Noto Serif etc.).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BookFont {
+    Serif,
+    Sans,
+}
+
+/// Page color scheme for books.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BookTheme {
+    /// Follow the COSMIC light/dark theme.
+    Auto,
+    Paper,
+    Sepia,
+    Dark,
+    /// Pure black background, dimmed text (OLED / night reading).
+    Night,
+}
+
+impl BookTheme {
+    pub const ALL: [BookTheme; 5] =
+        [BookTheme::Auto, BookTheme::Paper, BookTheme::Sepia, BookTheme::Dark, BookTheme::Night];
+    pub const LABELS: [&'static str; 5] = ["Auto", "Paper", "Sepia", "Dark", "Night"];
+}
+
+/// Text column width, as a reading measure (characters per line).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BookWidth {
+    Narrow,
+    Medium,
+    Wide,
+}
+
+impl BookWidth {
+    pub const ALL: [BookWidth; 3] = [BookWidth::Narrow, BookWidth::Medium, BookWidth::Wide];
+    pub const LABELS: [&'static str; 3] = ["Narrow", "Medium", "Wide"];
+
+    /// Column width in ems. Average Latin glyphs are ~0.5em wide, so
+    /// Medium (34em) lands near the classic ~66 characters per line.
+    pub fn ems(self) -> f32 {
         match self {
-            Background::Theme => "Theme",
-            Background::Black => "Black",
+            BookWidth::Narrow => 28.0,
+            BookWidth::Medium => 34.0,
+            BookWidth::Wide => 42.0,
+        }
+    }
+}
+
+/// Book typography. Kept separate from comic settings; every option is a
+/// reader override, the publisher's CSS only contributes semantics
+/// (italics, centering, indents).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BookSettings {
+    /// Body text size in pixels.
+    pub font_size: u16,
+    pub font: BookFont,
+    /// Line height as a multiple of the font size.
+    pub line_spacing: f32,
+    pub width: BookWidth,
+    pub theme: BookTheme,
+    pub justify: bool,
+}
+
+impl BookSettings {
+    pub const MIN_SIZE: u16 = 12;
+    pub const MAX_SIZE: u16 = 40;
+    pub const LINE_SPACINGS: [f32; 4] = [1.3, 1.5, 1.7, 1.9];
+    pub const LINE_LABELS: [&'static str; 4] = ["Tight", "Normal", "Relaxed", "Loose"];
+}
+
+impl Default for BookSettings {
+    fn default() -> Self {
+        Self {
+            font_size: 19,
+            font: BookFont::Serif,
+            line_spacing: 1.5,
+            width: BookWidth::Medium,
+            theme: BookTheme::Auto,
+            justify: true,
         }
     }
 }
@@ -41,6 +119,7 @@ pub struct Settings {
     pub theater_mode: bool,
     /// Look up metadata online (AniList / ComicVine) when opening a comic.
     pub fetch_metadata: bool,
+    pub book: BookSettings,
 }
 
 impl Default for Settings {
@@ -51,6 +130,7 @@ impl Default for Settings {
             dual_page: false,
             theater_mode: false,
             fetch_metadata: true,
+            book: BookSettings::default(),
         }
     }
 }

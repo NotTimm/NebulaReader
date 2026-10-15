@@ -126,6 +126,8 @@ pub struct IssueEntry {
     pub last_page: usize,
     pub completed: bool,
     pub last_read_at: i64,
+    /// Books: relative scroll position (0–1) inside chapter `last_page`.
+    pub position: f32,
 }
 
 impl IssueEntry {
@@ -293,6 +295,7 @@ pub fn open_db() -> Result<Connection, String> {
              last_page     INTEGER NOT NULL DEFAULT 0,
              completed     INTEGER NOT NULL DEFAULT 0,
              last_read_at  INTEGER NOT NULL DEFAULT 0,
+             position      REAL    NOT NULL DEFAULT 0,
              UNIQUE(series_path, path)
          );
          CREATE INDEX IF NOT EXISTS issues_by_path ON issues(path);",
@@ -306,7 +309,7 @@ pub fn open_db() -> Result<Connection, String> {
 
 /// Current expected schema version. Bump this and add a matching arm in
 /// [`run_migrations`] whenever the schema changes.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Brings an existing database up to [`SCHEMA_VERSION`] without touching
 /// user data. Uses SQLite's `user_version` pragma as the version marker, so
@@ -370,6 +373,11 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
                 params![path, kind, title],
             );
         }
+    }
+
+    // v3 -> v4: scroll position inside a book chapter.
+    if current < 4 {
+        let _ = conn.execute("ALTER TABLE issues ADD COLUMN position REAL NOT NULL DEFAULT 0", []);
     }
 
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
@@ -541,7 +549,7 @@ pub fn known_page_counts(conn: &Connection, series_path: &str) -> HashMap<String
 
 pub fn issues_for(conn: &Connection, series_path: &str) -> Vec<IssueEntry> {
     let sql = "SELECT id, series_path, path, idx, name, number, subtitle, title, cover_date, url,
-                      page_count, last_page, completed, last_read_at
+                      page_count, last_page, completed, last_read_at, position
                FROM issues WHERE series_path = ?1 ORDER BY idx";
     let Ok(mut st) = conn.prepare(sql) else { return vec![] };
     st.query_map(params![series_path], |r| {
@@ -560,6 +568,7 @@ pub fn issues_for(conn: &Connection, series_path: &str) -> Vec<IssueEntry> {
             last_page: r.get::<_, i64>(11)? as usize,
             completed: r.get::<_, i64>(12)? != 0,
             last_read_at: r.get(13)?,
+            position: r.get::<_, f64>(14)? as f32,
         })
     })
     .map(|it| it.flatten().collect())
@@ -591,6 +600,32 @@ pub fn save_issue_progress(
         params![series_path, global_page as i64, chapter_idx as i64, issue_path],
     )
     .map_err(|e| format!("save_progress: {e}"))?;
+    Ok(())
+}
+
+/// Books: chapter + position within it. The book's single issue row holds
+/// it; `page_count` is the chapter count so shelf progress works as-is.
+pub fn save_book_progress(
+    conn: &Connection,
+    key: &str,
+    chapter: usize,
+    chapters: usize,
+    position: f32,
+    finished: bool,
+) -> Result<(), String> {
+    let now = now_unix();
+    conn.execute(
+        "UPDATE issues SET last_page = ?2, page_count = ?3, position = ?4,
+                completed = CASE WHEN ?5 THEN 1 ELSE completed END, last_read_at = ?6
+         WHERE series_path = ?1 AND path = ?1",
+        params![key, chapter as i64, chapters as i64, position as f64, finished, now],
+    )
+    .map_err(|e| format!("save_book_progress: {e}"))?;
+    conn.execute(
+        "UPDATE series SET last_read_ch = ?2, last_issue_path = ?1 WHERE path = ?1",
+        params![key, chapter as i64],
+    )
+    .map_err(|e| format!("save_book_progress: {e}"))?;
     Ok(())
 }
 
@@ -785,7 +820,9 @@ const SERIES_COLS: &str = "s.id, s.path, s.title, s.display_title, s.description
     s.total_pages, s.date_added, s.last_opened, s.is_series,
     (SELECT COUNT(*) FROM issues i WHERE i.series_path = s.path),
     (SELECT COUNT(*) FROM issues i WHERE i.series_path = s.path AND i.completed),
-    (SELECT CASE WHEN i.page_count > 1 AND NOT i.completed
+    (SELECT CASE WHEN s.path LIKE '%.epub' AND i.page_count > 0 AND NOT i.completed
+                 THEN (i.last_page + i.position) / i.page_count
+                 WHEN i.page_count > 1 AND NOT i.completed
                  THEN CAST(i.last_page AS REAL) / (i.page_count - 1) ELSE 0 END
        FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path),
     (SELECT CASE WHEN i.number != '' THEN i.number ELSE i.name END

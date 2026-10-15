@@ -25,7 +25,10 @@ use crate::naming;
 use crate::scan;
 use crate::settings::{Background as BgStyle, Settings};
 
+mod book_view;
 mod library_view;
+
+use book_view::{BookMsg, BookScroll};
 
 /// Dropdown labels for [`BgStyle::ALL`], kept in the same order.
 const BG_LABELS: [&str; 2] = ["Theme", "Black"];
@@ -52,7 +55,7 @@ pub enum Layout { Single, Dual }
 
 /// Which panel the context drawer is currently showing.
 #[derive(Clone, Debug, PartialEq)]
-pub enum ContextPage { Settings, Info }
+pub enum ContextPage { Settings, Info, Typography }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
@@ -137,6 +140,8 @@ pub enum Message {
     // Drag and drop
     FilesDropped(Vec<PathBuf>),
     DndDataReceived(String, Vec<u8>),
+    // Books
+    Book(BookMsg),
     // Fit page
     FitPage,
     FitPageSize(cosmic::iced::Size),
@@ -179,6 +184,11 @@ pub struct App {
     epub_book: Option<epub::EpubBook>,
     epub_chapter: usize,
     epub_cover: Option<widget::image::Handle>,
+    /// One handle per book image, made once (a fresh handle per frame
+    /// would re-upload the texture every redraw).
+    epub_images: Vec<widget::image::Handle>,
+    book_scroll: BookScroll,
+    book_saved_pos: f32,
     // pointer / touch state
     modifiers: keyboard::Modifiers,
     touches: HashSet<touch::Finger>,
@@ -762,11 +772,8 @@ impl App {
         let Some(db) = &self.db else { return };
         let Some(path) = &self.open_path else { return };
         let key = path.to_string_lossy();
-        if let Some(book) = &self.epub_book {
-            let n = book.chapters.len();
-            // A book counts as finished once you reach its last chapter.
-            let _ = library::save_issue_progress(db, &key, &key, self.epub_chapter, n, 0, self.epub_chapter);
-            return;
+        if self.epub_book.is_some() {
+            return; // books save chapter + scroll position in book_view
         }
         if let Some((ch_idx, ch, pg)) = self.current_chapter() {
             // In two-page mode the right-hand page is on screen too.
@@ -854,6 +861,9 @@ impl Application for App {
             epub_book: None,
             epub_chapter: 0,
             epub_cover: None,
+            epub_images: Vec::new(),
+            book_scroll: BookScroll::default(),
+            book_saved_pos: 0.0,
             modifiers: keyboard::Modifiers::default(),
             touches: HashSet::new(),
             chapter_covers: HashMap::new(),
@@ -934,6 +944,11 @@ impl Application for App {
                 Message::CloseContext,
             )
             .title("Details"),
+            ContextPage::Typography => cosmic::app::context_drawer::context_drawer(
+                self.build_typography_panel(),
+                Message::CloseContext,
+            )
+            .title("Reading"),
         })
     }
 
@@ -989,28 +1004,47 @@ impl Application for App {
                 let book = self.epub_book.as_ref().unwrap();
                 els.push(
                     widget::button::icon(icon::from_name("go-previous-symbolic"))
-                        .on_press(Message::PrevPage)
+                        .on_press(Message::Book(BookMsg::PrevChapter))
                         .into(),
                 );
                 els.push(
-                    widget::text(format!("Chapter {} / {}", self.epub_chapter + 1, book.chapters.len()))
-                        .into(),
+                    widget::text(format!("{} / {}", self.epub_chapter + 1, book.chapters.len())).into(),
                 );
                 els.push(
                     widget::button::icon(icon::from_name("go-next-symbolic"))
-                        .on_press(Message::NextPage)
+                        .on_press(Message::Book(BookMsg::NextChapter))
                         .into(),
                 );
                 els.push(widget::divider::vertical::light().into());
-                if book.chapters.len() > 1 {
-                    let ch_label = if self.show_chapter_select { "Chapters ▾" } else { "Chapters" };
-                    els.push(
-                        widget::button::standard(ch_label)
-                            .on_press(Message::ToggleChapterSelect)
-                            .into(),
-                    );
-                }
-                els.extend(self.reader_common_controls());
+                els.push(
+                    widget::tooltip(
+                        widget::button::icon(icon::from_name("view-list-symbolic"))
+                            .on_press(Message::ToggleChapterSelect),
+                        widget::text("Contents (C)"),
+                        widget::tooltip::Position::Bottom,
+                    )
+                    .into(),
+                );
+                els.push(
+                    widget::tooltip(
+                        widget::button::standard("Aa").on_press(Message::Book(BookMsg::ToggleTypography)),
+                        widget::text("Text & page settings"),
+                        widget::tooltip::Position::Bottom,
+                    )
+                    .into(),
+                );
+                els.push(
+                    widget::button::icon(icon::from_name("dialog-information-symbolic"))
+                        .on_press(Message::ToggleInfo)
+                        .into(),
+                );
+                let fs_icon = if self.fullscreen { "view-restore-symbolic" } else { "view-fullscreen-symbolic" };
+                els.push(widget::button::icon(icon::from_name(fs_icon)).on_press(Message::ToggleFullscreen).into());
+                els.push(
+                    widget::button::icon(icon::from_name("emblem-system-symbolic"))
+                        .on_press(Message::ToggleSettings)
+                        .into(),
+                );
             }
             AppView::Reader => {
                 if !self.sources.is_empty() {
@@ -1106,6 +1140,9 @@ impl Application for App {
         match message {
             Message::GoToLibrary => {
                 self.show_chapter_select = false;
+                if self.app_view == AppView::Reader && self.epub_book.is_some() {
+                    self.persist_book_position();
+                }
                 if self.app_view == AppView::Reader && self.back_to_series {
                     if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
                         let t = self.refresh_views();
@@ -1263,14 +1300,26 @@ impl Application for App {
                             .map(widget::image::Handle::from_bytes);
 
                         let chapter_count = book.chapters.len();
-                        self.epub_chapter = if let Some(db) = &self.db {
-                            library::get_progress(db, &path_str)
-                                .map(|(_, ch)| ch)
-                                .unwrap_or(0)
-                                .min(chapter_count.saturating_sub(1))
-                        } else {
-                            0
+                        self.epub_images =
+                            book.images.iter().map(|b| widget::image::Handle::from_bytes(b.clone())).collect();
+                        // Resume at the saved chapter *and* scroll position.
+                        let saved = self.db.as_ref().and_then(|db| {
+                            library::issues_for(db, &path_str).into_iter().find(|i| i.path == path_str)
+                        });
+                        let (chapter, position) = match saved {
+                            Some(i) if !i.completed => (i.last_page, i.position),
+                            _ => (
+                                self.db
+                                    .as_ref()
+                                    .and_then(|db| library::get_progress(db, &path_str))
+                                    .map(|(_, ch)| ch)
+                                    .unwrap_or(0),
+                                0.0,
+                            ),
                         };
+                        self.epub_chapter = chapter.min(chapter_count.saturating_sub(1));
+                        self.book_scroll = BookScroll { rel_y: position, ..BookScroll::default() };
+                        self.book_saved_pos = position;
                         let cover_bytes = book.cover.clone();
                         self.epub_book = Some(book);
 
@@ -1300,12 +1349,15 @@ impl Application for App {
                                 }
                             }
                         }
-                        self.persist_progress();
 
                         let title_task = self.core.main_window_id()
                             .map(|id| self.set_window_title(self.title.clone(), id));
 
-                        return Task::batch(title_task);
+                        let restore = cosmic::iced::widget::scrollable::snap_to(
+                            book_view::book_scroll_id(),
+                            cosmic::iced::widget::scrollable::RelativeOffset { x: None, y: Some(position) },
+                        );
+                        return Task::batch(title_task.into_iter().chain([restore]));
                     }
                     Err(e) => self.error = Some(e),
                 }
@@ -1587,13 +1639,8 @@ impl Application for App {
                 self.settings.save();
             }
             Message::NextPage => {
-                if let Some(book) = &self.epub_book {
-                    let new = (self.epub_chapter + 1).min(book.chapters.len().saturating_sub(1));
-                    if new != self.epub_chapter {
-                        self.epub_chapter = new;
-                        self.persist_progress();
-                    }
-                    return Task::none();
+                if self.epub_book.is_some() {
+                    return self.update_book(BookMsg::NextChapter);
                 }
                 let step = self.page_step();
                 let new = (self.current_page + step).min(self.sources.len().saturating_sub(1));
@@ -1605,13 +1652,8 @@ impl Application for App {
                 }
             }
             Message::PrevPage => {
-                if let Some(_book) = &self.epub_book {
-                    let new = self.epub_chapter.saturating_sub(1);
-                    if new != self.epub_chapter {
-                        self.epub_chapter = new;
-                        self.persist_progress();
-                    }
-                    return Task::none();
+                if self.epub_book.is_some() {
+                    return self.update_book(BookMsg::PrevChapter);
                 }
                 let step = self.page_step();
                 let new = self.current_page.saturating_sub(step);
@@ -1665,9 +1707,7 @@ impl Application for App {
             }
             Message::SelectChapter(ch_idx) => {
                 if self.epub_book.is_some() {
-                    self.epub_chapter = ch_idx;
-                    self.show_chapter_select = false;
-                    self.persist_progress();
+                    return self.update_book(BookMsg::GoToChapter(ch_idx));
                 } else if let Some(ch) = self.chapters.get(ch_idx) {
                     self.current_page = ch.start;
                     self.nav_dir = 1;
@@ -1722,6 +1762,7 @@ impl Application for App {
                     }
                 }
             }
+            Message::Book(msg) => return self.update_book(msg),
             Message::FitPage => {
                 let Some(page) = self.page_data(self.current_page) else { return Task::none() };
                 let Some(id) = self.core.main_window_id() else { return Task::none() };
@@ -1762,6 +1803,35 @@ impl Application for App {
 
 impl App {
     fn handle_key(&mut self, key: Key) -> Task<Message> {
+        if self.app_view == AppView::Reader && self.epub_book.is_some() {
+            let ctrl = self.modifiers.control();
+            let shift = self.modifiers.shift();
+            let msg = match &key {
+                Key::Character(c) if c.as_str() == " " && shift => Some(BookMsg::PageUp),
+                Key::Character(c) if c.as_str() == " " => Some(BookMsg::PageDown),
+                Key::Named(Named::ArrowRight | Named::PageDown) => Some(BookMsg::PageDown),
+                Key::Named(Named::ArrowLeft | Named::PageUp) => Some(BookMsg::PageUp),
+                Key::Named(Named::ArrowDown) => Some(BookMsg::LineDown),
+                Key::Named(Named::ArrowUp) => Some(BookMsg::LineUp),
+                Key::Character(c) if ctrl && matches!(c.as_str(), "=" | "+") => Some(BookMsg::FontBigger),
+                Key::Character(c) if ctrl && c.as_str() == "-" => Some(BookMsg::FontSmaller),
+                Key::Character(c) if ctrl && c.as_str() == "0" => Some(BookMsg::FontReset),
+                _ => None,
+            };
+            if let Some(msg) = msg {
+                return self.update_book(msg);
+            }
+            match &key {
+                Key::Character(c) if !ctrl && matches!(c.as_str(), "c" | "C") => {
+                    self.show_chapter_select = !self.show_chapter_select;
+                    return Task::none();
+                }
+                Key::Character(c) if !ctrl && matches!(c.as_str(), "a" | "A") => {
+                    return self.update_book(BookMsg::ToggleTypography);
+                }
+                _ => {}
+            }
+        }
         match &key {
             Key::Named(Named::ArrowRight) | Key::Named(Named::PageDown) => {
                 if self.app_view != AppView::Reader { return Task::none(); }
@@ -1956,117 +2026,6 @@ impl App {
             col = col.push(error_banner(err));
         }
         col.push(main_row).into()
-    }
-
-    fn view_epub_reader(&self) -> Element<'_, Message> {
-        let book = self.epub_book.as_ref().unwrap();
-
-        let content: Element<'_, Message> = if let Some(chapter) = book.chapters.get(self.epub_chapter)
-        {
-            let mut page = widget::Column::new().spacing(14).max_width(720.0).padding(24);
-            for block in &chapter.blocks {
-                page = page.push(render_epub_block(block));
-            }
-            widget::scrollable::scrollable(
-                widget::container(page).width(Length::Fill).center_x(Length::Fill),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        } else {
-            widget::text("This book has no chapters.").into()
-        };
-
-        let content_bg: Element<'_, Message> = self.backdrop(content);
-
-        let main_row: Element<'_, Message> = if self.show_chapter_select {
-            widget::Row::new()
-                .push(widget::container(content_bg).width(Length::Fill).height(Length::Fill))
-                .push(self.build_epub_chapter_select())
-                .into()
-        } else {
-            content_bg
-        };
-
-        let mut col = widget::Column::new().spacing(8);
-        if let Some(err) = self.error.as_deref() {
-            col = col.push(error_banner(err));
-        }
-        col.push(main_row).into()
-    }
-
-    fn build_epub_chapter_select(&self) -> Element<'_, Message> {
-        let book = self.epub_book.as_ref().unwrap();
-        let mut col = widget::Column::new().spacing(0);
-
-        col = col.push(
-            widget::Row::new()
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .padding(12)
-                .push(widget::text::title4("Chapters").width(Length::Fill))
-                .push(
-                    widget::button::icon(icon::from_name("window-close-symbolic"))
-                        .on_press(Message::ToggleChapterSelect),
-                ),
-        );
-        col = col.push(widget::divider::horizontal::light());
-
-        let mut list = widget::Column::new().spacing(2).padding(8);
-        for (idx, chapter) in book.chapters.iter().enumerate() {
-            let is_current = idx == self.epub_chapter;
-            let label = widget::text(chapter.title.clone())
-                .size(if is_current { 14 } else { 13 });
-
-            let row_el: Element<'_, Message> = if is_current {
-                widget::container(label)
-                    .padding(6)
-                    .width(Length::Fill)
-                    .style(|_: &cosmic::Theme| widget::container::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.3, 0.5, 1.0, 0.15))),
-                        ..Default::default()
-                    })
-                    .into()
-            } else {
-                mouse_area(widget::container(label).padding(6).width(Length::Fill))
-                    .on_press(Message::SelectChapter(idx))
-                    .into()
-            };
-            list = list.push(row_el);
-        }
-
-        col = col.push(widget::scrollable::scrollable(list).height(Length::Fill));
-
-        widget::container(col).width(Length::Fixed(300.0)).height(Length::Fill).into()
-    }
-
-    fn build_epub_info_panel(&self) -> Element<'_, Message> {
-        let book = self.epub_book.as_ref().unwrap();
-        let mut col = widget::Column::new().spacing(8).padding(12);
-
-        if let Some(cover) = &self.epub_cover {
-            col = col.push(
-                widget::image(cover.clone())
-                    .width(Length::Fixed(160.0))
-                    .content_fit(ContentFit::Contain),
-            );
-        }
-
-        col = col.push(widget::text::title4(book.title.clone()));
-        if let Some(author) = &book.author {
-            col = col.push(widget::text(author.clone()).size(13));
-        }
-        col = col.push(widget::divider::horizontal::light());
-
-        if let Some(chapter) = book.chapters.get(self.epub_chapter) {
-            col = col.push(
-                widget::text(format!("Chapter {} of {}", self.epub_chapter + 1, book.chapters.len()))
-                    .size(13),
-            );
-            col = col.push(widget::text(chapter.title.clone()).size(13));
-        }
-
-        widget::container(col).width(Length::Fixed(280.0)).height(Length::Fill).into()
     }
 
     fn build_chapter_select(&self) -> Element<'_, Message> {
@@ -2461,33 +2420,7 @@ fn first_path_from_uri_list(data: &[u8]) -> Option<PathBuf> {
         .and_then(|url| url.to_file_path().ok())
 }
 
-/// Renders one parsed EPUB block with heading-appropriate sizing.
-fn render_epub_block(block: &epub::Block) -> Element<'_, Message> {
-    match block {
-        epub::Block::Heading(level, text) => {
-            let size: u16 = match level {
-                1 => 28,
-                2 => 24,
-                3 => 20,
-                4 => 18,
-                5 => 16,
-                _ => 15,
-            };
-            widget::text(text.clone()).size(size).into()
-        }
-        epub::Block::Paragraph(text) => widget::text(text.clone()).size(16).into(),
-        epub::Block::Quote(text) => widget::container(widget::text(text.clone()).size(15))
-            .padding([4, 16])
-            .into(),
-        epub::Block::ListItem(text) => widget::text(format!("•  {text}")).size(16).into(),
-        epub::Block::Image(bytes) => widget::image(widget::image::Handle::from_bytes(bytes.clone()))
-            .width(Length::Fill)
-            .content_fit(ContentFit::Contain)
-            .into(),
-    }
-}
-
-fn error_banner(msg: &str) -> Element<'_, Message> {
+pub(super) fn error_banner(msg: &str) -> Element<'_, Message> {
     widget::container(
         widget::Row::new()
             .spacing(8)
