@@ -1,31 +1,61 @@
 # Cosmic Comic
 
-A native [COSMIC desktop](https://system76.com/cosmic) reader for comic book
-archives (`.cbz`/`.cbr`), manga/comic series folders, and `.epub` books.
+A native [COSMIC desktop](https://system76.com/cosmic) reader for comics,
+manga and EPUB books. Point it at the folders your collection already lives
+in and it builds a library of series, with covers, per-issue progress and a
+Continue Reading shelf. Messy names are cleaned up and matched online for
+proper titles and descriptions.
+
+Screenshots: [`res/screenshots/`](res/screenshots/) (store copy and captions
+in [`docs/listing.md`](docs/listing.md)).
 
 ## Features
 
-- Library view with covers, search, and a "Continue Reading" shelf
-- Add library folders that get scanned and grouped automatically, either by
-  browsing or by typing/pasting a path (`~` expands to home)
-- Settings drawer: backdrop style & opacity, layout, metadata lookup,
-  library folder list
-- Chapter-aware series folders (nested `.cbz`/`.cbr`/image-dir chapters)
-- Fast CBR opening: pages are extracted in one pass and cached on disk
-  instead of re-streaming the archive per page (see src/comic.rs)
-- Basic `.epub` support: chapter navigation, heading sizes, cover
-- Reading progress and metadata saved to a local SQLite database
-- Single/dual page layout, theater mode, fullscreen
-- Zoom & pan: mouse wheel zooms directly (no modifier needed), trackpad/
-  touchscreen pinch zooms (see the libcosmic fork note below), `Ctrl`+
-  trackpad scroll also zooms, plain trackpad two-finger scroll pans a
-  zoomed-in image (free diagonal movement), click-drag pans too, and
-  `M`/`Ctrl 0` toggle/reset zoom, "Fit Page" resizes the window's width to
-  match the current page's aspect ratio (height unchanged)
-- Drag and drop a file, folder, or book onto the window to open it
-- Metadata debug panel (the `i` button): embedded `ComicInfo.xml` when
-  present, plus what it matched via AniList (manga/anime) and ComicVine
-  (Western comics, via a series→issue lookup with a cover image)
+**Library**
+
+- Add library folders (browse, or type/paste a path; `~` expands). The
+  scanner recognises series folders, manga-tui downloads
+  (`Title/English/Ch N ….cbz`), image-folder chapters, publisher container
+  folders, and loose issues, which are grouped into series
+- Names are cleaned offline (`Civil War 001-007 (2006-2007) GetComics.INFO`
+  → `Civil War`), then matched online: AniList for manga, ComicVine for
+  Western comics (needs a free key, see below), for canonical titles,
+  descriptions, publishers and per-issue titles and cover dates
+- Series pages with an issue list, mark read/unread, and re-match with your
+  own search terms when the automatic match is wrong
+- Per-issue progress (read, unread, or in progress at a page), a Continue
+  Reading shelf, and library search. Opening a loose file that belongs to a
+  library series continues that series
+
+**Comics**
+
+- CBZ, CBR and image folders, with embedded `ComicInfo.xml`
+- Fast CBR: pages are extracted in one pass and cached on disk instead of
+  re-streaming the archive per page (see `src/comic.rs`)
+- Single/dual page, theater mode, fullscreen, and Fit Page (resizes the
+  window's width to the page's aspect ratio)
+- Zoom & pan: the mouse wheel zooms directly, trackpad/touchscreen pinch
+  zooms (see the libcosmic fork note below), two-finger scroll and
+  click-drag pan a zoomed page, `M`/`Ctrl 0` toggle/reset zoom
+- Metadata panel (`i`) showing the `ComicInfo.xml` and what was matched online
+
+**Books (EPUB)**
+
+- Kindle-style typography: serif or sans, adjustable size, line spacing and
+  line width (about 66 characters by default), justified text with
+  first-line indents, large chapter titles
+- Paper, Sepia, Dark and Night themes
+- The book's own table of contents, position remembered within a chapter,
+  time left in the chapter and percentage through the book
+- `Space` and arrow keys turn pages
+
+**General**
+
+- Native COSMIC look that follows the system theme
+- Drag and drop a file, folder or book onto the window to open it
+- Settings drawer: backdrop style and opacity, layout, online lookup,
+  library folders
+- Data in the standard XDG folders (see below)
 
 ## Building
 
