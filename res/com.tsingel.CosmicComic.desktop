@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Cosmic Comic
-Comment=Read comic book archives (.cbz, .cbr) and ebooks (.epub)
+GenericName=Comic Book Reader
+Comment=Read comics, manga and EPUB books from your library
 Exec=cosmic-comic %f
 Terminal=false
 Type=Application
@@ -9,4 +10,4 @@ StartupWMClass=com.tsingel.CosmicComic
 MimeType=application/x-cbz;application/vnd.comicbook+zip;application/x-cbr;application/vnd.comicbook-rar;application/epub+zip;
 Icon=com.tsingel.CosmicComic
 Categories=COSMIC;Graphics;Viewer;
-Keywords=Comic;Reader;CBZ;CBR;Manga;EPUB;Ebook;Book;
+Keywords=Comic;Comics;Manga;CBZ;CBR;EPUB;Ebook;Book;Reader;Library;ComicVine;AniList;
