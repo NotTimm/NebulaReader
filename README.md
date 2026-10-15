@@ -27,6 +27,32 @@ archives (`.cbz`/`.cbr`), manga/comic series folders, and `.epub` books.
   present, plus what it matched via AniList (manga/anime) and ComicVine
   (Western comics, via a series→issue lookup with a cover image)
 
+## Download
+
+Prebuilt packages are attached to each
+[GitHub Release](https://github.com/NotTimm/cosmic-reader/releases)
+(x86_64 only for now):
+
+| Package | Built on | Install |
+|---------|----------|---------|
+| `cosmic-comic_<version>_amd64.deb` | Ubuntu 24.04 | `sudo apt install ./cosmic-comic_*_amd64.deb` |
+| `cosmic-comic-<version>-1.fc<NN>.x86_64.rpm` | latest Fedora | `sudo dnf install ./cosmic-comic-*.x86_64.rpm` |
+
+Install with `apt`/`dnf` as above (not `dpkg -i`/`rpm -i`) so the library
+dependencies (`libarchive`, `libxkbcommon`, `openssl`, ...) are pulled in
+automatically. The `.deb` targets Ubuntu 24.04 / Pop!_OS 24.04 and newer
+Debian-based releases; the `.rpm` targets the Fedora release it was built
+on and newer. To upgrade, download the newer package and run the same
+command; to remove, `sudo apt remove cosmic-comic` or
+`sudo dnf remove cosmic-comic`. Your library and settings are kept either
+way (see [Where your data lives](#where-your-data-lives)).
+
+Pre-release versions such as `0.1.0-beta.1` are packaged as `0.1.0~beta.1`,
+which both package managers sort before the final `0.1.0`, so upgrading
+from a beta to the release works as expected.
+
+On another distro, build from source (below) or use `./install.sh`.
+
 ## Building
 
 ```
@@ -61,6 +87,37 @@ Tooling needed per format (each script tells you if something's missing):
 | rpm      | `rpm-build` |
 | AppImage | `curl` (fetches `appimagetool` on first run) |
 | Flatpak  | `flatpak`, `flatpak-builder` |
+
+Building also needs the usual native headers: `libarchive`, `openssl` and
+`libxkbcommon` development packages plus `pkg-config` and a C compiler
+(`sudo apt install build-essential pkg-config libarchive-dev libssl-dev
+libxkbcommon-dev` / `sudo dnf install gcc pkgconf-pkg-config
+libarchive-devel openssl-devel libxkbcommon-devel`). A `.deb` meant for
+distribution should be built on Debian/Ubuntu so `dpkg-shlibdeps` can
+compute its dependencies; on other hosts the script falls back to a
+fixed list that's only suitable for local testing.
+
+### Publishing a release
+
+`.github/workflows/release.yml` builds the `.deb` (Ubuntu 24.04) and
+`.rpm` (Fedora container) on every pull request that touches the code or
+packaging, and on manual runs, uploading them as workflow artifacts. To
+publish:
+
+1. Bump `version` in `Cargo.toml` (and add a `<release>` entry to
+   `res/com.tsingel.CosmicComic.metainfo.xml`), commit, push.
+2. Tag that commit with the same version prefixed by `v` and push the tag:
+
+   ```
+   git tag v0.1.0-beta.1
+   git push origin v0.1.0-beta.1
+   ```
+
+The workflow refuses to publish if the tag doesn't match `Cargo.toml`,
+then creates the GitHub Release (marked as a pre-release when the version
+has a `-suffix`) with both packages attached. Re-running it updates the
+same release. `.github/workflows/ci.yml` runs `cargo test --release` on
+pushes to `master` and on pull requests.
 
 ## Where your data lives
 
