@@ -11,51 +11,80 @@ in [`docs/listing.md`](docs/listing.md)).
 
 ## Features
 
-**Library**
+**Library and collection management**
 
-- Add library folders (browse, or type/paste a path; `~` expands). The
-  scanner recognises series folders, manga-tui downloads
-  (`Title/English/Ch N ….cbz`), image-folder chapters, publisher container
-  folders, and loose issues, which are grouped into series
-- Names are cleaned offline (`Civil War 001-007 (2006-2007) GetComics.INFO`
-  → `Civil War`), then matched online: AniList for manga, ComicVine for
-  Western comics (needs a free key, see below), for canonical titles,
-  descriptions, publishers and per-issue titles and cover dates
-- Series pages with an issue list, mark read/unread, and re-match with your
-  own search terms when the automatic match is wrong
-- Per-issue progress (read, unread, or in progress at a page), a Continue
-  Reading shelf, and library search. Opening a loose file that belongs to a
-  library series continues that series
+- Add library folders from the Settings drawer or by typing a path; `~` expands
+  to your home directory.
+- The scanner understands series folders, manga-tui chapter layouts,
+  publisher/container folders, image directories and loose issues, then groups
+  them into a single series entry when it makes sense.
+- Every series keeps per-issue progress, read/unread state, cover art and a
+  Continue Reading shelf.
+- Search the library by title and reopen any series or issue from the library
+  grid.
+- If a file or folder is later removed, the app hides missing items without
+  deleting your library metadata.
 
-**Comics**
+**Comics and manga**
 
-- CBZ, CBR and image folders, with embedded `ComicInfo.xml`
-- Fast CBR: pages are extracted in one pass and cached on disk instead of
-  re-streaming the archive per page (see `src/comic.rs`)
-- Single/dual page, theater mode, fullscreen, and Fit Page (resizes the
-  window's width to the page's aspect ratio)
-- Zoom & pan: the mouse wheel zooms directly, trackpad/touchscreen pinch
-  zooms (see the libcosmic fork note below), two-finger scroll and
-  click-drag pan a zoomed page, `M`/`Ctrl 0` toggle/reset zoom
-- Metadata panel (`i`) showing the `ComicInfo.xml` and what was matched online
+- CBZ, CBR, image folders and embedded `ComicInfo.xml` metadata are supported.
+- Fast CBR reading: large archives are extracted once and cached, so page turns
+  don't keep re-streaming the same archive.
+- Single-page or dual-page layout, theater mode, fullscreen and fit-to-height/
+  fit-page window sizing.
+- Zoom and pan work with the mouse wheel, trackpad, touchscreen pinch and
+  click-drag pan. `M` or `Ctrl+0` toggles/resets zoom mode.
+- The info panel shows the embedded metadata and the online match result.
 
-**Books (EPUB)**
+**EPUB books**
 
-- Kindle-style typography: serif or sans, adjustable size, line spacing and
-  line width (about 66 characters by default), justified text with
-  first-line indents, large chapter titles
-- Paper, Sepia, Dark and Night themes
-- The book's own table of contents, position remembered within a chapter,
-  time left in the chapter and percentage through the book
-- `Space` and arrow keys turn pages
+- Full EPUB support with the book's own table of contents and chapter jump.
+- Kindle-like typography: serif or sans, adjustable font size, line spacing,
+  width, justification and theme.
+- Paper, Sepia, Dark and Night themes, plus chapter progress and saved reading
+  position across sessions.
 
-**General**
+**Metadata and online lookup**
 
-- Native COSMIC look that follows the system theme
-- Drag and drop a file, folder or book onto the window to open it
-- Settings drawer: backdrop style and opacity, layout, online lookup,
-  library folders
-- Data in the standard XDG folders (see below)
+- Offline name cleanup makes messy filenames readable before lookup.
+- AniList is used for manga-like series; ComicVine can fill in more Western
+  titles and publisher metadata when you add a free API key.
+- Re-match a series with your own search terms if the automatic result is wrong.
+
+**General app behavior**
+
+- Native COSMIC styling that follows the system theme.
+- Drag and drop files, folders or books directly into the window to open them.
+- Settings drawer configures background style/opacity, dual-page mode,
+  metadata lookup and library roots.
+- Data stays in the standard XDG locations (`~/.local/share`,
+  `~/.config`, `~/.cache`), so it survives reinstalls and upgrades.
+
+## Quick start
+
+1. Open the app and either add a library folder from the Settings drawer or open
+   a file/folder directly.
+2. Drop in an existing comic, manga or EPUB, or point the app at a local folder
+   containing a collection.
+3. The library builds a series view automatically, with cover art, issue lists,
+   progress and a Continue Reading shelf.
+4. While reading, use the toolbar or keyboard shortcuts to flip pages, toggle
+   layouts, zoom, open details, or jump chapters.
+
+## Reader controls
+
+- Page navigation: Arrow keys, Page Up/Down, or the on-screen buttons.
+- Book paging: `Space` moves forward; `Shift+Space` moves backward.
+- Fullscreen: `F`.
+- Theater mode: `T`.
+- Dual-page layout: `L`.
+- Zoom mode: `M` (or `Ctrl+scroll` / pinch when the reader is in view).
+- Reset zoom: `Ctrl+0` or `M` again.
+- Toggle metadata/info panel: `I`.
+- Toggle Settings drawer: `S`.
+- EPUB typography panel: `A`.
+- Chapter picker: `C` (for multi-chapter books/series).
+- Copy the current page to the clipboard: `P`.
 
 ## Download
 
