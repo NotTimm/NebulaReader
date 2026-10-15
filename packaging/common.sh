@@ -7,16 +7,25 @@ APP_NAME="cosmic-comic"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_DIR/dist"
+# Honour a relocated cargo target dir (CI caches, shared target dirs).
+TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_DIR/target}"
+BIN_PATH="$TARGET_DIR/release/$APP_NAME"
 
 # Version comes from Cargo.toml so there's exactly one source of truth.
+# Reads `version` from the [package] table specifically, so a
+# `version = ...` line in some other table can never be picked up.
 version() {
-    grep -m1 '^version' "$REPO_DIR/Cargo.toml" | sed -E 's/.*"(.*)".*/\1/'
+    awk '
+        /^\[/ { in_pkg = ($0 == "[package]"); next }
+        in_pkg && /^version[[:space:]]*=/ {
+            sub(/^[^"]*"/, ""); sub(/".*$/, ""); print; exit
+        }
+    ' "$REPO_DIR/Cargo.toml"
 }
 
 # Debian and RPM disallow '-' in version fields (it separates the release),
-# so 0.1.0-beta.1 becomes 0.1.0~beta.1 for deb and 0.1.0~beta.1 for rpm.
-# The tilde sorts *before* the plain version, which is what you want for a
-# pre-release.
+# so 0.1.0-beta.1 becomes 0.1.0~beta.1 for both. The tilde sorts *before*
+# the plain version, which is what you want for a pre-release.
 version_native() {
     version | tr '-' '~'
 }
@@ -29,20 +38,28 @@ need() {
     }
 }
 
+# Extra cargo flags can be passed via CARGO_BUILD_FLAGS (CI uses --locked).
 build_release() {
     echo "==> Building release binary"
-    (cd "$REPO_DIR" && cargo build --release)
+    # shellcheck disable=SC2086
+    (cd "$REPO_DIR" && cargo build --release ${CARGO_BUILD_FLAGS:-})
+    [ -x "$BIN_PATH" ] || {
+        echo "error: expected binary at $BIN_PATH after build" >&2
+        exit 1
+    }
 }
 
 # Lays out a standard FHS install tree under $1, which both the .deb and
 # .rpm builds package verbatim.
 stage_tree() {
     local root="$1"
-    install -Dm0755 "$REPO_DIR/target/release/$APP_NAME" "$root/usr/bin/$APP_NAME"
+    install -Dm0755 "$BIN_PATH" "$root/usr/bin/$APP_NAME"
     install -Dm0644 "$REPO_DIR/res/$APP_ID.desktop" \
         "$root/usr/share/applications/$APP_ID.desktop"
     install -Dm0644 "$REPO_DIR/res/icons/$APP_ID.svg" \
         "$root/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg"
     install -Dm0644 "$REPO_DIR/res/$APP_ID.metainfo.xml" \
         "$root/usr/share/metainfo/$APP_ID.metainfo.xml"
+    install -Dm0644 "$REPO_DIR/README.md" \
+        "$root/usr/share/doc/$APP_NAME/README.md"
 }
