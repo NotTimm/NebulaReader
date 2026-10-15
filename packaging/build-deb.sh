@@ -1,19 +1,27 @@
 #!/usr/bin/env bash
 # Builds a .deb. Runtime dependencies are discovered from the binary's
 # actual ELF links via dpkg-shlibdeps, so the package depends on real
-# system packages (libarchive13, libxkbcommon0, libssl3, ...) rather than
-# a hand-maintained list that drifts.
+# system packages (libarchive13t64, libxkbcommon0, libssl3t64, ...) rather
+# than a hand-maintained list that drifts.
+#
+# Build it on the Debian/Ubuntu release you're targeting (CI uses Ubuntu
+# 24.04): the binary picks up that system's glibc/openssl symbol versions,
+# and dpkg-shlibdeps needs that system's dpkg database to map libraries to
+# packages.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 need dpkg-deb "sudo apt install dpkg-dev  # or: sudo dnf install dpkg"
 
-# Debian package names for the libraries the binary links against. Used
-# when dpkg-shlibdeps isn't available (i.e. when cross-building a .deb
-# from a non-Debian host, where the local shlibs database can't map
-# sonames to packages anyway).
+# Debian package names for the libraries the binary links against. Only
+# used when building on a non-Debian host (where the local dpkg database
+# can't map sonames to packages anyway). Such a .deb is fine for local
+# testing but shouldn't be published: its binary was linked against the
+# host's glibc, which may be newer than the target distro's.
+# Matches the binary's DT_NEEDED entries (readelf -d): libssl/libcrypto,
+# libarchive, libxkbcommon, liblzma, libbz2, libgcc_s, libm/libc.
 FALLBACK_DEPS="libc6, libgcc-s1, libarchive13, libxkbcommon0, libssl3, \
-zlib1g, libzstd1, liblzma5, libbz2-1.0, liblz4-1, libacl1, libxml2"
+liblzma5, libbz2-1.0"
 
 VERSION="$(version_native)"
 if command -v dpkg >/dev/null 2>&1; then
@@ -27,34 +35,48 @@ else
 fi
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
+# mktemp makes the dir 0700, and dpkg-deb records it as the mode of "/".
+chmod 0755 "$STAGE"
 
 build_release
 stage_tree "$STAGE"
 
-mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/share/doc/$APP_NAME"
-install -Dm0644 "$REPO_DIR/README.md" "$STAGE/usr/share/doc/$APP_NAME/README.md"
-
-if command -v dpkg-shlibdeps >/dev/null 2>&1; then
-    # dpkg-shlibdeps insists on running from a package root with a
-    # debian/ directory present.
-    mkdir -p "$STAGE/debian"
-    echo 9 > "$STAGE/debian/compat"
-    : > "$STAGE/debian/control"
-    DEPS="$(cd "$STAGE" && dpkg-shlibdeps -O --ignore-missing-info "usr/bin/$APP_NAME" 2>/dev/null \
-        | sed -E 's/^shlibs:Depends=//')"
-    rm -rf "$STAGE/debian"
+# Debian policy: ship stripped binaries (rpmbuild does this on its own).
+if command -v strip >/dev/null 2>&1; then
+    strip --strip-unneeded "$STAGE/usr/bin/$APP_NAME"
 fi
-if [ -z "${DEPS:-}" ]; then
-    echo "==> dpkg-shlibdeps unavailable; using curated dependency list"
+
+DEPS=""
+if [ -f /etc/debian_version ]; then
+    need dpkg-shlibdeps "sudo apt install dpkg-dev"
+    # dpkg-shlibdeps insists on running from a source-package root with a
+    # parseable debian/control present.
+    mkdir -p "$STAGE/debian"
+    printf 'Source: %s\n\nPackage: %s\nArchitecture: any\n' \
+        "$APP_NAME" "$APP_NAME" > "$STAGE/debian/control"
+    # Errors are fatal here on purpose: silently shipping the fallback list
+    # from a real Debian/Ubuntu build would hide a broken package.
+    shlibs="$(cd "$STAGE" && dpkg-shlibdeps -O "usr/bin/$APP_NAME")"
+    rm -rf "$STAGE/debian"
+    DEPS="$(sed -nE 's/^shlibs:Depends=//p' <<<"$shlibs")"
+    [ -n "$DEPS" ] || { echo "error: dpkg-shlibdeps found no dependencies" >&2; exit 1; }
+else
+    echo "==> Not a Debian-based host; using the curated dependency list"
+    echo "    (fine for testing; build on Debian/Ubuntu for a release .deb)"
     DEPS="$FALLBACK_DEPS"
 fi
+echo "==> Depends: $DEPS"
 
+INSTALLED_SIZE="$(du -sk --apparent-size "$STAGE" | cut -f1)"
+
+mkdir -p "$STAGE/DEBIAN"
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: $APP_NAME
 Version: $VERSION
 Section: graphics
 Priority: optional
 Architecture: $ARCH
+Installed-Size: $INSTALLED_SIZE
 Depends: $DEPS
 Maintainer: Tim Singel <gamer.tdogtim@gmail.com>
 Homepage: https://github.com/NotTimm/cosmic-reader
