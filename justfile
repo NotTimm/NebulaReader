@@ -42,6 +42,21 @@ install:
     install -Dm0644 {{icon-src}} {{icon-dst}}
     install -Dm0644 {{metainfo-src}} {{metainfo-dst}}
 
+# Build release and install for the current user (~/.local, no sudo). Same as ./install.sh minus the git pull.
+install-local: build-release
+    just prefix="$HOME/.local" install
+    -update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
+    -gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" 2>/dev/null
+    @echo "Installed to $HOME/.local/bin/cosmic-comic"
+
+# Remove a user-local install
+uninstall-local:
+    just prefix="$HOME/.local" uninstall
+
+# Run the test suite
+test *args:
+    cargo test --release {{args}}
+
 # Removes installed files
 uninstall:
     rm -f {{bin-dst}} {{desktop-dst}} {{icon-dst}} {{metainfo-dst}}

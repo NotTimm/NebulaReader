@@ -7,6 +7,7 @@ description = "A native COSMIC desktop comic book (.cbz/.cbr) reader"
 
 [dependencies]
 env_logger = "0.11"
+log = "0.4"
 tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "sync"] }
 url = "2.5"
 image = { version = "0.25", default-features = false, features = [
@@ -24,8 +25,9 @@ serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 quick-xml = "0.37"
+regex = "1"
 
-# Fork of pop-os/libcosmic with three patches on top of pop-os/libcosmic:
+# Fork of pop-os/libcosmic with four patches on top of pop-os/libcosmic:
 # 1. Forwards winit's trackpad pinch gesture (WindowEvent::PinchGesture)
 #    through iced as mouse::Event::WheelZoomed, which upstream iced drops
 #    entirely.
@@ -36,11 +38,14 @@ quick-xml = "0.37"
 # 3. In image::Viewer, trackpad two-finger scroll without Ctrl pans a
 #    zoomed-in image instead of doing nothing — free diagonal movement,
 #    since x/y move independently.
+# 4. In image::Viewer, fixes the pan clamp so dragging/scrolling can't push
+#    a zoomed page past its own edge into blank space (was most visible
+#    top-to-bottom, since pages are portrait).
 # Re-sync by rebasing NotTimm/libcosmic's commits onto a newer
 # pop-os/libcosmic and updating `rev` below.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "afd5f9e008681f1961d093d87b8735cd17405f5a"
+rev = "d5c937c8a9707487c084465717ab21876187a4d5"
 default-features = false
 features = ["dbus-config", "wgpu", "wayland", "winit", "tokio", "xdg-portal", "multi-window"]
 

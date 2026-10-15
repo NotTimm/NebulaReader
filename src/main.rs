@@ -5,6 +5,8 @@ mod comicvine;
 mod epub;
 mod library;
 mod metadata;
+mod naming;
+mod scan;
 mod settings;
 
 use cosmic::app::Settings;

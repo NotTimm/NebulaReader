@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,7 +10,6 @@ use cosmic::iced::{
     keyboard::{self, key::Named, Key},
     mouse, touch, window, Alignment, Background, Color, ContentFit, Length, Subscription,
 };
-use cosmic::iced::widget::scrollable as scroll_mod;
 use cosmic::iced::widget::mouse_area;
 use cosmic::widget::{self, icon};
 use cosmic::{executor, Application, ApplicationExt, Element};
@@ -19,15 +18,22 @@ use url::Url;
 use crate::comic::{self, ChapterInfo, PageSource};
 use crate::epub;
 use crate::comicinfo::{self, ComicInfo};
-use crate::comicvine::{self, ComicVineMatch};
-use crate::library::{self, SeriesEntry};
-use crate::metadata::{self, ParsedFilename, SeriesMetadata};
+use crate::comicvine;
+use crate::library::{self, IssueEntry, IssueRow, SeriesEntry, SeriesKind};
+use crate::metadata::{self, SeriesMatch};
+use crate::naming;
+use crate::scan;
 use crate::settings::{Background as BgStyle, Settings};
+
+mod library_view;
 
 /// Dropdown labels for [`BgStyle::ALL`], kept in the same order.
 const BG_LABELS: [&str; 2] = ["Theme", "Black"];
 
-const MIN_ZOOM: f32 = 0.25;
+// The viewer's zoom scale is a multiplier on top of the already-computed
+// fit-to-window size (ContentFit::Contain), so 1.0 *is* the fit-page view —
+// flooring at 1.0 stops you from zooming out past the page's own edges.
+const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 8.0;
 
 pub const APP_ID: &str = "com.tsingel.CosmicComic";
@@ -35,13 +41,11 @@ pub const APP_ID: &str = "com.tsingel.CosmicComic";
 const PRELOAD_NEAR: usize = 1;
 const PRELOAD_FAR: usize = 6;
 const CACHE_RADIUS: usize = 14;
-const THUMB_W: u32 = 120;
-const THUMB_H: u32 = 170;
 
 // ── View modes ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum AppView { Library, Reader }
+pub enum AppView { Library, Series, Reader }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Layout { Single, Dual }
@@ -56,11 +60,13 @@ pub enum ContextPage { Settings, Info }
 pub enum Message {
     // Navigation
     GoToLibrary,
-    GoToReader,
     OpenFile,
     OpenFolder,
     PathSelected(Url),
-    OpenFromLibrary { path: PathBuf, page: usize, chapter: usize },
+    /// Open a library entry in the reader; `chapter` picks an issue,
+    /// `None` resumes where you left off.
+    OpenEntry { key: String, chapter: Option<usize> },
+    OpenSeriesPage(String),
     // Loading
     Loaded(PathBuf, Vec<PageSource>, Vec<ChapterInfo>),
     EpubLoaded(PathBuf, Result<epub::EpubBook, String>),
@@ -89,14 +95,27 @@ pub enum Message {
     CopyPage,
     CopiedPage(Result<(), String>),
     // Metadata
-    MetadataLoaded(Result<SeriesMetadata, String>),
-    ComicVineLoaded(Result<ComicVineMatch, String>),
-    ComicVineCoverReady(Result<(u32, u32, Vec<u8>), String>),
+    MetaNext,
+    MetaMatched(String, Result<Option<SeriesMatch>, String>),
+    SeriesSearchInput(String),
+    RematchSeries,
+    ClearSeriesMatch,
+    RefreshAllMetadata,
+    ComicVineKeyInput(String),
+    SaveComicVineKey,
+    OpenUrl(String),
+    // Tracking
+    ToggleIssueRead(i64, bool),
+    MarkSeriesRead(bool),
     // Chapter covers
     ChapterCoverReady { chapter_idx: usize, result: Result<(u32, u32, Vec<u8>), String> },
     // Library
     LibrarySearchChanged(String),
-    LibraryCoverReady { series_id: i64, path: PathBuf },
+    RootDiscovered(PathBuf, Option<Vec<scan::Discovered>>),
+    SeriesScanned(Result<scan::ScanResult, String>),
+    IssueCoverReady { key: String, idx: usize },
+    HideMissing(Vec<String>),
+    RescanLibrary,
     AddLibraryFolder,
     LibraryFolderSelected(Url),
     RemoveLibraryFolder(PathBuf),
@@ -108,8 +127,6 @@ pub enum Message {
     SetBackgroundOpacity(f32),
     SetBackground(usize),
     SetFetchMetadata(bool),
-    LibraryEntryScanned(Result<ScanOutcome, String>),
-    LibraryScanCoverDone(Result<(), String>),
     // Keys / pointer / touch
     Key(Key),
     ModifiersChanged(keyboard::Modifiers),
@@ -150,13 +167,14 @@ pub struct App {
     zoom_active: bool,
     zoom: f32,
     show_chapter_select: bool,
-    metadata: Option<SeriesMetadata>,
-    metadata_loading: bool,
-    parsed_filename: Option<ParsedFilename>,
     comic_info: Option<ComicInfo>,
-    comicvine: Option<Result<ComicVineMatch, String>>,
-    comicvine_loading: bool,
-    comicvine_cover: Option<widget::image::Handle>,
+    /// The DB view of what's open in the reader (series + its issues).
+    reader_entry: Option<SeriesEntry>,
+    reader_issues: Vec<IssueEntry>,
+    /// Issue to start at for the next `Loaded` (None = resume).
+    start_chapter: Option<usize>,
+    /// Whether "back" from the reader returns to a series page.
+    back_to_series: bool,
     // epub
     epub_book: Option<epub::EpubBook>,
     epub_chapter: usize,
@@ -174,6 +192,24 @@ pub struct App {
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
     library_path_input: String,
+    /// Library roots that weren't reachable (unmounted drive, deleted) —
+    /// their series are hidden, never deleted.
+    missing_roots: HashSet<PathBuf>,
+    /// One-off entries whose file is gone.
+    hidden_paths: HashSet<String>,
+    scans_pending: usize,
+    // series page
+    series_page: Option<SeriesEntry>,
+    series_page_issues: Vec<IssueEntry>,
+    series_page_covers: HashMap<usize, widget::image::Handle>,
+    series_covers_pending: HashSet<usize>,
+    series_search_input: String,
+    // online metadata queue (one series at a time, rate-limit friendly)
+    meta_queue: VecDeque<String>,
+    meta_running: bool,
+    meta_current: Option<String>,
+    meta_attempted: HashSet<String>,
+    cv_key_input: String,
     // settings
     settings: Settings,
     context_page: ContextPage,
@@ -216,143 +252,150 @@ fn open_any(path: PathBuf) -> Task<Message> {
     }
 }
 
-/// Immediate children of a library folder that look openable: subfolders
-/// (treated as series — each may hold one or many issues/chapters) and
-/// loose .cbz/.cbr/.epub files (treated as standalone items).
-fn discover_library_entries(root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            out.push(path);
-            continue;
-        }
-        let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-            continue;
-        };
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with(".cbz")
-            || lower.ends_with(".cbr")
-            || lower.ends_with(".zip")
-            || lower.ends_with(".rar")
-            || epub::is_epub_name(&name)
-        {
-            out.push(path);
-        }
-    }
-    out
-}
-
-/// What a background library scan found for one entry, enough to register
-/// it in the DB and generate a cover without disturbing reader state.
-#[derive(Clone, Debug)]
-pub struct ScanOutcome {
-    path: PathBuf,
-    title: String,
-    count: usize,
-    is_series: bool,
-    first_page: Option<PageSource>,
-    epub_cover: Option<Vec<u8>>,
-}
-
-fn scan_entry_task(path: PathBuf) -> Task<Message> {
+/// Opens a group series (loose files grouped by name) from its member list.
+fn open_list_task(key: PathBuf, issues: Vec<PathBuf>) -> Task<Message> {
     cosmic::task::future(async move {
-        let scan_path = path.clone();
-        let is_epub =
-            path.file_name().map(|n| epub::is_epub_name(&n.to_string_lossy())).unwrap_or(false);
-        let is_series = path.is_dir();
-
-        let result = tokio::task::spawn_blocking(move || -> Result<ScanOutcome, String> {
-            if is_epub {
-                let book = epub::open(&scan_path)?;
-                Ok(ScanOutcome {
-                    path: scan_path,
-                    title: book.title,
-                    count: book.chapters.len(),
-                    is_series: false,
-                    first_page: None,
-                    epub_cover: book.cover,
-                })
-            } else {
-                let (sources, _chapters) = comic::collect_sources(&scan_path)?;
-                let title = metadata::extract_title(
-                    &scan_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                );
-                let first_page = sources.first().cloned();
-                Ok(ScanOutcome {
-                    path: scan_path,
-                    title,
-                    count: sources.len(),
-                    is_series,
-                    first_page,
-                    epub_cover: None,
-                })
-            }
-        })
-        .await;
-
-        Message::LibraryEntryScanned(match result {
-            Ok(inner) => inner,
-            Err(e) => Err(format!("scan panicked: {e}")),
-        })
+        match tokio::task::spawn_blocking(move || comic::collect_sources_for(&issues)).await {
+            Ok(Ok((sources, chapters))) => Message::Loaded(key, sources, chapters),
+            Ok(Err(e)) => Message::LoadFailed(e),
+            Err(e) => Message::LoadFailed(format!("listing task panicked: {e}")),
+        }
     })
 }
 
-/// Generates and caches a series' ch0 cover thumbnail from the comic's
-/// first page, independent of any currently-open reader state (unlike
-/// `cover_task`, which updates `chapter_covers` for whatever's open).
-fn comic_library_cover_task(source: PageSource, path: PathBuf) -> Task<Message> {
+/// Limits concurrent library-scan work so a big library (or a network
+/// drive) doesn't get hammered by hundreds of parallel archive reads.
+fn scan_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(3))
+}
+
+fn discover_task(root: PathBuf) -> Task<Message> {
     cosmic::task::future(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let page = comic::decode_source(&source)?;
+        let r = root.clone();
+        let found = tokio::task::spawn_blocking(move || r.is_dir().then(|| scan::discover(&r)))
+            .await
+            .ok()
+            .flatten();
+        Message::RootDiscovered(root, found)
+    })
+}
+
+fn scan_series_task(d: scan::Discovered, known: HashMap<String, usize>) -> Task<Message> {
+    cosmic::task::future(async move {
+        let _permit = scan_semaphore().acquire().await;
+        let result = tokio::task::spawn_blocking(move || scan::scan_series(&d, known)).await;
+        Message::SeriesScanned(result.unwrap_or_else(|e| Err(format!("scan panicked: {e}"))))
+    })
+}
+
+/// Cover thumbnail for one issue on the series page.
+fn issue_cover_task(key: String, idx: usize, issue: PathBuf) -> Task<Message> {
+    cosmic::task::future(async move {
+        let _permit = scan_semaphore().acquire().await;
+        let k = key.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let page = comic::first_page(&issue)?;
             let img = image::RgbaImage::from_raw(page.width, page.height, page.rgba)
                 .ok_or_else(|| "bad rgba".to_string())?;
-            let thumb = image::imageops::resize(
-                &img, THUMB_W, THUMB_H, image::imageops::FilterType::Triangle,
-            );
-            save_cover_thumb(&thumb, &path)
+            scan::save_thumb(&img, &library::chapter_cover_path(&k, idx))
         })
         .await;
-        Message::LibraryScanCoverDone(match result {
-            Ok(r) => r,
-            Err(e) => Err(format!("cover panicked: {e}")),
-        })
+        Message::IssueCoverReady { key, idx }
     })
 }
 
-fn epub_library_cover_task(cover_bytes: Vec<u8>, path: PathBuf) -> Task<Message> {
+fn missing_check_task(paths: Vec<String>) -> Task<Message> {
     cosmic::task::future(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            let img = image::load_from_memory(&cover_bytes)
-                .map_err(|e| format!("decode cover: {e}"))?;
-            let thumb = image::imageops::resize(
-                &img.to_rgba8(), THUMB_W, THUMB_H, image::imageops::FilterType::Triangle,
-            );
-            save_cover_thumb(&thumb, &path)
+        let missing = tokio::task::spawn_blocking(move || {
+            paths.into_iter().filter(|p| !p.starts_with("group://") && !Path::new(p).exists()).collect()
         })
-        .await;
-        Message::LibraryScanCoverDone(match result {
-            Ok(r) => r,
-            Err(e) => Err(format!("cover panicked: {e}")),
-        })
+        .await
+        .unwrap_or_default();
+        Message::HideMissing(missing)
     })
 }
 
-fn save_cover_thumb(thumb: &image::RgbaImage, path: &Path) -> Result<(), String> {
-    let cover_path = library::chapter_cover_path(&path.to_string_lossy(), 0);
-    if let Some(parent) = cover_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+/// Builds the online search for a series from what's in the DB.
+fn build_query(entry: &SeriesEntry, issues: &[IssueEntry]) -> metadata::SeriesQuery {
+    let search = if entry.search_override.is_empty() {
+        naming::clean_series_name(&entry.title).search
+    } else {
+        entry.search_override.clone()
+    };
+    let looks_manga = issues.iter().any(|i| {
+        let n = i.name.to_ascii_lowercase();
+        n.starts_with("ch") || n.contains("chapter")
+    });
+    metadata::SeriesQuery {
+        search,
+        year: entry.year,
+        volume: entry.volume,
+        issue_numbers: issues.iter().filter(|i| !i.number.is_empty()).map(|i| i.number.clone()).collect(),
+        looks_manga,
     }
-    thumb.save(&cover_path).map_err(|e| format!("save cover: {e}"))
 }
 
-/// Caps how many full-resolution page decodes run at once. Decoding a
-/// large scanned page is genuinely CPU-heavy; letting the whole preload
-/// window (7+ pages) decode simultaneously means the page actually on
-/// screen competes for CPU with pages the reader hasn't gotten to yet,
-/// which is the main reason initial page loads felt slow. A small cap
-/// keeps the current/next page decode from being starved.
+fn issue_rows_from_chapters(chapters: &[ChapterInfo]) -> Vec<IssueRow> {
+    chapters
+        .iter()
+        .map(|ch| {
+            let file = ch.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let parsed = naming::parse_issue(&file);
+            IssueRow {
+                path: ch.path.to_string_lossy().into_owned(),
+                name: ch.name.clone(),
+                number: parsed.number.unwrap_or_default(),
+                subtitle: parsed.subtitle.unwrap_or_default(),
+                page_count: Some(ch.page_count),
+            }
+        })
+        .collect()
+}
+
+/// Where to start reading: an explicit issue (resuming inside it if it's
+/// in progress), else the last issue you were in (moving on to the next
+/// one if you'd finished it), else the old global page index.
+fn resume_page(
+    chapters: &[ChapterInfo],
+    issues: &[IssueEntry],
+    entry: Option<&SeriesEntry>,
+    start_chapter: Option<usize>,
+    total: usize,
+) -> usize {
+    let issue_for = |ch: &ChapterInfo| {
+        let p = ch.path.to_string_lossy();
+        issues.iter().find(|i| i.path == p)
+    };
+    let clamp = |p: usize| p.min(total.saturating_sub(1));
+
+    if let Some(idx) = start_chapter {
+        if let Some(ch) = chapters.get(idx) {
+            let offset = issue_for(ch)
+                .filter(|i| i.in_progress())
+                .map(|i| i.last_page.min(ch.page_count.saturating_sub(1)))
+                .unwrap_or(0);
+            return clamp(ch.start + offset);
+        }
+    }
+    let Some(entry) = entry else { return 0 };
+    if !entry.last_issue_path.is_empty() {
+        if let Some((i, ch)) =
+            chapters.iter().enumerate().find(|(_, ch)| ch.path.to_string_lossy() == entry.last_issue_path)
+        {
+            if let Some(issue) = issue_for(ch) {
+                if issue.completed {
+                    if let Some(next) = chapters.get(i + 1) {
+                        return clamp(next.start);
+                    }
+                }
+                return clamp(ch.start + issue.last_page.min(ch.page_count.saturating_sub(1)));
+            }
+        }
+    }
+    clamp(entry.last_read_page)
+}
+
 fn decode_semaphore() -> &'static tokio::sync::Semaphore {
     static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
     SEM.get_or_init(|| {
@@ -395,25 +438,6 @@ fn copy_task(page: Arc<comic::Page>) -> Task<Message> {
     })
 }
 
-fn metadata_task(raw_name: String) -> Task<Message> {
-    cosmic::task::future(async move {
-        let title = metadata::extract_title(&raw_name);
-        Message::MetadataLoaded(metadata::fetch_series_metadata(&title).await)
-    })
-}
-
-fn comicvine_task(series: String, issue_number: Option<String>, year: Option<u32>) -> Task<Message> {
-    cosmic::task::future(async move {
-        Message::ComicVineLoaded(
-            comicvine::find_issue(&series, issue_number.as_deref(), year).await,
-        )
-    })
-}
-
-fn comicvine_cover_task(url: String) -> Task<Message> {
-    cosmic::task::future(async move { Message::ComicVineCoverReady(comicvine::fetch_cover(&url).await) })
-}
-
 /// Decode the first page of `chapter_idx`, thumbnail it, save to disk, return rgba.
 fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> Task<Message> {
     cosmic::task::future(async move {
@@ -421,9 +445,7 @@ fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> T
             let page = comic::decode_source(&source)?;
             let img = image::RgbaImage::from_raw(page.width, page.height, page.rgba)
                 .ok_or_else(|| "bad rgba".to_string())?;
-            let thumb = image::imageops::resize(
-                &img, THUMB_W, THUMB_H, image::imageops::FilterType::Triangle,
-            );
+            let thumb = scan::make_thumb(&img);
             // Save to disk cache
             let cover_path = library::chapter_cover_path(
                 &series_path.to_string_lossy(),
@@ -447,14 +469,6 @@ fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> T
                 Err(e) => Err(format!("cover panicked: {e}")),
             },
         }
-    })
-}
-
-/// Load a chapter cover thumbnail from disk (non-blocking since it's just a path handle).
-fn load_cover_from_disk(series_id: i64, path: PathBuf) -> Task<Message> {
-    // Handle::from_path is lazy; we just emit the message immediately.
-    cosmic::task::future(async move {
-        Message::LibraryCoverReady { series_id, path }
     })
 }
 
@@ -579,7 +593,6 @@ impl App {
         })
     }
 
-    /// Queue cover generation for chapters that don't have covers yet.
     /// Register `path` as a library folder (if not already) and scan it.
     /// Shared by the "Browse…" file-picker flow and the typed-path field.
     fn add_library_folder(&mut self, path: PathBuf) -> Task<Message> {
@@ -589,11 +602,127 @@ impl App {
         if !self.library_dirs.contains(&path) {
             self.library_dirs.push(path.clone());
         }
+        self.scan_root(path)
+    }
+
+    fn scan_root(&mut self, root: PathBuf) -> Task<Message> {
+        self.scans_pending += 1;
+        discover_task(root)
+    }
+
+    /// Opens a library entry (series, group, single file or book) in the
+    /// reader. `chapter` jumps to an issue; `None` resumes.
+    fn open_entry(&mut self, key: String, chapter: Option<usize>) -> Task<Message> {
+        self.loading = true;
+        self.error = None;
+        self.back_to_series = self.app_view == AppView::Series;
+        self.app_view = AppView::Reader;
+        self.start_chapter = chapter;
+        self.current_page = 0;
+        self.show_chapter_select = false;
+
+        let entry = self.db.as_ref().and_then(|db| library::get_series(db, &key));
+        if let Some(e) = entry.as_ref().filter(|e| e.kind == SeriesKind::Group) {
+            let issues: Vec<PathBuf> = self
+                .db
+                .as_ref()
+                .map(|db| library::issues_for(db, &e.path).into_iter().map(|i| PathBuf::from(i.path)).collect())
+                .unwrap_or_default();
+            return open_list_task(PathBuf::from(&key), issues);
+        }
+        open_any(PathBuf::from(key))
+    }
+
+    /// Opens a path picked/dropped by the user. If that file is an issue of
+    /// a series already in the library, open the series at that issue so
+    /// progress and "next issue" carry on there (issue linking).
+    fn open_linked(&mut self, path: PathBuf) -> Task<Message> {
+        let key = path.to_string_lossy().into_owned();
+        if let Some((series, idx)) = self.db.as_ref().and_then(|db| library::series_for_issue(db, &key)) {
+            return self.open_entry(series, Some(idx));
+        }
+        self.open_entry(key, None)
+    }
+
+    fn open_series_page(&mut self, key: String) -> Task<Message> {
+        let Some(db) = &self.db else { return Task::none() };
+        let Some(entry) = library::get_series(db, &key) else { return Task::none() };
+        if self.series_page.as_ref().map(|s| &s.path) != Some(&key) {
+            self.series_page_covers.clear();
+            self.series_covers_pending.clear();
+            self.series_search_input = entry.search_override.clone();
+        }
+        self.series_page_issues = library::issues_for(db, &key);
+        self.set_header_title(entry.name().to_string());
+        self.series_page = Some(entry);
+        self.app_view = AppView::Series;
+
         let mut tasks = Vec::new();
-        for entry in discover_library_entries(&path) {
-            tasks.push(scan_entry_task(entry));
+        for issue in &self.series_page_issues {
+            if self.series_page_covers.contains_key(&issue.idx) || self.series_covers_pending.contains(&issue.idx) {
+                continue;
+            }
+            let cover = library::chapter_cover_path(&key, issue.idx);
+            if cover.exists() {
+                self.series_page_covers.insert(issue.idx, widget::image::Handle::from_path(cover));
+            } else {
+                self.series_covers_pending.insert(issue.idx);
+                tasks.push(issue_cover_task(key.clone(), issue.idx, PathBuf::from(&issue.path)));
+            }
         }
         Task::batch(tasks)
+    }
+
+    /// Re-reads DB-backed state for whatever's on screen.
+    fn refresh_views(&mut self) -> Task<Message> {
+        let mut tasks = vec![self.reload_library()];
+        if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+            self.series_page = library::get_series(db, &key);
+            self.series_page_issues = library::issues_for(db, &key);
+        }
+        if let (Some(db), Some(key)) = (&self.db, self.open_path.as_ref()) {
+            let key = key.to_string_lossy();
+            self.reader_entry = library::get_series(db, &key);
+            self.reader_issues = library::issues_for(db, &key);
+        }
+        tasks.push(Task::none());
+        Task::batch(tasks)
+    }
+
+    fn enqueue_meta(&mut self, key: String) -> Task<Message> {
+        if !self.settings.fetch_metadata || self.meta_attempted.contains(&key) {
+            return Task::none();
+        }
+        self.meta_attempted.insert(key.clone());
+        self.meta_queue.push_back(key);
+        self.pump_meta()
+    }
+
+    fn pump_meta(&mut self) -> Task<Message> {
+        if self.meta_running {
+            return Task::none();
+        }
+        let Some(db) = &self.db else { return Task::none() };
+        while let Some(key) = self.meta_queue.pop_front() {
+            let Some(entry) = library::get_series(db, &key) else { continue };
+            if entry.is_epub {
+                continue;
+            }
+            let issues = library::issues_for(db, &key);
+            let query = build_query(&entry, &issues);
+            if query.search.trim().is_empty() {
+                // Nothing to search with (yet) — let a later scan retry.
+                self.meta_attempted.remove(&key);
+                continue;
+            }
+            self.meta_running = true;
+            self.meta_current = Some(key.clone());
+            return cosmic::task::future(async move {
+                let result = metadata::match_series(query).await;
+                Message::MetaMatched(key, result)
+            });
+        }
+        Task::none()
     }
 
     /// Queue cover generation for chapters that don't have covers yet.
@@ -626,17 +755,33 @@ impl App {
         Task::batch(tasks)
     }
 
-    /// Save reading progress to DB (cheap, called on page change).
+    /// Save reading progress to DB (cheap, called on page change). Tracks
+    /// the page *within* the current issue, so adding issues to a folder
+    /// later never shifts anyone's place.
     fn persist_progress(&self) {
         let Some(db) = &self.db else { return };
         let Some(path) = &self.open_path else { return };
-        if self.epub_book.is_some() {
-            let _ =
-                library::save_progress(db, &path.to_string_lossy(), 0, self.epub_chapter);
+        let key = path.to_string_lossy();
+        if let Some(book) = &self.epub_book {
+            let n = book.chapters.len();
+            // A book counts as finished once you reach its last chapter.
+            let _ = library::save_issue_progress(db, &key, &key, self.epub_chapter, n, 0, self.epub_chapter);
             return;
         }
-        let ch_idx = self.current_chapter().map(|(i, _, _)| i).unwrap_or(0);
-        let _ = library::save_progress(db, &path.to_string_lossy(), self.current_page, ch_idx);
+        if let Some((ch_idx, ch, pg)) = self.current_chapter() {
+            // In two-page mode the right-hand page is on screen too.
+            let visible = if self.layout == Layout::Dual { pg + 1 } else { pg };
+            let visible = visible.min(ch.page_count.saturating_sub(1));
+            let _ = library::save_issue_progress(
+                db,
+                &key,
+                &ch.path.to_string_lossy(),
+                visible,
+                ch.page_count,
+                self.current_page,
+                ch_idx,
+            );
+        }
     }
 
     fn reload_library(&mut self) -> Task<Message> {
@@ -648,20 +793,18 @@ impl App {
             library::search_series(db, &self.library_search)
         };
 
-        // Load series covers from disk (ch0 of each series)
-        let mut cover_tasks = Vec::new();
         for entry in &entries {
             if self.library_covers.contains_key(&entry.id) {
                 continue;
             }
             let cover_path = library::chapter_cover_path(&entry.path, 0);
             if cover_path.exists() {
-                cover_tasks.push(load_cover_from_disk(entry.id, cover_path));
+                self.library_covers.insert(entry.id, widget::image::Handle::from_path(cover_path));
             }
         }
 
         self.library_entries = entries;
-        Task::batch(cover_tasks)
+        Task::none()
     }
 }
 
@@ -703,13 +846,11 @@ impl Application for App {
             zoom_active: false,
             zoom: 1.0,
             show_chapter_select: false,
-            metadata: None,
-            metadata_loading: false,
-            parsed_filename: None,
             comic_info: None,
-            comicvine: None,
-            comicvine_loading: false,
-            comicvine_cover: None,
+            reader_entry: None,
+            reader_issues: Vec::new(),
+            start_chapter: None,
+            back_to_series: false,
             epub_book: None,
             epub_chapter: 0,
             epub_cover: None,
@@ -723,6 +864,19 @@ impl Application for App {
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
+            missing_roots: HashSet::new(),
+            hidden_paths: HashSet::new(),
+            scans_pending: 0,
+            series_page: None,
+            series_page_issues: Vec::new(),
+            series_page_covers: HashMap::new(),
+            series_covers_pending: HashSet::new(),
+            series_search_input: String::new(),
+            meta_queue: VecDeque::new(),
+            meta_running: false,
+            meta_current: None,
+            meta_attempted: HashSet::new(),
+            cv_key_input: String::new(),
             settings,
             context_page: ContextPage::Settings,
         };
@@ -733,17 +887,29 @@ impl Application for App {
             None => Task::none(),
         }];
 
+        tasks.push(app.reload_library());
         if let Some(path) = flags {
-            tasks.push(open_any(path));
-        } else {
-            // Start on library view — load entries
-            tasks.push(app.reload_library());
+            tasks.push(app.open_linked(path));
         }
 
+        // Rescan every library folder in the background (cheap for
+        // anything already known), and hide one-off entries whose files
+        // have since disappeared.
         for dir in library_dirs {
-            for entry in discover_library_entries(&dir) {
-                tasks.push(scan_entry_task(entry));
-            }
+            tasks.push(app.scan_root(dir));
+        }
+        let one_offs: Vec<String> =
+            app.library_entries.iter().filter(|e| e.library_root.is_empty()).map(|e| e.path.clone()).collect();
+        tasks.push(missing_check_task(one_offs));
+        // Retry lookups for anything never matched (e.g. added offline).
+        let pending: Vec<String> = app
+            .library_entries
+            .iter()
+            .filter(|e| e.meta_fetched_at == 0 && !e.is_epub && !e.title.is_empty())
+            .map(|e| e.path.clone())
+            .collect();
+        for key in pending {
+            tasks.push(app.enqueue_meta(key));
         }
 
         (app, Task::batch(tasks))
@@ -772,12 +938,16 @@ impl Application for App {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        if self.app_view == AppView::Reader {
-            vec![widget::button::icon(icon::from_name("go-home-symbolic"))
+        match self.app_view {
+            AppView::Reader if self.back_to_series => vec![widget::button::icon(icon::from_name(
+                "go-previous-symbolic",
+            ))
+            .on_press(Message::GoToLibrary)
+            .into()],
+            AppView::Reader | AppView::Series => vec![widget::button::icon(icon::from_name("go-home-symbolic"))
                 .on_press(Message::GoToLibrary)
-                .into()]
-        } else {
-            vec![]
+                .into()],
+            AppView::Library => vec![],
         }
     }
 
@@ -785,9 +955,16 @@ impl Application for App {
         let mut els: Vec<Element<'_, Message>> = Vec::new();
 
         match self.app_view {
+            AppView::Series => {
+                els.push(
+                    widget::button::icon(icon::from_name("emblem-system-symbolic"))
+                        .on_press(Message::ToggleSettings)
+                        .into(),
+                );
+            }
             AppView::Library => {
                 els.push(
-                    widget::text_input("Search library…", &self.library_search)
+                    widget::search_input("Search library…", &self.library_search)
                         .on_input(Message::LibrarySearchChanged)
                         .width(Length::Fixed(220.0))
                         .into(),
@@ -795,11 +972,6 @@ impl Application for App {
                 els.push(
                     widget::button::standard("Open File")
                         .on_press(Message::OpenFile)
-                        .into(),
-                );
-                els.push(
-                    widget::button::standard("Add Series")
-                        .on_press(Message::OpenFolder)
                         .into(),
                 );
                 els.push(
@@ -933,15 +1105,20 @@ impl Application for App {
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         match message {
             Message::GoToLibrary => {
-                self.app_view = AppView::Library;
                 self.show_chapter_select = false;
-
-                self.set_header_title("Cosmic Comic — Library".into());
-                return self.reload_library();
+                if self.app_view == AppView::Reader && self.back_to_series {
+                    if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
+                        let t = self.refresh_views();
+                        return Task::batch([t, self.open_series_page(key)]);
+                    }
+                }
+                self.app_view = AppView::Library;
+                self.series_page = None;
+                self.set_header_title("Cosmic Comic".into());
+                return self.refresh_views();
             }
-            Message::GoToReader => {
-                self.app_view = AppView::Reader;
-                self.set_header_title(self.title.clone());
+            Message::OpenSeriesPage(key) => {
+                return self.open_series_page(key);
             }
             Message::OpenFile => {
                 return cosmic::task::future(async move {
@@ -980,24 +1157,15 @@ impl Application for App {
                         return Task::none();
                     }
                 };
-                self.loading = true;
-                self.error = None;
-                self.app_view = AppView::Reader;
-                return open_any(path);
+                return self.open_linked(path);
             }
-            Message::OpenFromLibrary { path, page, chapter: _ } => {
-                self.loading = true;
-                self.error = None;
-                self.app_view = AppView::Reader;
-                // We'll resume at the saved page after Loaded
-                // Store page temporarily in current_page; reset properly in Loaded
-                self.current_page = page;
-                return open_any(path);
+            Message::OpenEntry { key, chapter } => {
+                return self.open_entry(key, chapter);
             }
             Message::Loaded(path, sources, chapters) => {
-                let path_str = path.to_string_lossy().to_string();
-                let resume_page = self.current_page; // may have been set by OpenFromLibrary
+                let key = path.to_string_lossy().to_string();
                 let total = sources.len();
+                let start_chapter = self.start_chapter.take();
 
                 self.loading = false;
                 self.sources = sources;
@@ -1008,86 +1176,62 @@ impl Application for App {
                 self.covers_pending.clear();
                 self.zoom_active = false;
                 self.zoom = 1.0;
-                self.metadata = None;
-                self.metadata_loading = false;
                 self.comic_info = None;
-                self.comicvine = None;
-                self.comicvine_loading = false;
-                self.comicvine_cover = None;
                 self.epub_book = None;
                 self.epub_chapter = 0;
                 self.epub_cover = None;
                 self.show_chapter_select = false;
                 self.open_path = Some(path.clone());
 
-                self.title = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "Comic".to_string());
-                self.set_header_title(self.title.clone());
-
-                // Restore saved progress (but only if we have a saved position and
-                // OpenFromLibrary set resume_page, OR check DB)
-                let saved_page = if resume_page > 0 {
-                    resume_page.min(total.saturating_sub(1))
-                } else if let Some(db) = &self.db {
-                    library::get_progress(db, &path_str)
-                        .map(|(pg, _)| pg)
-                        .unwrap_or(0)
-                        .min(total.saturating_sub(1))
-                } else {
-                    0
-                };
-                self.current_page = saved_page;
-                self.nav_dir = 1;
-
-                // Update library DB. This runs for any opened file, not
-                // just ones under a configured library folder, so a
-                // one-off "Open File" still gets a shelf cover.
-                let mut cover_task_for_open: Option<Task<Message>> = None;
+                // Register (or refresh) this series and its issues — any
+                // open counts, not just library folders, so one-off files
+                // get tracked and a shelf cover too.
+                let mut tasks = Vec::new();
                 if let Some(db) = &self.db {
-                    let title = metadata::extract_title(&self.title);
-                    let _ = library::upsert_series(db, &path_str, &title, total, path.is_dir());
-                    let _ = library::touch_opened(db, &path_str);
+                    let raw_name =
+                        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let clean = naming::clean_series_name(&raw_name);
+                    let is_series = path.is_dir() || self.chapters.len() > 1;
+                    let _ = library::upsert_series(db, &key, &clean.display, total, is_series);
+                    let _ = library::sync_issues(db, &key, &issue_rows_from_chapters(&self.chapters));
+                    let _ = library::touch_opened(db, &key);
+                    self.reader_entry = library::get_series(db, &key);
+                    self.reader_issues = library::issues_for(db, &key);
 
-                    let cover_path = library::chapter_cover_path(&path_str, 0);
-                    if !cover_path.exists() {
+                    if !library::chapter_cover_path(&key, 0).exists() {
                         if let Some(source) = self.sources.first().cloned() {
-                            cover_task_for_open = Some(comic_library_cover_task(source, path.clone()));
+                            self.covers_pending.insert(0);
+                            tasks.push(cover_task(0, source, path.clone()));
                         }
                     }
                 }
 
-                let raw_name = self.title.clone();
-                self.metadata_loading = true;
-                let parsed = metadata::parse_filename(&raw_name);
-                self.parsed_filename = Some(parsed.clone());
+                self.current_page = resume_page(
+                    &self.chapters,
+                    &self.reader_issues,
+                    self.reader_entry.as_ref(),
+                    start_chapter,
+                    total,
+                );
+                self.nav_dir = 1;
 
-                // Embedded ComicInfo.xml is free, offline, and authoritative
-                // when present — prefer it over filename guesswork for the
-                // ComicVine query, the same way Jellyfin does.
-                let comic_info = comic::find_comic_info(&path).map(|xml| comicinfo::parse(&xml));
-                let (cv_series, cv_issue, cv_year) = match &comic_info {
-                    Some(info) if info.series.is_some() => (
-                        info.series.clone().unwrap(),
-                        info.number.clone().or(parsed.issue.map(|n| n.to_string())),
-                        info.year.map(|y| y as u32).or(parsed.year),
-                    ),
-                    _ => (parsed.series.clone(), parsed.issue.map(|n| n.to_string()), parsed.year),
-                };
-                self.comic_info = comic_info;
+                self.title = self
+                    .reader_entry
+                    .as_ref()
+                    .map(|e| e.name().to_string())
+                    .unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                self.set_header_title(self.title.clone());
 
-                let mut tasks = vec![self.refresh_window()];
-                if let Some(t) = cover_task_for_open {
-                    tasks.push(t);
+                // Embedded ComicInfo.xml of the issue being read.
+                if let Some((_, ch, _)) = self.current_chapter() {
+                    self.comic_info = comic::find_comic_info(&ch.path).map(|xml| comicinfo::parse(&xml));
                 }
-                if self.settings.fetch_metadata {
-                    self.comicvine_loading = true;
-                    tasks.push(metadata_task(raw_name));
-                    tasks.push(comicvine_task(cv_series, cv_issue, cv_year));
-                } else {
-                    self.metadata_loading = false;
+                self.persist_progress();
+
+                if self.reader_entry.as_ref().is_some_and(|e| e.meta_fetched_at == 0) {
+                    tasks.push(self.enqueue_meta(key));
                 }
+                tasks.push(self.refresh_window());
                 if let Some(id) = self.core.main_window_id() {
                     tasks.push(self.set_window_title(self.title.clone(), id));
                 }
@@ -1106,12 +1250,8 @@ impl Application for App {
                         self.covers_pending.clear();
                         self.zoom_active = false;
                         self.zoom = 1.0;
-                        self.metadata = None;
-                        self.metadata_loading = false;
                         self.comic_info = None;
-                        self.comicvine = None;
-                        self.comicvine_loading = false;
-                        self.comicvine_cover = None;
+                        self.start_chapter = None;
                         self.show_chapter_select = false;
                         self.open_path = Some(path.clone());
                         self.title = book.title.clone();
@@ -1134,27 +1274,38 @@ impl Application for App {
                         let cover_bytes = book.cover.clone();
                         self.epub_book = Some(book);
 
-                        // As with comics: any opened EPUB gets a shelf
-                        // cover, not just ones under a library folder.
-                        let mut cover_task_for_open = None;
+                        // As with comics: any opened EPUB gets tracked and a
+                        // shelf cover, not just ones under a library folder.
                         if let Some(db) = &self.db {
                             let _ = library::upsert_series(db, &path_str, &self.title, chapter_count, false);
+                            let _ = library::sync_issues(
+                                db,
+                                &path_str,
+                                &[IssueRow {
+                                    path: path_str.clone(),
+                                    name: self.title.clone(),
+                                    number: String::new(),
+                                    subtitle: String::new(),
+                                    page_count: Some(chapter_count),
+                                }],
+                            );
                             let _ = library::touch_opened(db, &path_str);
+                            self.reader_entry = library::get_series(db, &path_str);
+                            self.reader_issues = library::issues_for(db, &path_str);
 
                             let cover_path = library::chapter_cover_path(&path_str, 0);
                             if !cover_path.exists() {
-                                if let Some(bytes) = cover_bytes {
-                                    cover_task_for_open = Some(epub_library_cover_task(bytes, path.clone()));
+                                if let Some(img) = cover_bytes.and_then(|b| image::load_from_memory(&b).ok()) {
+                                    let _ = scan::save_thumb(&img.to_rgba8(), &cover_path);
                                 }
                             }
                         }
+                        self.persist_progress();
 
                         let title_task = self.core.main_window_id()
                             .map(|id| self.set_window_title(self.title.clone(), id));
 
-                        return Task::batch(
-                            cover_task_for_open.into_iter().chain(title_task),
-                        );
+                        return Task::batch(title_task);
                     }
                     Err(e) => self.error = Some(e),
                 }
@@ -1184,56 +1335,116 @@ impl Application for App {
                 self.error = Some(why);
             }
             Message::Cancelled => { self.loading = false; }
-            Message::MetadataLoaded(result) => {
-                self.metadata_loading = false;
-                if let Ok(meta) = result {
-                    if let Some(db) = &self.db {
-                        if let Some(path) = &self.open_path {
-                            let _ = library::update_metadata(db, &path.to_string_lossy(), &meta);
+            Message::MetaNext => {
+                return self.pump_meta();
+            }
+            Message::MetaMatched(key, result) => {
+                self.meta_running = false;
+                self.meta_current = None;
+                let mut used_comicvine = false;
+                if let Some(db) = &self.db {
+                    match result {
+                        Ok(Some(m)) => {
+                            used_comicvine = m.source == "comicvine";
+                            let entry = library::get_series(db, &key);
+                            let forced = entry.as_ref().is_some_and(|e| !e.search_override.is_empty());
+                            let rename = forced || m.score >= metadata::RENAME_SCORE;
+                            let display = rename.then(|| {
+                                naming::with_edition(&m.title, entry.as_ref().map_or("", |e| e.title.as_str()))
+                            });
+                            let _ = library::apply_match(db, &key, &m, display.as_deref());
+                        }
+                        Ok(None) => library::mark_meta(db, &key, "nomatch", true),
+                        Err(e) => {
+                            log::warn!("metadata lookup for {key} failed: {e}");
+                            library::set_meta_error(db, &key, &e);
                         }
                     }
-                    self.metadata = Some(meta);
+                }
+                let refresh = self.refresh_views();
+                if self.series_page.as_ref().is_some_and(|s| s.path == key) {
+                    if let Some(s) = &self.series_page {
+                        self.set_header_title(s.name().to_string());
+                    }
+                }
+                // Space requests out (ComicVine asks for ~1/s).
+                let delay = if used_comicvine { 1500 } else { 400 };
+                let next = cosmic::task::future(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    Message::MetaNext
+                });
+                return Task::batch([refresh, next]);
+            }
+            Message::SeriesSearchInput(text) => {
+                self.series_search_input = text;
+            }
+            Message::RematchSeries => {
+                let Some(key) = self.series_page.as_ref().map(|s| s.path.clone()) else { return Task::none() };
+                if let Some(db) = &self.db {
+                    library::set_search_override(db, &key, &self.series_search_input);
+                    library::mark_meta(db, &key, "", false);
+                }
+                self.meta_attempted.remove(&key);
+                // Jump the queue: this is what the user is looking at.
+                self.meta_queue.retain(|k| k != &key);
+                self.meta_queue.push_front(key.clone());
+                self.meta_attempted.insert(key);
+                let t = self.refresh_views();
+                return Task::batch([t, self.pump_meta()]);
+            }
+            Message::ClearSeriesMatch => {
+                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+                    library::mark_meta(db, &key, "nomatch", true);
+                }
+                let t = self.refresh_views();
+                if let Some(s) = &self.series_page {
+                    self.set_header_title(s.name().to_string());
+                }
+                return t;
+            }
+            Message::RefreshAllMetadata => {
+                if let Some(db) = &self.db {
+                    library::reset_all_metadata(db);
+                }
+                self.meta_attempted.clear();
+                let keys: Vec<String> =
+                    self.library_entries.iter().filter(|e| !e.is_epub).map(|e| e.path.clone()).collect();
+                let tasks: Vec<_> = keys.into_iter().map(|k| self.enqueue_meta(k)).collect();
+                return Task::batch(tasks);
+            }
+            Message::ComicVineKeyInput(text) => {
+                self.cv_key_input = text;
+            }
+            Message::SaveComicVineKey => {
+                if let Err(e) = comicvine::save_api_key(&self.cv_key_input) {
+                    self.error = Some(e);
+                } else {
+                    self.cv_key_input.clear();
+                    // Series that found nothing without a key may match now.
+                    return self.update(Message::RefreshAllMetadata);
                 }
             }
-            Message::ComicVineLoaded(result) => {
-                self.comicvine_loading = false;
-                let cover_url = result.as_ref().ok().and_then(|m| m.cover_url.clone());
-                self.comicvine = Some(result);
-                if let Some(url) = cover_url {
-                    return comicvine_cover_task(url);
-                }
+            Message::OpenUrl(url) => {
+                let _ = std::process::Command::new("xdg-open").arg(url).spawn();
             }
-            Message::ComicVineCoverReady(result) => {
-                if let Ok((w, h, rgba)) = result {
-                    self.comicvine_cover = Some(widget::image::Handle::from_rgba(w, h, rgba));
+            Message::ToggleIssueRead(id, completed) => {
+                if let Some(db) = &self.db {
+                    let _ = library::set_issue_completed(db, id, completed);
                 }
+                return self.refresh_views();
+            }
+            Message::MarkSeriesRead(completed) => {
+                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+                    let _ = library::set_series_completed(db, &key, completed);
+                }
+                return self.refresh_views();
             }
             Message::ChapterCoverReady { chapter_idx, result } => {
                 self.covers_pending.remove(&chapter_idx);
                 if let Ok((w, h, rgba)) = result {
                     let handle = widget::image::Handle::from_rgba(w, h, rgba);
                     self.chapter_covers.insert(chapter_idx, handle);
-                    // If this is ch0, update library covers for the current series
-                    if chapter_idx == 0 {
-                        if let Some(db) = &self.db {
-                            if let Some(path) = &self.open_path {
-                                // Look up the series id and update library_covers
-                                let path_str = path.to_string_lossy().to_string();
-                                let entries = library::search_series(db, &self.title);
-                                if let Some(e) = entries.iter().find(|e| e.path == path_str) {
-                                    let id = e.id;
-                                    if let Some(h) = self.chapter_covers.get(&0) {
-                                        self.library_covers.insert(id, h.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
-            }
-            Message::LibraryCoverReady { series_id, path } => {
-                let handle = widget::image::Handle::from_path(path);
-                self.library_covers.insert(series_id, handle);
             }
             Message::AddLibraryFolder => {
                 return cosmic::task::future(async move {
@@ -1277,32 +1488,79 @@ impl Application for App {
                 self.library_path_input.clear();
                 return self.add_library_folder(path);
             }
-            Message::LibraryEntryScanned(result) => {
-                let Ok(outcome) = result else { return Task::none() };
+            Message::RootDiscovered(root, found) => {
+                self.scans_pending = self.scans_pending.saturating_sub(1);
+                let Some(found) = found else {
+                    // Unreachable root (unmounted drive?): hide, never delete.
+                    self.missing_roots.insert(root);
+                    return self.reload_library();
+                };
+                self.missing_roots.remove(&root);
+                let mut tasks = Vec::new();
                 if let Some(db) = &self.db {
-                    let path_str = outcome.path.to_string_lossy().to_string();
-                    let _ = library::upsert_series(
-                        db, &path_str, &outcome.title, outcome.count, outcome.is_series,
-                    );
-                }
-                let cover_path = library::chapter_cover_path(&outcome.path.to_string_lossy(), 0);
-                if !cover_path.exists() {
-                    if let Some(bytes) = outcome.epub_cover {
-                        return epub_library_cover_task(bytes, outcome.path);
-                    } else if let Some(source) = outcome.first_page {
-                        return comic_library_cover_task(source, outcome.path);
+                    let keys: Vec<String> = found.iter().map(|d| d.key.clone()).collect();
+                    let removed = library::prune_root(db, &root.to_string_lossy(), &keys);
+                    if removed > 0 {
+                        log::info!("removed {removed} series no longer under {}", root.display());
+                    }
+                    for d in found {
+                        let known = library::known_page_counts(db, &d.key);
+                        self.scans_pending += 1;
+                        tasks.push(scan_series_task(d, known));
                     }
                 }
-                return self.reload_library();
+                tasks.push(self.reload_library());
+                return Task::batch(tasks);
             }
-            Message::LibraryScanCoverDone(_) => {
-                return self.reload_library();
+            Message::SeriesScanned(result) => {
+                self.scans_pending = self.scans_pending.saturating_sub(1);
+                let mut tasks = Vec::new();
+                match result {
+                    Ok(r) => {
+                        if let Some(db) = &self.db {
+                            let _ = library::upsert_scanned_series(db, &r.series);
+                            let _ = library::sync_issues(db, &r.series.path, &r.issues);
+                            if library::get_series(db, &r.series.path).is_some_and(|e| e.meta_fetched_at == 0) {
+                                tasks.push(self.enqueue_meta(r.series.path.clone()));
+                            }
+                        }
+                    }
+                    Err(e) => log::warn!("scan: {e}"),
+                }
+                // Refresh the grid in batches rather than once per series.
+                if self.scans_pending == 0 || self.scans_pending % 8 == 0 {
+                    tasks.push(self.refresh_views());
+                }
+                return Task::batch(tasks);
+            }
+            Message::IssueCoverReady { key, idx } => {
+                self.series_covers_pending.remove(&idx);
+                if self.series_page.as_ref().is_some_and(|s| s.path == key) {
+                    let cover = library::chapter_cover_path(&key, idx);
+                    if cover.exists() {
+                        self.series_page_covers.insert(idx, widget::image::Handle::from_path(cover));
+                    }
+                }
+                if idx == 0 {
+                    return self.reload_library();
+                }
+            }
+            Message::HideMissing(paths) => {
+                self.hidden_paths.extend(paths);
+            }
+            Message::RescanLibrary => {
+                let dirs = self.library_dirs.clone();
+                let tasks: Vec<_> = dirs.into_iter().map(|d| self.scan_root(d)).collect();
+                return Task::batch(tasks);
             }
             Message::RemoveLibraryFolder(path) => {
                 if let Some(db) = &self.db {
-                    let _ = library::remove_library_dir(db, &path.to_string_lossy());
+                    let root = path.to_string_lossy();
+                    let _ = library::remove_library_dir(db, &root);
+                    library::remove_series_under_root(db, &root);
                 }
                 self.library_dirs.retain(|d| d != &path);
+                self.missing_roots.remove(&path);
                 return self.reload_library();
             }
             Message::ToggleSettings => {
@@ -1454,19 +1712,13 @@ impl Application for App {
             Message::Touch(event) => self.handle_touch(event),
             Message::FilesDropped(paths) => {
                 if let Some(path) = paths.into_iter().next() {
-                    self.loading = true;
-                    self.error = None;
-                    self.app_view = AppView::Reader;
-                    return open_any(path);
+                    return self.open_linked(path);
                 }
             }
             Message::DndDataReceived(mime, data) => {
                 if mime.contains("uri-list") {
                     if let Some(path) = first_path_from_uri_list(&data) {
-                        self.loading = true;
-                        self.error = None;
-                        self.app_view = AppView::Reader;
-                        return open_any(path);
+                        return self.open_linked(path);
                     }
                 }
             }
@@ -1495,6 +1747,7 @@ impl Application for App {
     fn view(&self) -> Element<'_, Self::Message> {
         let content = match self.app_view {
             AppView::Library => self.view_library(),
+            AppView::Series => self.view_series(),
             AppView::Reader => self.view_reader(),
         };
 
@@ -1521,6 +1774,7 @@ impl App {
             Key::Named(Named::Escape) => {
                 if self.zoom_active { self.zoom_active = false; self.zoom = 1.0; }
                 else if self.show_chapter_select { self.show_chapter_select = false; }
+                else if self.app_view != AppView::Library { return self.update(Message::GoToLibrary); }
             }
             Key::Character(c)
                 if self.app_view == AppView::Reader
@@ -1565,155 +1819,6 @@ impl App {
             _ => {}
         }
         Task::none()
-    }
-}
-
-// ── Library view ──────────────────────────────────────────────────────────────
-
-impl App {
-    fn view_library(&self) -> Element<'_, Message> {
-        let mut col = widget::Column::new().spacing(16).padding(20);
-
-        if let Some(err) = self.error.as_deref() {
-            col = col.push(error_banner(err));
-        }
-
-        // ── Continue Reading ──────────────────────────────────────────────────
-        let recent: Vec<&SeriesEntry> = self.library_entries.iter()
-            .filter(|e| e.last_read_page > 0)
-            .take(8)
-            .collect();
-
-        if !recent.is_empty() {
-            col = col.push(widget::text::title3("Continue Reading"));
-            let mut row = widget::Row::new().spacing(12);
-            for entry in &recent {
-                row = row.push(self.series_card(entry, true));
-            }
-            col = col.push(
-                widget::scrollable::scrollable(row).direction(
-                    scroll_mod::Direction::Horizontal(scroll_mod::Scrollbar::new()),
-                ),
-            );
-        }
-
-        // ── All Series ────────────────────────────────────────────────────────
-        if self.library_entries.is_empty() {
-            col = col.push(
-                widget::Column::new()
-                    .spacing(12)
-                    .align_x(Alignment::Center)
-                    .push(icon::from_name("library-symbolic").size(64))
-                    .push(widget::text::title3("Your library is empty"))
-                    .push(widget::text("Open a comic or series to add it here, or drag and drop one in.").size(14))
-                    .push(
-                        widget::Row::new().spacing(8)
-                            .push(widget::button::standard("Open File").on_press(Message::OpenFile))
-                            .push(widget::button::suggested("Add Series").on_press(Message::OpenFolder)),
-                    ),
-            );
-        } else if self.library_dirs.is_empty() {
-            col = col.push(widget::text::title3("All Series"));
-            col = col.push(
-                widget::scrollable::scrollable(self.series_grid(&self.library_entries.iter().collect::<Vec<_>>()))
-                    .height(Length::Fill),
-            );
-        } else {
-            // Grouped by configured library folder, with anything opened
-            // outside of those (loose "Open File"/"Add Series" picks)
-            // collected in a trailing "Library" section.
-            let mut grouped = widget::Column::new().spacing(20);
-            let mut remaining: Vec<&SeriesEntry> = self.library_entries.iter().collect();
-
-            for dir in &self.library_dirs {
-                let (matched, rest): (Vec<_>, Vec<_>) =
-                    remaining.into_iter().partition(|e| Path::new(&e.path).starts_with(dir));
-                remaining = rest;
-                if matched.is_empty() {
-                    continue;
-                }
-                let name = dir.file_name().map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| dir.to_string_lossy().into_owned());
-                grouped = grouped
-                    .push(widget::text::title3(name))
-                    .push(self.series_grid(&matched));
-            }
-
-            if !remaining.is_empty() {
-                grouped = grouped.push(widget::text::title3("Library")).push(self.series_grid(&remaining));
-            }
-
-            col = col.push(widget::scrollable::scrollable(grouped).height(Length::Fill));
-        }
-
-        widget::container(col)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    }
-
-    /// A 5-column grid of series cards.
-    fn series_grid<'a>(&'a self, entries: &[&'a SeriesEntry]) -> Element<'a, Message> {
-        let mut grid_col = widget::Column::new().spacing(12);
-        for chunk in entries.chunks(5) {
-            let mut row = widget::Row::new().spacing(12);
-            for entry in chunk {
-                row = row.push(self.series_card(entry, false));
-            }
-            grid_col = grid_col.push(row);
-        }
-        grid_col.into()
-    }
-
-    fn series_card<'a>(&'a self, entry: &'a SeriesEntry, show_progress: bool) -> Element<'a, Message> {
-        let cover: Element<'_, Message> = if let Some(handle) = self.library_covers.get(&entry.id) {
-            widget::image(handle.clone())
-                .width(Length::Fixed(THUMB_W as f32))
-                .height(Length::Fixed(THUMB_H as f32))
-                .content_fit(ContentFit::Cover)
-                .into()
-        } else {
-            widget::container(
-                icon::from_name("image-x-generic-symbolic").size(48),
-            )
-            .width(Length::Fixed(THUMB_W as f32))
-            .height(Length::Fixed(THUMB_H as f32))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
-        };
-
-        let title_text = if entry.title.chars().count() > 22 {
-            format!("{}…", entry.title.chars().take(20).collect::<String>())
-        } else {
-            entry.title.clone()
-        };
-
-        let mut card = widget::Column::new()
-            .spacing(4)
-            .push(cover)
-            .push(widget::text(title_text).size(12));
-
-        if show_progress && entry.total_pages > 0 {
-            let fraction = entry.progress_fraction();
-            card = card.push(
-                cosmic::iced::widget::ProgressBar::new(0.0..=1.0, fraction),
-            );
-            let ch = if entry.is_series {
-                format!("Ch.{}", entry.last_read_chapter + 1)
-            } else {
-                format!("P.{}", entry.last_read_page + 1)
-            };
-            card = card.push(widget::text(ch).size(11));
-        }
-
-        let path = PathBuf::from(&entry.path);
-        let page = entry.last_read_page;
-        let chapter = entry.last_read_chapter;
-
-        mouse_area(card)
-            .on_press(Message::OpenFromLibrary { path, page, chapter })
-            .into()
     }
 }
 
@@ -2138,10 +2243,47 @@ impl App {
                 widget::toggler(self.layout == Layout::Dual)
                     .on_toggle(|_| Message::ToggleLayout),
             ))
+            ;
+
+        let has_key = comicvine::api_key().is_some();
+        let metadata_section = widget::settings::section()
+            .title("Metadata")
             .add(widget::settings::item(
-                "Look up metadata online",
+                "Look up series online (AniList, ComicVine)",
                 widget::toggler(s.fetch_metadata).on_toggle(Message::SetFetchMetadata),
-            ));
+            ))
+            .add(
+                widget::Column::new()
+                    .spacing(6)
+                    .push(widget::text::body(if has_key {
+                        "ComicVine API key: set ✓"
+                    } else {
+                        "ComicVine API key: not set — needed for Western comics (free at comicvine.gamespot.com/api)"
+                    }))
+                    .push(
+                        widget::Row::new()
+                            .spacing(8)
+                            .align_y(Alignment::Center)
+                            .push(
+                                widget::secure_input(
+                                    if has_key { "Replace key…" } else { "Paste API key…" },
+                                    &self.cv_key_input,
+                                    None,
+                                    true,
+                                )
+                                .on_input(Message::ComicVineKeyInput)
+                                .on_submit(|_| Message::SaveComicVineKey)
+                                .width(Length::Fill),
+                            )
+                            .push(widget::button::standard("Save").on_press(Message::SaveComicVineKey)),
+                    ),
+            )
+            .add(
+                widget::Row::new()
+                    .spacing(8)
+                    .push(widget::button::standard("Rescan Library").on_press(Message::RescanLibrary))
+                    .push(widget::button::standard("Refresh All Metadata").on_press(Message::RefreshAllMetadata)),
+            );
 
         let mut library_section = widget::settings::section().title("Library folders");
         if self.library_dirs.is_empty() {
@@ -2151,7 +2293,10 @@ impl App {
             );
         } else {
             for dir in &self.library_dirs {
-                let name = dir.to_string_lossy().into_owned();
+                let mut name = dir.to_string_lossy().into_owned();
+                if self.missing_roots.contains(dir) {
+                    name.push_str("  (not found — hidden)");
+                }
                 library_section = library_section.add(
                     widget::Row::new()
                         .spacing(8)
@@ -2186,6 +2331,7 @@ impl App {
         widget::settings::view_column(vec![
             appearance.into(),
             reading.into(),
+            metadata_section.into(),
             library_section.into(),
             add_folder_row.into(),
         ])
@@ -2195,146 +2341,108 @@ impl App {
     fn build_info_panel(&self) -> Element<'_, Message> {
         let mut col = widget::Column::new().spacing(8).padding(12);
 
-        if let Some((ch_idx, ch, pg)) = self.current_chapter() {
-            let heading = if self.chapters.len() == 1 {
-                ch.name.clone()
-            } else {
-                format!("Chapter {} — {}", ch_idx + 1, ch.name)
+        let current = self.current_chapter();
+        if let Some((ch_idx, ch, pg)) = current {
+            let issue = self.reader_issues.iter().find(|i| i.path == ch.path.to_string_lossy());
+            let heading = match issue {
+                Some(i) if !i.number.is_empty() => {
+                    let h = i.heading();
+                    if h.is_empty() { format!("#{}", i.number) } else { format!("#{} — {h}", i.number) }
+                }
+                _ if self.chapters.len() > 1 => format!("Chapter {} — {}", ch_idx + 1, ch.name),
+                _ => ch.name.clone(),
             };
             col = col.push(widget::text::title4(heading));
-            col = col.push(widget::text(format!("Page {} of {}", pg + 1, ch.page_count)).size(13));
+            col = col.push(widget::text::body(format!("Page {} of {}", pg + 1, ch.page_count)));
+            if let Some(i) = issue {
+                if !i.cover_date.is_empty() {
+                    col = col.push(widget::text::caption(format!("Cover date: {}", i.cover_date)));
+                }
+                if self.chapters.len() > 1 {
+                    col = col.push(widget::text::caption(format!(
+                        "Issue {} of {} in this series",
+                        ch_idx + 1,
+                        self.chapters.len()
+                    )));
+                }
+                if !i.url.is_empty() {
+                    col = col.push(widget::button::link("View issue page").on_press(Message::OpenUrl(i.url.clone())));
+                }
+            }
+            col = col.push(widget::divider::horizontal::light());
+        }
+
+        if let Some(e) = &self.reader_entry {
+            col = col.push(widget::text::title4(e.name().to_string()));
+            let mut facts = Vec::new();
+            if !e.publisher.is_empty() {
+                facts.push(e.publisher.clone());
+            }
+            if let Some(y) = e.year {
+                facts.push(y.to_string());
+            }
+            if e.issue_count > 1 {
+                facts.push(format!("{}/{} read", e.issues_read, e.issue_count));
+            }
+            if !facts.is_empty() {
+                col = col.push(widget::text::body(facts.join(" · ")));
+            }
+            let source = match e.source.as_str() {
+                "comicvine" => "Source: ComicVine".to_string(),
+                "anilist" => "Source: AniList".to_string(),
+                _ if e.meta_status == "nomatch" => "No online match".to_string(),
+                _ if e.meta_status.starts_with("error") => e.meta_status.clone(),
+                _ => "Not looked up yet".to_string(),
+            };
+            col = col.push(widget::text::caption(source));
+            if !e.genres.is_empty() {
+                col = col.push(widget::text::caption(e.genres.clone()));
+            }
+            if !e.description.is_empty() {
+                col = col.push(widget::text::body(e.description.clone()));
+            }
             col = col.push(widget::divider::horizontal::light());
         }
 
         // ── Embedded ComicInfo.xml, when present (free, offline, authoritative) ─
-        if let Some(info) = &self.comic_info {
-            if !info.is_empty() {
-                col = col.push(widget::text::title4("ComicInfo.xml"));
-                if let Some(s) = &info.series {
-                    col = col.push(widget::text(format!("Series: {s}")).size(12));
+        if let Some(info) = self.comic_info.as_ref().filter(|i| !i.is_empty()) {
+            col = col.push(widget::text::title4("ComicInfo.xml"));
+            for (label, value) in [
+                ("Series", info.series.clone()),
+                ("Number", info.number.clone()),
+                ("Volume", info.volume.clone()),
+                ("Year", info.year.map(|y| y.to_string())),
+                ("Publisher", info.publisher.clone()),
+                ("Writer", info.writer.clone()),
+                ("Genre", info.genre.clone()),
+            ] {
+                if let Some(v) = value {
+                    col = col.push(widget::text::caption(format!("{label}: {v}")));
                 }
-                if let Some(n) = &info.number {
-                    col = col.push(widget::text(format!("Number: {n}")).size(12));
-                }
-                if let Some(v) = &info.volume {
-                    col = col.push(widget::text(format!("Volume: {v}")).size(12));
-                }
-                if let Some(y) = info.year {
-                    col = col.push(widget::text(format!("Year: {y}")).size(12));
-                }
-                if let Some(p) = &info.publisher {
-                    col = col.push(widget::text(format!("Publisher: {p}")).size(12));
-                }
-                if let Some(w) = &info.writer {
-                    col = col.push(widget::text(format!("Writer: {w}")).size(12));
-                }
-                if let Some(g) = &info.genre {
-                    col = col.push(widget::text(format!("Genre: {g}")).size(12));
-                }
-                col = col.push(widget::divider::horizontal::light());
             }
+            if let Some(summary) = &info.summary {
+                col = col.push(widget::text::body(summary.clone()));
+            }
+            col = col.push(widget::divider::horizontal::light());
         }
 
-        // ── Debug: what we parsed out of the filename ─────────────────────────
-        col = col.push(widget::text::title4("Debug: Metadata Matching"));
-        if let Some(p) = &self.parsed_filename {
-            col = col.push(widget::text(format!("Parsed series: {}", p.series)).size(12));
-            col = col.push(
-                widget::text(format!(
-                    "Parsed issue: {}",
-                    p.issue.map(|n| n.to_string()).unwrap_or_else(|| "—".into())
-                ))
-                .size(12),
-            );
-            col = col.push(
-                widget::text(format!(
-                    "Parsed year: {}",
-                    p.year.map(|n| n.to_string()).unwrap_or_else(|| "—".into())
-                ))
-                .size(12),
-            );
-        }
-        col = col.push(widget::divider::horizontal::light());
-
-        // AniList (manga/anime only — won't match Western comics)
-        col = col.push(widget::text::title4("AniList (manga/anime)"));
-        if self.metadata_loading {
-            col = col.push(widget::text("Fetching…").size(12))
-                .push(widget::indeterminate_circular());
-        } else if let Some(meta) = &self.metadata {
-            col = col.push(widget::text(meta.title.clone()).size(13));
-            if !meta.status.is_empty() {
-                col = col.push(widget::text(format!("Status: {}", meta.status)).size(12));
-            }
-            if let Some(n) = meta.chapter_count {
-                col = col.push(widget::text(format!("Chapters: {n}")).size(12));
-            }
-            if let Some(s) = meta.score {
-                col = col.push(widget::text(format!("Score: {s}/100")).size(12));
-            }
-            if !meta.genres.is_empty() {
-                col = col.push(widget::text(format!("Genres: {}", meta.genres.join(", "))).size(12));
-            }
-        } else {
-            col = col.push(widget::text("No match.").size(12));
-        }
-        col = col.push(widget::divider::horizontal::light());
-
-        // ComicVine (Western comics — Marvel/DC/etc.)
-        col = col.push(widget::text::title4("ComicVine (Western comics)"));
-        if self.comicvine_loading {
-            col = col.push(widget::text("Fetching…").size(12))
-                .push(widget::indeterminate_circular());
-        } else {
-            match &self.comicvine {
-                Some(Ok(m)) => {
-                    if let Some(cover) = &self.comicvine_cover {
-                        col = col.push(
-                            widget::image(cover.clone())
-                                .width(Length::Fixed(160.0))
-                                .content_fit(ContentFit::Contain),
-                        );
-                    }
-                    col = col.push(widget::text(m.name.clone()).size(13));
-                    if let Some(v) = &m.volume {
-                        col = col.push(widget::text(format!("Volume: {v}")).size(12));
-                    }
-                    if let Some(n) = &m.issue_number {
-                        col = col.push(widget::text(format!("Issue #: {n}")).size(12));
-                    }
-                    if let Some(d) = &m.cover_date {
-                        col = col.push(widget::text(format!("Cover date: {d}")).size(12));
-                    }
-                    if let Some(d) = &m.description {
-                        let snippet: String = if d.chars().count() > 200 {
-                            format!("{}…", d.chars().take(200).collect::<String>())
-                        } else {
-                            d.clone()
-                        };
-                        col = col.push(widget::text(snippet).size(12));
-                    }
-                    if let Some(u) = &m.site_url {
-                        col = col.push(widget::text(u.clone()).size(11));
-                    }
-                }
-                Some(Err(e)) => col = col.push(widget::text(e.clone()).size(12)),
-                None => col = col.push(widget::text("No match.").size(12)),
-            }
+        // ── What the name parser made of this file (for fixing matches) ──
+        if let Some((_, ch, _)) = current {
+            let file = ch.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let parsed = naming::parse_issue(&file);
+            let clean = naming::series_name_from_issue(&file);
+            col = col.push(widget::text::heading("Name parsing"));
+            col = col.push(widget::text::caption(file));
+            col = col.push(widget::text::caption(format!(
+                "Series “{}” · issue {} · year {}",
+                clean.search,
+                parsed.number.as_deref().unwrap_or("—"),
+                clean.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()),
+            )));
         }
 
-        if let Some(meta) = &self.metadata {
-            if !meta.description.is_empty() {
-                col = col.push(widget::divider::horizontal::light());
-                col = col.push(widget::text::title4("Synopsis"));
-                col = col.push(
-                    widget::scrollable::scrollable(widget::text(meta.description.clone()).size(13))
-                        .height(Length::Fill),
-                );
-            }
-        }
-
-        widget::container(col)
-            .width(Length::Fixed(300.0))
+        widget::container(widget::scrollable(col))
+            .width(Length::Fixed(320.0))
             .height(Length::Fill)
             .into()
     }

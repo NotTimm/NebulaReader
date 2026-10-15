@@ -105,6 +105,40 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
     })
 }
 
+/// Title/author/cover/chapter count without parsing any chapter — what the
+/// library scan needs, at a fraction of the cost of [`open`].
+pub struct EpubMeta {
+    pub title: String,
+    pub author: Option<String>,
+    pub cover: Option<Vec<u8>>,
+    pub chapter_count: usize,
+}
+
+pub fn read_meta(path: &Path) -> Result<EpubMeta, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| format!("failed to open {}: {e}", path.display()))?;
+    let mut zip = zip::ZipArchive::new(file)
+        .map_err(|e| format!("failed to read epub {}: {e}", path.display()))?;
+    let opf_path = find_opf_path(&mut zip)?;
+    let opf_dir = Path::new(&opf_path).parent().unwrap_or(Path::new("")).to_path_buf();
+    let opf_xml = read_zip_text(&mut zip, &opf_path)?;
+    let (title, author, manifest, spine, cover_id) = parse_opf(&opf_xml);
+    let cover = cover_id
+        .and_then(|id| manifest.get(&id))
+        .map(|href| join_epub_path(&opf_dir, href))
+        .and_then(|p| read_zip_bytes(&mut zip, &p).ok());
+    Ok(EpubMeta {
+        title: if title.is_empty() {
+            path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+        } else {
+            title
+        },
+        author,
+        cover,
+        chapter_count: spine.len(),
+    })
+}
+
 // ── container.xml / OPF ──────────────────────────────────────────────────────
 
 fn find_opf_path(zip: &mut zip::ZipArchive<std::fs::File>) -> Result<String, String> {
