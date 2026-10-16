@@ -29,6 +29,7 @@ use crate::settings::{Background as BgStyle, Settings};
 
 mod book_view;
 mod library_view;
+mod window_icon;
 
 use book_view::{BookMsg, BookScroll};
 
@@ -132,6 +133,8 @@ pub enum Message {
     SetBackgroundOpacity(f32),
     SetBackground(usize),
     SetLook(usize),
+    /// A window opened; (re)apply the window icon to it.
+    WindowOpened,
     SetFetchMetadata(bool),
     // Keys / pointer / touch
     Key(Key),
@@ -157,6 +160,9 @@ pub struct App {
     /// Whether this window was created with the system title bar. Fixed
     /// at startup: decorations can't be swapped on a live window.
     native_titlebar: bool,
+    /// Which window icon is showing (open book while reading); `None`
+    /// until the first one is set.
+    icon_open: Option<bool>,
     // view
     app_view: AppView,
     // reader
@@ -866,6 +872,7 @@ impl Application for App {
         let mut app = App {
             core,
             native_titlebar,
+            icon_open: None,
             app_view: if flags.is_none() { AppView::Library } else { AppView::Reader },
             title: "Cosmic Comic".to_string(),
             open_path: None,
@@ -1167,6 +1174,8 @@ impl Application for App {
                 event::Status::Captured => None,
             },
             event::Event::Touch(t) => Some(Message::Touch(t)),
+            // The window icon can only be set once the window exists.
+            event::Event::Window(window::Event::Opened { .. }) => Some(Message::WindowOpened),
             event::Event::Window(window::Event::FileDropped(paths)) => {
                 Some(Message::FilesDropped(paths))
             }
@@ -1176,658 +1185,8 @@ impl Application for App {
 
     #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
-        match message {
-            Message::GoToLibrary => {
-                self.show_chapter_select = false;
-                if self.app_view == AppView::Reader && self.epub_book.is_some() {
-                    self.persist_book_position();
-                }
-                if self.app_view == AppView::Reader && self.back_to_series {
-                    if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
-                        let t = self.refresh_views();
-                        return Task::batch([t, self.open_series_page(key)]);
-                    }
-                }
-                self.app_view = AppView::Library;
-                self.series_page = None;
-                self.set_header_title("Cosmic Comic".into());
-                return self.refresh_views();
-            }
-            Message::OpenSeriesPage(key) => {
-                return self.open_series_page(key);
-            }
-            Message::OpenFile => {
-                return cosmic::task::future(async move {
-                    let filter = comic_file_filter();
-                    let dialog = file_chooser::open::Dialog::new()
-                        .title("Open Comic or Book").filter(filter);
-                    match dialog.open_file().await {
-                        Ok(r) => Message::PathSelected(r.url().to_owned()),
-                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
-                        Err(e) => Message::LoadFailed(e.to_string()),
-                    }
-                });
-            }
-            Message::OpenFolder => {
-                return cosmic::task::future(async move {
-                    let dialog = file_chooser::open::Dialog::new().title("Open Comic Series");
-                    match dialog.open_folder().await {
-                        Ok(r) => Message::PathSelected(r.url().to_owned()),
-                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
-                        Err(e) => Message::LoadFailed(e.to_string()),
-                    }
-                });
-            }
-            Message::PathSelected(url) => {
-                let path = match url.scheme() {
-                    "file" => match url.to_file_path() {
-                        Ok(p) => p,
-                        Err(()) => {
-                            self.error = Some(format!("invalid file path: {url}"));
-                            return Task::none();
-                        }
-                    },
-                    other => {
-                        self.error = Some(format!("unsupported scheme: {other}"));
-                        return Task::none();
-                    }
-                };
-                return self.open_linked(path);
-            }
-            Message::OpenEntry { key, chapter } => {
-                return self.open_entry(key, chapter);
-            }
-            Message::Loaded(path, sources, chapters) => {
-                let key = path.to_string_lossy().to_string();
-                let total = sources.len();
-                let start_chapter = self.start_chapter.take();
-
-                self.loading = false;
-                self.sources = sources;
-                self.chapters = chapters;
-                self.cache.clear();
-                self.pending.clear();
-                self.chapter_covers.clear();
-                self.covers_pending.clear();
-                self.zoom_active = false;
-                self.zoom = 1.0;
-                self.comic_info = None;
-                self.epub_book = None;
-                self.epub_chapter = 0;
-                self.epub_cover = None;
-                self.show_chapter_select = false;
-                self.open_path = Some(path.clone());
-
-                // Register (or refresh) this series and its issues — any
-                // open counts, not just library folders, so one-off files
-                // get tracked and a shelf cover too.
-                let mut tasks = Vec::new();
-                if let Some(db) = &self.db {
-                    let raw_name =
-                        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    let clean = naming::clean_series_name(&raw_name);
-                    let is_series = path.is_dir() || self.chapters.len() > 1;
-                    let _ = library::upsert_series(db, &key, &clean.display, total, is_series);
-                    let _ = library::sync_issues(db, &key, &issue_rows_from_chapters(&self.chapters));
-                    let _ = library::touch_opened(db, &key);
-                    self.reader_entry = library::get_series(db, &key);
-                    self.reader_issues = library::issues_for(db, &key);
-
-                    if !library::chapter_cover_path(&key, 0).exists() {
-                        if let Some(source) = self.sources.first().cloned() {
-                            self.covers_pending.insert(0);
-                            tasks.push(cover_task(0, source, path.clone()));
-                        }
-                    }
-                }
-
-                self.current_page = resume_page(
-                    &self.chapters,
-                    &self.reader_issues,
-                    self.reader_entry.as_ref(),
-                    start_chapter,
-                    total,
-                );
-                self.nav_dir = 1;
-
-                self.title = self
-                    .reader_entry
-                    .as_ref()
-                    .map(|e| e.name().to_string())
-                    .unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-                self.set_header_title(self.title.clone());
-
-                // Embedded ComicInfo.xml of the issue being read.
-                if let Some((_, ch, _)) = self.current_chapter() {
-                    self.comic_info = comic::find_comic_info(&ch.path).map(|xml| comicinfo::parse(&xml));
-                }
-                self.persist_progress();
-
-                if self.reader_entry.as_ref().is_some_and(|e| e.meta_fetched_at == 0) {
-                    tasks.push(self.enqueue_meta(key));
-                }
-                tasks.push(self.refresh_window());
-                if let Some(id) = self.core.main_window_id() {
-                    tasks.push(self.set_window_title(self.title.clone(), id));
-                }
-                return Task::batch(tasks);
-            }
-            Message::EpubLoaded(path, result) => {
-                self.loading = false;
-                match result {
-                    Ok(book) => {
-                        let path_str = path.to_string_lossy().to_string();
-                        self.sources.clear();
-                        self.chapters.clear();
-                        self.cache.clear();
-                        self.pending.clear();
-                        self.chapter_covers.clear();
-                        self.covers_pending.clear();
-                        self.zoom_active = false;
-                        self.zoom = 1.0;
-                        self.comic_info = None;
-                        self.start_chapter = None;
-                        self.show_chapter_select = false;
-                        self.open_path = Some(path.clone());
-                        self.title = book.title.clone();
-                        self.set_header_title(self.title.clone());
-
-                        self.epub_cover = book
-                            .cover
-                            .clone()
-                            .map(widget::image::Handle::from_bytes);
-
-                        let chapter_count = book.chapters.len();
-                        self.epub_images =
-                            book.images.iter().map(|b| widget::image::Handle::from_bytes(b.clone())).collect();
-                        // Resume at the saved chapter *and* scroll position.
-                        let saved = self.db.as_ref().and_then(|db| {
-                            library::issues_for(db, &path_str).into_iter().find(|i| i.path == path_str)
-                        });
-                        let (chapter, position) = match saved {
-                            Some(i) if !i.completed => (i.last_page, i.position),
-                            _ => (
-                                self.db
-                                    .as_ref()
-                                    .and_then(|db| library::get_progress(db, &path_str))
-                                    .map(|(_, ch)| ch)
-                                    .unwrap_or(0),
-                                0.0,
-                            ),
-                        };
-                        self.epub_chapter = chapter.min(chapter_count.saturating_sub(1));
-                        self.book_scroll = BookScroll { rel_y: position, ..BookScroll::default() };
-                        self.book_saved_pos = position;
-                        let cover_bytes = book.cover.clone();
-                        self.epub_book = Some(book);
-
-                        // As with comics: any opened EPUB gets tracked and a
-                        // shelf cover, not just ones under a library folder.
-                        if let Some(db) = &self.db {
-                            let _ = library::upsert_series(db, &path_str, &self.title, chapter_count, false);
-                            let _ = library::sync_issues(
-                                db,
-                                &path_str,
-                                &[IssueRow {
-                                    path: path_str.clone(),
-                                    name: self.title.clone(),
-                                    number: String::new(),
-                                    subtitle: String::new(),
-                                    page_count: Some(chapter_count),
-                                }],
-                            );
-                            let _ = library::touch_opened(db, &path_str);
-                            self.reader_entry = library::get_series(db, &path_str);
-                            self.reader_issues = library::issues_for(db, &path_str);
-
-                            let cover_path = library::chapter_cover_path(&path_str, 0);
-                            if !cover_path.exists() {
-                                if let Some(img) = cover_bytes.and_then(|b| image::load_from_memory(&b).ok()) {
-                                    let _ = scan::save_thumb(&img.to_rgba8(), &cover_path);
-                                }
-                            }
-                        }
-
-                        let title_task = self.core.main_window_id()
-                            .map(|id| self.set_window_title(self.title.clone(), id));
-
-                        let restore = cosmic::iced::widget::scrollable::snap_to(
-                            book_view::book_scroll_id(),
-                            cosmic::iced::widget::scrollable::RelativeOffset { x: None, y: Some(position) },
-                        );
-                        return Task::batch(title_task.into_iter().chain([restore]));
-                    }
-                    Err(e) => self.error = Some(e),
-                }
-            }
-            Message::PageDecoded(index, result) => {
-                self.pending.remove(&index);
-                let is_current = index == self.current_page;
-                if let Ok(page) = result {
-                    let handle = widget::image::Handle::from_rgba(
-                        page.width, page.height, page.rgba.clone(),
-                    );
-                    self.cache.insert(index, (handle, page));
-                }
-                if is_current {
-                    // The freshly-uploaded texture sometimes doesn't paint on
-                    // the very frame it lands in the cache, so force one more
-                    // render pass shortly after.
-                    return cosmic::task::future(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        Message::Redraw
-                    });
-                }
-            }
-            Message::Redraw => {}
-            Message::LoadFailed(why) => {
-                self.loading = false;
-                self.error = Some(why);
-            }
-            Message::Cancelled => { self.loading = false; }
-            Message::MetaNext => {
-                return self.pump_meta();
-            }
-            Message::MetaMatched(key, result) => {
-                self.meta_running = false;
-                self.meta_current = None;
-                let mut used_comicvine = false;
-                if let Some(db) = &self.db {
-                    match result {
-                        Ok(Some(m)) => {
-                            used_comicvine = m.source == "comicvine";
-                            let entry = library::get_series(db, &key);
-                            let forced = entry.as_ref().is_some_and(|e| !e.search_override.is_empty());
-                            let rename = forced || m.score >= metadata::RENAME_SCORE;
-                            let display = rename.then(|| {
-                                naming::with_edition(&m.title, entry.as_ref().map_or("", |e| e.title.as_str()))
-                            });
-                            let _ = library::apply_match(db, &key, &m, display.as_deref());
-                        }
-                        Ok(None) => library::mark_meta(db, &key, "nomatch", true),
-                        Err(e) => {
-                            log::warn!("metadata lookup for {key} failed: {e}");
-                            library::set_meta_error(db, &key, &e);
-                        }
-                    }
-                }
-                let refresh = self.refresh_views();
-                if self.series_page.as_ref().is_some_and(|s| s.path == key) {
-                    if let Some(s) = &self.series_page {
-                        self.set_header_title(s.name().to_string());
-                    }
-                }
-                // Space requests out (ComicVine asks for ~1/s).
-                let delay = if used_comicvine { 1500 } else { 400 };
-                let next = cosmic::task::future(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                    Message::MetaNext
-                });
-                return Task::batch([refresh, next]);
-            }
-            Message::SeriesSearchInput(text) => {
-                self.series_search_input = text;
-            }
-            Message::RematchSeries => {
-                let Some(key) = self.series_page.as_ref().map(|s| s.path.clone()) else { return Task::none() };
-                if let Some(db) = &self.db {
-                    library::set_search_override(db, &key, &self.series_search_input);
-                    library::mark_meta(db, &key, "", false);
-                }
-                self.meta_attempted.remove(&key);
-                // Jump the queue: this is what the user is looking at.
-                self.meta_queue.retain(|k| k != &key);
-                self.meta_queue.push_front(key.clone());
-                self.meta_attempted.insert(key);
-                let t = self.refresh_views();
-                return Task::batch([t, self.pump_meta()]);
-            }
-            Message::ClearSeriesMatch => {
-                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
-                    library::mark_meta(db, &key, "nomatch", true);
-                }
-                let t = self.refresh_views();
-                if let Some(s) = &self.series_page {
-                    self.set_header_title(s.name().to_string());
-                }
-                return t;
-            }
-            Message::RefreshAllMetadata => {
-                if let Some(db) = &self.db {
-                    library::reset_all_metadata(db);
-                }
-                self.meta_attempted.clear();
-                let keys: Vec<String> =
-                    self.library_entries.iter().filter(|e| !e.is_epub).map(|e| e.path.clone()).collect();
-                let tasks: Vec<_> = keys.into_iter().map(|k| self.enqueue_meta(k)).collect();
-                return Task::batch(tasks);
-            }
-            Message::ComicVineKeyInput(text) => {
-                self.cv_key_input = text;
-            }
-            Message::SaveComicVineKey => {
-                if let Err(e) = comicvine::save_api_key(&self.cv_key_input) {
-                    self.error = Some(e);
-                } else {
-                    self.cv_key_input.clear();
-                    // Series that found nothing without a key may match now.
-                    return self.update(Message::RefreshAllMetadata);
-                }
-            }
-            Message::OpenUrl(url) => {
-                crate::platform::open_url(&url);
-            }
-            Message::ToggleIssueRead(id, completed) => {
-                if let Some(db) = &self.db {
-                    let _ = library::set_issue_completed(db, id, completed);
-                }
-                return self.refresh_views();
-            }
-            Message::MarkSeriesRead(completed) => {
-                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
-                    let _ = library::set_series_completed(db, &key, completed);
-                }
-                return self.refresh_views();
-            }
-            Message::ChapterCoverReady { chapter_idx, result } => {
-                self.covers_pending.remove(&chapter_idx);
-                if let Ok((w, h, rgba)) = result {
-                    let handle = widget::image::Handle::from_rgba(w, h, rgba);
-                    self.chapter_covers.insert(chapter_idx, handle);
-                }
-            }
-            Message::AddLibraryFolder => {
-                return cosmic::task::future(async move {
-                    let dialog = file_chooser::open::Dialog::new().title("Add Library Folder");
-                    match dialog.open_folder().await {
-                        Ok(r) => Message::LibraryFolderSelected(r.url().to_owned()),
-                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
-                        Err(e) => Message::LoadFailed(e.to_string()),
-                    }
-                });
-            }
-            Message::LibraryFolderSelected(url) => {
-                let path = match url.scheme() {
-                    "file" => match url.to_file_path() {
-                        Ok(p) => p,
-                        Err(()) => {
-                            self.error = Some(format!("invalid folder path: {url}"));
-                            return Task::none();
-                        }
-                    },
-                    other => {
-                        self.error = Some(format!("unsupported scheme: {other}"));
-                        return Task::none();
-                    }
-                };
-                return self.add_library_folder(path);
-            }
-            Message::LibraryPathInputChanged(text) => {
-                self.library_path_input = text;
-            }
-            Message::LibraryPathInputSubmitted => {
-                let text = self.library_path_input.trim().to_string();
-                if text.is_empty() {
-                    return Task::none();
-                }
-                let path = PathBuf::from(shellexpand_home(&text));
-                if !path.is_dir() {
-                    self.error = Some(format!("not a folder: {}", path.display()));
-                    return Task::none();
-                }
-                self.library_path_input.clear();
-                return self.add_library_folder(path);
-            }
-            Message::RootDiscovered(root, found) => {
-                self.scans_pending = self.scans_pending.saturating_sub(1);
-                let Some(found) = found else {
-                    // Unreachable root (unmounted drive?): hide, never delete.
-                    self.missing_roots.insert(root);
-                    return self.reload_library();
-                };
-                self.missing_roots.remove(&root);
-                let mut tasks = Vec::new();
-                if let Some(db) = &self.db {
-                    let keys: Vec<String> = found.iter().map(|d| d.key.clone()).collect();
-                    let removed = library::prune_root(db, &root.to_string_lossy(), &keys);
-                    if removed > 0 {
-                        log::info!("removed {removed} series no longer under {}", root.display());
-                    }
-                    for d in found {
-                        let known = library::known_page_counts(db, &d.key);
-                        self.scans_pending += 1;
-                        tasks.push(scan_series_task(d, known));
-                    }
-                }
-                tasks.push(self.reload_library());
-                return Task::batch(tasks);
-            }
-            Message::SeriesScanned(result) => {
-                self.scans_pending = self.scans_pending.saturating_sub(1);
-                let mut tasks = Vec::new();
-                match result {
-                    Ok(r) => {
-                        if let Some(db) = &self.db {
-                            let _ = library::upsert_scanned_series(db, &r.series);
-                            let _ = library::sync_issues(db, &r.series.path, &r.issues);
-                            if library::get_series(db, &r.series.path).is_some_and(|e| e.meta_fetched_at == 0) {
-                                tasks.push(self.enqueue_meta(r.series.path.clone()));
-                            }
-                        }
-                    }
-                    Err(e) => log::warn!("scan: {e}"),
-                }
-                // Refresh the grid in batches rather than once per series.
-                if self.scans_pending == 0 || self.scans_pending % 8 == 0 {
-                    tasks.push(self.refresh_views());
-                }
-                return Task::batch(tasks);
-            }
-            Message::IssueCoverReady { key, idx } => {
-                self.series_covers_pending.remove(&idx);
-                if self.series_page.as_ref().is_some_and(|s| s.path == key) {
-                    let cover = library::chapter_cover_path(&key, idx);
-                    if cover.exists() {
-                        self.series_page_covers.insert(idx, widget::image::Handle::from_path(cover));
-                    }
-                }
-                if idx == 0 {
-                    return self.reload_library();
-                }
-            }
-            Message::HideMissing(paths) => {
-                self.hidden_paths.extend(paths);
-            }
-            Message::RescanLibrary => {
-                let dirs = self.library_dirs.clone();
-                let tasks: Vec<_> = dirs.into_iter().map(|d| self.scan_root(d)).collect();
-                return Task::batch(tasks);
-            }
-            Message::RemoveLibraryFolder(path) => {
-                if let Some(db) = &self.db {
-                    let root = path.to_string_lossy();
-                    let _ = library::remove_library_dir(db, &root);
-                    library::remove_series_under_root(db, &root);
-                }
-                self.library_dirs.retain(|d| d != &path);
-                self.missing_roots.remove(&path);
-                return self.reload_library();
-            }
-            Message::ToggleSettings => {
-                let showing_settings =
-                    self.core.window.show_context && self.context_page == ContextPage::Settings;
-                self.context_page = ContextPage::Settings;
-                self.set_show_context(!showing_settings);
-            }
-            Message::CloseContext => {
-                self.set_show_context(false);
-            }
-            Message::SetBackgroundOpacity(value) => {
-                self.settings.background_opacity = value.clamp(0.0, 1.0);
-                self.settings.save();
-            }
-            Message::SetBackground(idx) => {
-                if let Some(bg) = BgStyle::ALL.get(idx).copied() {
-                    self.settings.background = bg;
-                    self.settings.save();
-                }
-            }
-            Message::SetLook(idx) => {
-                if let Some(look) = Look::ALL.get(idx).copied() {
-                    self.settings.look = look;
-                    self.settings.save();
-                    return cosmic::command::set_theme(look::theme(self.look()));
-                }
-            }
-            Message::SetFetchMetadata(enabled) => {
-                self.settings.fetch_metadata = enabled;
-                self.settings.save();
-            }
-            Message::NextPage => {
-                if self.epub_book.is_some() {
-                    return self.update_book(BookMsg::NextChapter);
-                }
-                let step = self.page_step();
-                let new = (self.current_page + step).min(self.sources.len().saturating_sub(1));
-                if new != self.current_page {
-                    self.current_page = new;
-                    self.nav_dir = 1;
-                    self.persist_progress();
-                    return self.refresh_window();
-                }
-            }
-            Message::PrevPage => {
-                if self.epub_book.is_some() {
-                    return self.update_book(BookMsg::PrevChapter);
-                }
-                let step = self.page_step();
-                let new = self.current_page.saturating_sub(step);
-                if new != self.current_page {
-                    self.current_page = new;
-                    self.nav_dir = -1;
-                    self.persist_progress();
-                    return self.refresh_window();
-                }
-            }
-            Message::ToggleFullscreen => {
-                self.fullscreen = !self.fullscreen;
-                let mode = if self.fullscreen { window::Mode::Fullscreen } else { window::Mode::Windowed };
-                if let Some(id) = self.core.main_window_id() {
-                    return window::set_mode(id, mode);
-                }
-            }
-            Message::ToggleTheater => {
-                self.theater_mode = !self.theater_mode;
-                self.settings.theater_mode = self.theater_mode;
-                self.settings.save();
-            }
-            Message::ToggleLayout => {
-                self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
-                self.settings.dual_page = self.layout == Layout::Dual;
-                self.settings.save();
-                if self.layout == Layout::Dual && self.current_page % 2 != 0 {
-                    self.current_page = self.current_page.saturating_sub(1);
-                }
-                return self.refresh_window();
-            }
-            Message::ToggleZoom => {
-                self.zoom_active = !self.zoom_active;
-                self.zoom = 1.0;
-            }
-            Message::ToggleInfo => {
-                let showing_info =
-                    self.core.window.show_context && self.context_page == ContextPage::Info;
-                self.context_page = ContextPage::Info;
-                self.set_show_context(!showing_info);
-                if !showing_info {
-                    self.show_chapter_select = false;
-                }
-            }
-            Message::ToggleChapterSelect => {
-                self.show_chapter_select = !self.show_chapter_select;
-                if self.show_chapter_select {
-
-                    return self.queue_missing_covers();
-                }
-            }
-            Message::SelectChapter(ch_idx) => {
-                if self.epub_book.is_some() {
-                    return self.update_book(BookMsg::GoToChapter(ch_idx));
-                } else if let Some(ch) = self.chapters.get(ch_idx) {
-                    self.current_page = ch.start;
-                    self.nav_dir = 1;
-                    self.show_chapter_select = false;
-                    self.persist_progress();
-                    return self.refresh_window();
-                }
-            }
-            Message::CopyPage => {
-                if let Some(page) = self.page_data(self.current_page) {
-                    return copy_task(page);
-                }
-            }
-            Message::CopiedPage(r) => { if let Err(e) = r { self.error = Some(e); } }
-            Message::CloseError => { self.error = None; }
-            Message::LibrarySearchChanged(q) => {
-                self.library_search = q;
-                return self.reload_library();
-            }
-            Message::Key(key) => {
-                return self.handle_key(key);
-            }
-            Message::ModifiersChanged(m) => {
-                self.modifiers = m;
-            }
-            Message::ZoomBootstrapWheel => {
-                if self.app_view == AppView::Reader
-                    && self.modifiers.control()
-                    && !self.sources.is_empty()
-                {
-                    self.enter_zoom();
-                }
-            }
-            Message::ZoomBootstrap => {
-                if self.app_view == AppView::Reader && !self.sources.is_empty() {
-                    self.enter_zoom();
-                }
-            }
-            Message::ZoomChanged(scale) => {
-                self.zoom = scale.clamp(MIN_ZOOM, MAX_ZOOM);
-            }
-            Message::Touch(event) => self.handle_touch(event),
-            Message::FilesDropped(paths) => {
-                if let Some(path) = paths.into_iter().next() {
-                    return self.open_linked(path);
-                }
-            }
-            Message::DndDataReceived(mime, data) => {
-                if mime.contains("uri-list") {
-                    if let Some(path) = first_path_from_uri_list(&data) {
-                        return self.open_linked(path);
-                    }
-                }
-            }
-            Message::Book(msg) => return self.update_book(msg),
-            Message::FitPage => {
-                let Some(page) = self.page_data(self.current_page) else { return Task::none() };
-                let Some(id) = self.core.main_window_id() else { return Task::none() };
-                if page.height == 0 {
-                    return Task::none();
-                }
-                let aspect = page.width as f32 / page.height as f32;
-                return window::size(id)
-                    .map(move |size| {
-                        Message::FitPageSize(cosmic::iced::Size::new(size.height * aspect, size.height))
-                    })
-                    .map(cosmic::Action::App);
-            }
-            Message::FitPageSize(size) => {
-                if let Some(id) = self.core.main_window_id() {
-                    return window::resize(id, size).map(cosmic::Action::App);
-                }
-            }
-        }
-        Task::none()
+        let task = self.handle_message(message);
+        Task::batch([task, self.sync_window_icon()])
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -2490,4 +1849,679 @@ pub(super) fn error_banner(msg: &str) -> Element<'_, Message> {
     .padding(8)
     .width(Length::Fill)
     .into()
+}
+
+impl App {
+    fn handle_message(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::GoToLibrary => {
+                self.show_chapter_select = false;
+                if self.app_view == AppView::Reader && self.epub_book.is_some() {
+                    self.persist_book_position();
+                }
+                if self.app_view == AppView::Reader && self.back_to_series {
+                    if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
+                        let t = self.refresh_views();
+                        return Task::batch([t, self.open_series_page(key)]);
+                    }
+                }
+                self.app_view = AppView::Library;
+                self.series_page = None;
+                self.set_header_title("Cosmic Comic".into());
+                return self.refresh_views();
+            }
+            Message::OpenSeriesPage(key) => {
+                return self.open_series_page(key);
+            }
+            Message::OpenFile => {
+                return cosmic::task::future(async move {
+                    let filter = comic_file_filter();
+                    let dialog = file_chooser::open::Dialog::new()
+                        .title("Open Comic or Book").filter(filter);
+                    match dialog.open_file().await {
+                        Ok(r) => Message::PathSelected(r.url().to_owned()),
+                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
+                        Err(e) => Message::LoadFailed(e.to_string()),
+                    }
+                });
+            }
+            Message::OpenFolder => {
+                return cosmic::task::future(async move {
+                    let dialog = file_chooser::open::Dialog::new().title("Open Comic Series");
+                    match dialog.open_folder().await {
+                        Ok(r) => Message::PathSelected(r.url().to_owned()),
+                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
+                        Err(e) => Message::LoadFailed(e.to_string()),
+                    }
+                });
+            }
+            Message::PathSelected(url) => {
+                let path = match url.scheme() {
+                    "file" => match url.to_file_path() {
+                        Ok(p) => p,
+                        Err(()) => {
+                            self.error = Some(format!("invalid file path: {url}"));
+                            return Task::none();
+                        }
+                    },
+                    other => {
+                        self.error = Some(format!("unsupported scheme: {other}"));
+                        return Task::none();
+                    }
+                };
+                return self.open_linked(path);
+            }
+            Message::OpenEntry { key, chapter } => {
+                return self.open_entry(key, chapter);
+            }
+            Message::Loaded(path, sources, chapters) => {
+                let key = path.to_string_lossy().to_string();
+                let total = sources.len();
+                let start_chapter = self.start_chapter.take();
+
+                self.loading = false;
+                self.sources = sources;
+                self.chapters = chapters;
+                self.cache.clear();
+                self.pending.clear();
+                self.chapter_covers.clear();
+                self.covers_pending.clear();
+                self.zoom_active = false;
+                self.zoom = 1.0;
+                self.comic_info = None;
+                self.epub_book = None;
+                self.epub_chapter = 0;
+                self.epub_cover = None;
+                self.show_chapter_select = false;
+                self.open_path = Some(path.clone());
+
+                // Register (or refresh) this series and its issues — any
+                // open counts, not just library folders, so one-off files
+                // get tracked and a shelf cover too.
+                let mut tasks = Vec::new();
+                if let Some(db) = &self.db {
+                    let raw_name =
+                        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let clean = naming::clean_series_name(&raw_name);
+                    let is_series = path.is_dir() || self.chapters.len() > 1;
+                    let _ = library::upsert_series(db, &key, &clean.display, total, is_series);
+                    let _ = library::sync_issues(db, &key, &issue_rows_from_chapters(&self.chapters));
+                    let _ = library::touch_opened(db, &key);
+                    self.reader_entry = library::get_series(db, &key);
+                    self.reader_issues = library::issues_for(db, &key);
+
+                    if !library::chapter_cover_path(&key, 0).exists() {
+                        if let Some(source) = self.sources.first().cloned() {
+                            self.covers_pending.insert(0);
+                            tasks.push(cover_task(0, source, path.clone()));
+                        }
+                    }
+                }
+
+                self.current_page = resume_page(
+                    &self.chapters,
+                    &self.reader_issues,
+                    self.reader_entry.as_ref(),
+                    start_chapter,
+                    total,
+                );
+                self.nav_dir = 1;
+
+                self.title = self
+                    .reader_entry
+                    .as_ref()
+                    .map(|e| e.name().to_string())
+                    .unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                self.set_header_title(self.title.clone());
+
+                // Embedded ComicInfo.xml of the issue being read.
+                if let Some((_, ch, _)) = self.current_chapter() {
+                    self.comic_info = comic::find_comic_info(&ch.path).map(|xml| comicinfo::parse(&xml));
+                }
+                self.persist_progress();
+
+                if self.reader_entry.as_ref().is_some_and(|e| e.meta_fetched_at == 0) {
+                    tasks.push(self.enqueue_meta(key));
+                }
+                tasks.push(self.refresh_window());
+                if let Some(id) = self.core.main_window_id() {
+                    tasks.push(self.set_window_title(self.title.clone(), id));
+                }
+                return Task::batch(tasks);
+            }
+            Message::EpubLoaded(path, result) => {
+                self.loading = false;
+                match result {
+                    Ok(book) => {
+                        let path_str = path.to_string_lossy().to_string();
+                        self.sources.clear();
+                        self.chapters.clear();
+                        self.cache.clear();
+                        self.pending.clear();
+                        self.chapter_covers.clear();
+                        self.covers_pending.clear();
+                        self.zoom_active = false;
+                        self.zoom = 1.0;
+                        self.comic_info = None;
+                        self.start_chapter = None;
+                        self.show_chapter_select = false;
+                        self.open_path = Some(path.clone());
+                        self.title = book.title.clone();
+                        self.set_header_title(self.title.clone());
+
+                        self.epub_cover = book
+                            .cover
+                            .clone()
+                            .map(widget::image::Handle::from_bytes);
+
+                        let chapter_count = book.chapters.len();
+                        self.epub_images =
+                            book.images.iter().map(|b| widget::image::Handle::from_bytes(b.clone())).collect();
+                        // Resume at the saved chapter *and* scroll position.
+                        let saved = self.db.as_ref().and_then(|db| {
+                            library::issues_for(db, &path_str).into_iter().find(|i| i.path == path_str)
+                        });
+                        let (chapter, position) = match saved {
+                            Some(i) if !i.completed => (i.last_page, i.position),
+                            _ => (
+                                self.db
+                                    .as_ref()
+                                    .and_then(|db| library::get_progress(db, &path_str))
+                                    .map(|(_, ch)| ch)
+                                    .unwrap_or(0),
+                                0.0,
+                            ),
+                        };
+                        self.epub_chapter = chapter.min(chapter_count.saturating_sub(1));
+                        self.book_scroll = BookScroll { rel_y: position, ..BookScroll::default() };
+                        self.book_saved_pos = position;
+                        let cover_bytes = book.cover.clone();
+                        self.epub_book = Some(book);
+
+                        // As with comics: any opened EPUB gets tracked and a
+                        // shelf cover, not just ones under a library folder.
+                        if let Some(db) = &self.db {
+                            let _ = library::upsert_series(db, &path_str, &self.title, chapter_count, false);
+                            let _ = library::sync_issues(
+                                db,
+                                &path_str,
+                                &[IssueRow {
+                                    path: path_str.clone(),
+                                    name: self.title.clone(),
+                                    number: String::new(),
+                                    subtitle: String::new(),
+                                    page_count: Some(chapter_count),
+                                }],
+                            );
+                            let _ = library::touch_opened(db, &path_str);
+                            self.reader_entry = library::get_series(db, &path_str);
+                            self.reader_issues = library::issues_for(db, &path_str);
+
+                            let cover_path = library::chapter_cover_path(&path_str, 0);
+                            if !cover_path.exists() {
+                                if let Some(img) = cover_bytes.and_then(|b| image::load_from_memory(&b).ok()) {
+                                    let _ = scan::save_thumb(&img.to_rgba8(), &cover_path);
+                                }
+                            }
+                        }
+
+                        let title_task = self.core.main_window_id()
+                            .map(|id| self.set_window_title(self.title.clone(), id));
+
+                        let restore = cosmic::iced::widget::scrollable::snap_to(
+                            book_view::book_scroll_id(),
+                            cosmic::iced::widget::scrollable::RelativeOffset { x: None, y: Some(position) },
+                        );
+                        return Task::batch(title_task.into_iter().chain([restore]));
+                    }
+                    Err(e) => self.error = Some(e),
+                }
+            }
+            Message::PageDecoded(index, result) => {
+                self.pending.remove(&index);
+                let is_current = index == self.current_page;
+                if let Ok(page) = result {
+                    let handle = widget::image::Handle::from_rgba(
+                        page.width, page.height, page.rgba.clone(),
+                    );
+                    self.cache.insert(index, (handle, page));
+                }
+                if is_current {
+                    // The freshly-uploaded texture sometimes doesn't paint on
+                    // the very frame it lands in the cache, so force one more
+                    // render pass shortly after.
+                    return cosmic::task::future(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        Message::Redraw
+                    });
+                }
+            }
+            Message::Redraw => {}
+            Message::LoadFailed(why) => {
+                self.loading = false;
+                self.error = Some(why);
+            }
+            Message::Cancelled => { self.loading = false; }
+            Message::MetaNext => {
+                return self.pump_meta();
+            }
+            Message::MetaMatched(key, result) => {
+                self.meta_running = false;
+                self.meta_current = None;
+                let mut used_comicvine = false;
+                if let Some(db) = &self.db {
+                    match result {
+                        Ok(Some(m)) => {
+                            used_comicvine = m.source == "comicvine";
+                            let entry = library::get_series(db, &key);
+                            let forced = entry.as_ref().is_some_and(|e| !e.search_override.is_empty());
+                            let rename = forced || m.score >= metadata::RENAME_SCORE;
+                            let display = rename.then(|| {
+                                naming::with_edition(&m.title, entry.as_ref().map_or("", |e| e.title.as_str()))
+                            });
+                            let _ = library::apply_match(db, &key, &m, display.as_deref());
+                        }
+                        Ok(None) => library::mark_meta(db, &key, "nomatch", true),
+                        Err(e) => {
+                            log::warn!("metadata lookup for {key} failed: {e}");
+                            library::set_meta_error(db, &key, &e);
+                        }
+                    }
+                }
+                let refresh = self.refresh_views();
+                if self.series_page.as_ref().is_some_and(|s| s.path == key) {
+                    if let Some(s) = &self.series_page {
+                        self.set_header_title(s.name().to_string());
+                    }
+                }
+                // Space requests out (ComicVine asks for ~1/s).
+                let delay = if used_comicvine { 1500 } else { 400 };
+                let next = cosmic::task::future(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    Message::MetaNext
+                });
+                return Task::batch([refresh, next]);
+            }
+            Message::SeriesSearchInput(text) => {
+                self.series_search_input = text;
+            }
+            Message::RematchSeries => {
+                let Some(key) = self.series_page.as_ref().map(|s| s.path.clone()) else { return Task::none() };
+                if let Some(db) = &self.db {
+                    library::set_search_override(db, &key, &self.series_search_input);
+                    library::mark_meta(db, &key, "", false);
+                }
+                self.meta_attempted.remove(&key);
+                // Jump the queue: this is what the user is looking at.
+                self.meta_queue.retain(|k| k != &key);
+                self.meta_queue.push_front(key.clone());
+                self.meta_attempted.insert(key);
+                let t = self.refresh_views();
+                return Task::batch([t, self.pump_meta()]);
+            }
+            Message::ClearSeriesMatch => {
+                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+                    library::mark_meta(db, &key, "nomatch", true);
+                }
+                let t = self.refresh_views();
+                if let Some(s) = &self.series_page {
+                    self.set_header_title(s.name().to_string());
+                }
+                return t;
+            }
+            Message::RefreshAllMetadata => {
+                if let Some(db) = &self.db {
+                    library::reset_all_metadata(db);
+                }
+                self.meta_attempted.clear();
+                let keys: Vec<String> =
+                    self.library_entries.iter().filter(|e| !e.is_epub).map(|e| e.path.clone()).collect();
+                let tasks: Vec<_> = keys.into_iter().map(|k| self.enqueue_meta(k)).collect();
+                return Task::batch(tasks);
+            }
+            Message::ComicVineKeyInput(text) => {
+                self.cv_key_input = text;
+            }
+            Message::SaveComicVineKey => {
+                if let Err(e) = comicvine::save_api_key(&self.cv_key_input) {
+                    self.error = Some(e);
+                } else {
+                    self.cv_key_input.clear();
+                    // Series that found nothing without a key may match now.
+                    return self.update(Message::RefreshAllMetadata);
+                }
+            }
+            Message::OpenUrl(url) => {
+                crate::platform::open_url(&url);
+            }
+            Message::ToggleIssueRead(id, completed) => {
+                if let Some(db) = &self.db {
+                    let _ = library::set_issue_completed(db, id, completed);
+                }
+                return self.refresh_views();
+            }
+            Message::MarkSeriesRead(completed) => {
+                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+                    let _ = library::set_series_completed(db, &key, completed);
+                }
+                return self.refresh_views();
+            }
+            Message::ChapterCoverReady { chapter_idx, result } => {
+                self.covers_pending.remove(&chapter_idx);
+                if let Ok((w, h, rgba)) = result {
+                    let handle = widget::image::Handle::from_rgba(w, h, rgba);
+                    self.chapter_covers.insert(chapter_idx, handle);
+                }
+            }
+            Message::AddLibraryFolder => {
+                return cosmic::task::future(async move {
+                    let dialog = file_chooser::open::Dialog::new().title("Add Library Folder");
+                    match dialog.open_folder().await {
+                        Ok(r) => Message::LibraryFolderSelected(r.url().to_owned()),
+                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
+                        Err(e) => Message::LoadFailed(e.to_string()),
+                    }
+                });
+            }
+            Message::LibraryFolderSelected(url) => {
+                let path = match url.scheme() {
+                    "file" => match url.to_file_path() {
+                        Ok(p) => p,
+                        Err(()) => {
+                            self.error = Some(format!("invalid folder path: {url}"));
+                            return Task::none();
+                        }
+                    },
+                    other => {
+                        self.error = Some(format!("unsupported scheme: {other}"));
+                        return Task::none();
+                    }
+                };
+                return self.add_library_folder(path);
+            }
+            Message::LibraryPathInputChanged(text) => {
+                self.library_path_input = text;
+            }
+            Message::LibraryPathInputSubmitted => {
+                let text = self.library_path_input.trim().to_string();
+                if text.is_empty() {
+                    return Task::none();
+                }
+                let path = PathBuf::from(shellexpand_home(&text));
+                if !path.is_dir() {
+                    self.error = Some(format!("not a folder: {}", path.display()));
+                    return Task::none();
+                }
+                self.library_path_input.clear();
+                return self.add_library_folder(path);
+            }
+            Message::RootDiscovered(root, found) => {
+                self.scans_pending = self.scans_pending.saturating_sub(1);
+                let Some(found) = found else {
+                    // Unreachable root (unmounted drive?): hide, never delete.
+                    self.missing_roots.insert(root);
+                    return self.reload_library();
+                };
+                self.missing_roots.remove(&root);
+                let mut tasks = Vec::new();
+                if let Some(db) = &self.db {
+                    let keys: Vec<String> = found.iter().map(|d| d.key.clone()).collect();
+                    let removed = library::prune_root(db, &root.to_string_lossy(), &keys);
+                    if removed > 0 {
+                        log::info!("removed {removed} series no longer under {}", root.display());
+                    }
+                    for d in found {
+                        let known = library::known_page_counts(db, &d.key);
+                        self.scans_pending += 1;
+                        tasks.push(scan_series_task(d, known));
+                    }
+                }
+                tasks.push(self.reload_library());
+                return Task::batch(tasks);
+            }
+            Message::SeriesScanned(result) => {
+                self.scans_pending = self.scans_pending.saturating_sub(1);
+                let mut tasks = Vec::new();
+                match result {
+                    Ok(r) => {
+                        if let Some(db) = &self.db {
+                            let _ = library::upsert_scanned_series(db, &r.series);
+                            let _ = library::sync_issues(db, &r.series.path, &r.issues);
+                            if library::get_series(db, &r.series.path).is_some_and(|e| e.meta_fetched_at == 0) {
+                                tasks.push(self.enqueue_meta(r.series.path.clone()));
+                            }
+                        }
+                    }
+                    Err(e) => log::warn!("scan: {e}"),
+                }
+                // Refresh the grid in batches rather than once per series.
+                if self.scans_pending == 0 || self.scans_pending % 8 == 0 {
+                    tasks.push(self.refresh_views());
+                }
+                return Task::batch(tasks);
+            }
+            Message::IssueCoverReady { key, idx } => {
+                self.series_covers_pending.remove(&idx);
+                if self.series_page.as_ref().is_some_and(|s| s.path == key) {
+                    let cover = library::chapter_cover_path(&key, idx);
+                    if cover.exists() {
+                        self.series_page_covers.insert(idx, widget::image::Handle::from_path(cover));
+                    }
+                }
+                if idx == 0 {
+                    return self.reload_library();
+                }
+            }
+            Message::HideMissing(paths) => {
+                self.hidden_paths.extend(paths);
+            }
+            Message::RescanLibrary => {
+                let dirs = self.library_dirs.clone();
+                let tasks: Vec<_> = dirs.into_iter().map(|d| self.scan_root(d)).collect();
+                return Task::batch(tasks);
+            }
+            Message::RemoveLibraryFolder(path) => {
+                if let Some(db) = &self.db {
+                    let root = path.to_string_lossy();
+                    let _ = library::remove_library_dir(db, &root);
+                    library::remove_series_under_root(db, &root);
+                }
+                self.library_dirs.retain(|d| d != &path);
+                self.missing_roots.remove(&path);
+                return self.reload_library();
+            }
+            Message::ToggleSettings => {
+                let showing_settings =
+                    self.core.window.show_context && self.context_page == ContextPage::Settings;
+                self.context_page = ContextPage::Settings;
+                self.set_show_context(!showing_settings);
+            }
+            Message::CloseContext => {
+                self.set_show_context(false);
+            }
+            Message::SetBackgroundOpacity(value) => {
+                self.settings.background_opacity = value.clamp(0.0, 1.0);
+                self.settings.save();
+            }
+            Message::SetBackground(idx) => {
+                if let Some(bg) = BgStyle::ALL.get(idx).copied() {
+                    self.settings.background = bg;
+                    self.settings.save();
+                }
+            }
+            Message::WindowOpened => {
+                // `update` re-sends the icon after this.
+                self.icon_open = None;
+            }
+            Message::SetLook(idx) => {
+                if let Some(look) = Look::ALL.get(idx).copied() {
+                    self.settings.look = look;
+                    self.settings.save();
+                    return cosmic::command::set_theme(look::theme(self.look()));
+                }
+            }
+            Message::SetFetchMetadata(enabled) => {
+                self.settings.fetch_metadata = enabled;
+                self.settings.save();
+            }
+            Message::NextPage => {
+                if self.epub_book.is_some() {
+                    return self.update_book(BookMsg::NextChapter);
+                }
+                let step = self.page_step();
+                let new = (self.current_page + step).min(self.sources.len().saturating_sub(1));
+                if new != self.current_page {
+                    self.current_page = new;
+                    self.nav_dir = 1;
+                    self.persist_progress();
+                    return self.refresh_window();
+                }
+            }
+            Message::PrevPage => {
+                if self.epub_book.is_some() {
+                    return self.update_book(BookMsg::PrevChapter);
+                }
+                let step = self.page_step();
+                let new = self.current_page.saturating_sub(step);
+                if new != self.current_page {
+                    self.current_page = new;
+                    self.nav_dir = -1;
+                    self.persist_progress();
+                    return self.refresh_window();
+                }
+            }
+            Message::ToggleFullscreen => {
+                self.fullscreen = !self.fullscreen;
+                let mode = if self.fullscreen { window::Mode::Fullscreen } else { window::Mode::Windowed };
+                if let Some(id) = self.core.main_window_id() {
+                    return window::set_mode(id, mode);
+                }
+            }
+            Message::ToggleTheater => {
+                self.theater_mode = !self.theater_mode;
+                self.settings.theater_mode = self.theater_mode;
+                self.settings.save();
+            }
+            Message::ToggleLayout => {
+                self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
+                self.settings.dual_page = self.layout == Layout::Dual;
+                self.settings.save();
+                if self.layout == Layout::Dual && self.current_page % 2 != 0 {
+                    self.current_page = self.current_page.saturating_sub(1);
+                }
+                return self.refresh_window();
+            }
+            Message::ToggleZoom => {
+                self.zoom_active = !self.zoom_active;
+                self.zoom = 1.0;
+            }
+            Message::ToggleInfo => {
+                let showing_info =
+                    self.core.window.show_context && self.context_page == ContextPage::Info;
+                self.context_page = ContextPage::Info;
+                self.set_show_context(!showing_info);
+                if !showing_info {
+                    self.show_chapter_select = false;
+                }
+            }
+            Message::ToggleChapterSelect => {
+                self.show_chapter_select = !self.show_chapter_select;
+                if self.show_chapter_select {
+
+                    return self.queue_missing_covers();
+                }
+            }
+            Message::SelectChapter(ch_idx) => {
+                if self.epub_book.is_some() {
+                    return self.update_book(BookMsg::GoToChapter(ch_idx));
+                } else if let Some(ch) = self.chapters.get(ch_idx) {
+                    self.current_page = ch.start;
+                    self.nav_dir = 1;
+                    self.show_chapter_select = false;
+                    self.persist_progress();
+                    return self.refresh_window();
+                }
+            }
+            Message::CopyPage => {
+                if let Some(page) = self.page_data(self.current_page) {
+                    return copy_task(page);
+                }
+            }
+            Message::CopiedPage(r) => { if let Err(e) = r { self.error = Some(e); } }
+            Message::CloseError => { self.error = None; }
+            Message::LibrarySearchChanged(q) => {
+                self.library_search = q;
+                return self.reload_library();
+            }
+            Message::Key(key) => {
+                return self.handle_key(key);
+            }
+            Message::ModifiersChanged(m) => {
+                self.modifiers = m;
+            }
+            Message::ZoomBootstrapWheel => {
+                if self.app_view == AppView::Reader
+                    && self.modifiers.control()
+                    && !self.sources.is_empty()
+                {
+                    self.enter_zoom();
+                }
+            }
+            Message::ZoomBootstrap => {
+                if self.app_view == AppView::Reader && !self.sources.is_empty() {
+                    self.enter_zoom();
+                }
+            }
+            Message::ZoomChanged(scale) => {
+                self.zoom = scale.clamp(MIN_ZOOM, MAX_ZOOM);
+            }
+            Message::Touch(event) => self.handle_touch(event),
+            Message::FilesDropped(paths) => {
+                if let Some(path) = paths.into_iter().next() {
+                    return self.open_linked(path);
+                }
+            }
+            Message::DndDataReceived(mime, data) => {
+                if mime.contains("uri-list") {
+                    if let Some(path) = first_path_from_uri_list(&data) {
+                        return self.open_linked(path);
+                    }
+                }
+            }
+            Message::Book(msg) => return self.update_book(msg),
+            Message::FitPage => {
+                let Some(page) = self.page_data(self.current_page) else { return Task::none() };
+                let Some(id) = self.core.main_window_id() else { return Task::none() };
+                if page.height == 0 {
+                    return Task::none();
+                }
+                let aspect = page.width as f32 / page.height as f32;
+                return window::size(id)
+                    .map(move |size| {
+                        Message::FitPageSize(cosmic::iced::Size::new(size.height * aspect, size.height))
+                    })
+                    .map(cosmic::Action::App);
+            }
+            Message::FitPageSize(size) => {
+                if let Some(id) = self.core.main_window_id() {
+                    return window::resize(id, size).map(cosmic::Action::App);
+                }
+            }
+        }
+        Task::none()
+    }
+
+    /// Shows an open book as the window icon while reading, a closed one
+    /// otherwise. Only sends anything when that changes.
+    fn sync_window_icon(&mut self) -> Task<Message> {
+        let open = self.app_view == AppView::Reader;
+        if self.icon_open == Some(open) {
+            return Task::none();
+        }
+        let (Some(id), Some(icon)) = (self.core.main_window_id(), window_icon::load(open)) else {
+            return Task::none();
+        };
+        self.icon_open = Some(open);
+        window::set_icon(id, icon)
+    }
 }

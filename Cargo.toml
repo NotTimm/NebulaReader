@@ -60,6 +60,10 @@ ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d5c937c8a9707487c084465717ab21876187a4d5", default-features = false, features = ["rfd"] }
 
+[target.'cfg(windows)'.build-dependencies]
+# Embeds the icon and version info in the .exe (see build.rs).
+winresource = "0.1"
+
 [target.'cfg(windows)'.dependencies]
 # Dark mode and accent colour for the Windows 11 look.
 windows-registry = "0.6"
