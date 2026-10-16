@@ -8,9 +8,10 @@
   `Co-Authored-By` trailer.
 - Commit small, logical steps with descriptive messages and push often, so
   work can be picked up locally at any time.
-- The owner wants finished, validated work merged into `master` without
-  waiting to be asked: once a change builds and passes `cargo test`, merge
-  it (fast-forward or a merge commit; no squash, the history is the log).
+- Push to `master` regularly, not just at the end: the owner follows
+  progress from the repo page. Each commit that builds and passes
+  `cargo test` goes to `master` right away (fast-forward or a merge commit;
+  never squash, the history is the log). Keep the session branch in sync.
 - Claude sessions' GitHub tokens may lack the `workflow` scope, so changes
   under `.github/workflows/` can be refused on push or merge. When that
   happens, park the new file under `packaging/pending/`, push that, and ask
