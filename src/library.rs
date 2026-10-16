@@ -296,7 +296,7 @@ pub fn open_db() -> Result<Connection, String> {
 
 /// Current expected schema version. Bump this and add a matching arm in
 /// [`run_migrations`] whenever the schema changes.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Brings an existing database up to [`SCHEMA_VERSION`] without touching
 /// user data. Uses SQLite's `user_version` pragma as the version marker, so
@@ -365,6 +365,29 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
     // v3 -> v4: scroll position inside a book chapter.
     if current < 4 {
         let _ = conn.execute("ALTER TABLE issues ADD COLUMN position REAL NOT NULL DEFAULT 0", []);
+    }
+
+    // v4 -> v5: single chapter files were titled with their raw name
+    // ("Ch 0 Vol none Oneshot Binktopia scan …"); name them after their
+    // folder now, as new scans do. Titles stick once set, so fix them here.
+    if current < 5 {
+        let roots: Vec<String> = conn
+            .prepare("SELECT path FROM library_dirs")
+            .and_then(|mut st| st.query_map([], |r| r.get(0)).map(|it| it.flatten().collect()))
+            .unwrap_or_default();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT path, title FROM series WHERE kind = 'file'")
+            .and_then(|mut st| st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.flatten().collect()))
+            .unwrap_or_default();
+        for (path, title) in rows {
+            if !crate::naming::starts_with_chapter(&title) {
+                continue;
+            }
+            let fixed = crate::naming::title_for_file(std::path::Path::new(&path), |p| {
+                roots.iter().any(|r| std::path::Path::new(r) == p)
+            });
+            let _ = conn.execute("UPDATE series SET title = ?2 WHERE path = ?1", params![path, fixed]);
+        }
     }
 
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))

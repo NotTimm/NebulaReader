@@ -45,16 +45,34 @@ fn strip_ext(raw: &str) -> &str {
     raw
 }
 
-/// ULID (26 uppercase base32) or UUID tokens that manga-tui etc. append.
+/// ULID or UUID tokens (whole or cut short) that manga-tui etc. append.
 fn is_id_token(s: &str) -> bool {
-    if s.len() == 26 && s.chars().all(|c| c.is_ascii_digit() || c.is_ascii_uppercase()) {
-        return s.chars().any(|c| c.is_ascii_digit());
+    let has_digit = s.chars().any(|c| c.is_ascii_digit());
+    // ULID: uppercase base32, 26 chars (10+ when a name was truncated).
+    if s.len() >= 10 && has_digit && s.chars().all(|c| c.is_ascii_digit() || c.is_ascii_uppercase()) {
+        return true;
     }
-    if s.len() == 36 {
-        let parts: Vec<&str> = s.split('-').collect();
-        return parts.len() == 5 && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_hexdigit()));
+    // UUID, or a long hex run from one.
+    let hex_parts: Vec<&str> = s.split('-').collect();
+    if hex_parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_hexdigit())) {
+        let hex_len: usize = hex_parts.iter().map(|p| p.len()).sum();
+        return (hex_parts.len() == 5 && hex_len == 32) || (hex_len >= 8 && has_digit);
     }
     false
+}
+
+/// Drops a scanlation group from the end of a chapter title. Groups are only
+/// recognisable by a telltale last word ("TCB Scans", "Binktopia scan",
+/// "Weeb Central"), which goes along with the word naming the group.
+fn strip_scan_group(title: &str) -> String {
+    const GROUP_WORDS: [&str; 10] =
+        ["scan", "scans", "scanlation", "scanlations", "translations", "tl", "central", "team", "subs", "fansub"];
+    let words: Vec<&str> = title.split_whitespace().collect();
+    match words.iter().rposition(|w| GROUP_WORDS.contains(&w.to_ascii_lowercase().as_str())) {
+        // "<group> scan" — drop both; whatever came before is the title.
+        Some(i) => words[..i.saturating_sub(1)].join(" "),
+        None => words.join(" "),
+    }
 }
 
 /// Splits out `(...)`/`[...]`/`{...}` groups, returning the remaining text
@@ -264,8 +282,7 @@ pub fn parse_issue(raw: &str) -> IssueName {
         // scanlation group, which can't be told apart reliably).
         static VOLP: OnceLock<Regex> = OnceLock::new();
         let tail = re(&VOLP, r"(?i)^\s*vol(?:ume)?\.?\s*(?:\d+|none)\b").replace(c[2].trim(), "");
-        let tail = tail.replace("Weeb central", "").replace("Weeb Central", "");
-        let subtitle = subtitle_after(&tail);
+        let subtitle = subtitle_after(&strip_scan_group(&tail));
         return IssueName { number: Some(normalize_number(&c[1])), subtitle };
     }
 
@@ -291,6 +308,65 @@ pub fn parse_issue(raw: &str) -> IssueName {
     // 4. A lone number in a group: "Annual (2)" is rare; ignore groups otherwise.
     let _ = groups;
     IssueName::default()
+}
+
+/// Folders that only wrap a series' chapters (manga-tui puts them in
+/// `Series/English/`), so a file's title should come from the folder above.
+fn is_wrapper_dir(name: &str) -> bool {
+    const WRAPPERS: [&str; 12] = [
+        "english", "en", "eng", "japanese", "jp", "ja", "raw", "raws", "chapters", "volumes", "manga", "comics",
+    ];
+    WRAPPERS.contains(&name.trim().to_ascii_lowercase().as_str())
+}
+
+/// The title for a single comic file, as a library entry or when opened on
+/// its own. Usually the cleaned file name; but a bare chapter file
+/// ("Ch 0 Vol none Oneshot Binktopia scan <uuid>.cbz") says nothing about
+/// its series, so its folder names it instead (skipping wrappers like
+/// `English`, and never a library root, which `is_root` identifies). With
+/// no usable folder it's "Chapter 0 · Oneshot".
+pub fn title_for_file(path: &std::path::Path, is_root: impl Fn(&std::path::Path) -> bool) -> String {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let issue = parse_issue(&name);
+    let series = series_name_from_issue(&name).display;
+    let chapter_only = issue.number.is_some() && (series.is_empty() || starts_with_chapter(&name));
+    if !chapter_only {
+        let clean = clean_series_name(&name).display;
+        return if clean.is_empty() { strip_ext(&name).to_string() } else { clean };
+    }
+    let mut dir = path.parent();
+    while let Some(d) = dir {
+        if is_root(d) {
+            break;
+        }
+        let dname = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if dname.is_empty() {
+            break;
+        }
+        if !is_wrapper_dir(&dname) {
+            let clean = clean_series_name(&dname).display;
+            if !clean.is_empty() {
+                return clean;
+            }
+        }
+        dir = d.parent();
+    }
+    chapter_title(&issue)
+}
+
+/// "Chapter 0 · Oneshot", or just "Chapter 12".
+pub fn chapter_title(issue: &IssueName) -> String {
+    let number = issue.number.as_deref().unwrap_or("?");
+    match &issue.subtitle {
+        Some(sub) => format!("Chapter {number} · {sub}"),
+        None => format!("Chapter {number}"),
+    }
+}
+
+/// Whether a file name leads with a chapter marker ("Ch 3 …", "Chapter 3 …").
+pub fn starts_with_chapter(name: &str) -> bool {
+    static START: OnceLock<Regex> = OnceLock::new();
+    re(&START, r"(?i)^\s*(?:ch(?:apter)?|chap)\.?\s*\d").is_match(name)
 }
 
 /// Removes the issue number (and anything after it) from a loose issue's
@@ -413,6 +489,40 @@ mod tests {
         assert_eq!(i.subtitle.as_deref(), Some("Dog And Chainsaw Phantom troop"));
         let i = parse_issue("Chapter 12.5 - Extra.cbz");
         assert_eq!(i.number.as_deref(), Some("12.5"));
+    }
+
+    #[test]
+    fn strips_scanlation_groups_and_ids() {
+        let i = parse_issue("Ch 0 Vol none Oneshot Binktopia scan f913c7e9-7c50-4a9f-83dd-cf2830f8350f.cbz");
+        assert_eq!(i.number.as_deref(), Some("0"));
+        assert_eq!(i.subtitle.as_deref(), Some("Oneshot"));
+        let i = parse_issue("Ch 1 Vol none  Weeb central 01J76XZ34EPTCA4QJ8Y0Z1K2M3.cbz");
+        assert_eq!(i.subtitle, None);
+        // Names cut short (e.g. by a file manager) leave a partial ULID.
+        let i = parse_issue("Ch 97 Vol 11 Weeb central 01J76XZ34EPTCA.cbz");
+        assert_eq!(i.subtitle, None);
+        let i = parse_issue("Ch 12.5 Vol none Extra TCB Scans.cbz");
+        assert_eq!(i.subtitle.as_deref(), Some("Extra"));
+        // Ordinary words that happen to be short hex stay put.
+        let i = parse_issue("Ch 4 Vol 1 Face The Bad Dead.cbz");
+        assert_eq!(i.subtitle.as_deref(), Some("Face The Bad Dead"));
+    }
+
+    #[test]
+    fn titles_for_bare_chapter_files() {
+        use std::path::Path;
+        let roots = [Path::new("/lib/Manga")];
+        let is_root = |p: &Path| roots.contains(&p);
+        let oneshot = "Ch 0 Vol none Oneshot Binktopia scan f913c7e9-7c50-4a9f-83dd-cf2830f8350f.cbz";
+        // manga-tui layout: Series/English/<chapter>
+        let p = format!("/lib/Manga/Death Note/English/{oneshot}");
+        assert_eq!(title_for_file(Path::new(&p), is_root), "Death Note");
+        // Directly in the library root: no folder to borrow from.
+        let p = format!("/lib/Manga/{oneshot}");
+        assert_eq!(title_for_file(Path::new(&p), is_root), "Chapter 0 · Oneshot");
+        // Normal loose issues keep their own (cleaned) name.
+        let p = "/lib/Manga/Civil War 001 (2006) (Digital).cbr";
+        assert_eq!(title_for_file(Path::new(p), is_root), "Civil War 001");
     }
 
     #[test]

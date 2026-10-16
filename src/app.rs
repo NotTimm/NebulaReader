@@ -1942,9 +1942,16 @@ impl App {
                 if let Some(db) = &self.db {
                     let raw_name =
                         path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    let clean = naming::clean_series_name(&raw_name);
+                    let title = if path.is_dir() {
+                        naming::clean_series_name(&raw_name).display
+                    } else {
+                        // Opened from a file manager: a bare chapter file is
+                        // named after its folder, not "Ch 0 Vol none …".
+                        let roots = &self.library_dirs;
+                        naming::title_for_file(&path, |p| roots.iter().any(|r| r == p))
+                    };
                     let is_series = path.is_dir() || self.chapters.len() > 1;
-                    let _ = library::upsert_series(db, &key, &clean.display, total, is_series);
+                    let _ = library::upsert_series(db, &key, &title, total, is_series);
                     let _ = library::sync_issues(db, &key, &issue_rows_from_chapters(&self.chapters));
                     let _ = library::touch_opened(db, &key);
                     self.reader_entry = library::get_series(db, &key);

@@ -332,11 +332,24 @@ fn find_sources(root: &Path, sources: &mut Vec<(String, Source)>) {
 }
 
 /// Strip file extension from a chapter filename to get a display name.
+/// A chapter's name for the chapter picker and details panel. Manga-style
+/// chapter files ("Ch 3 Vol none Weeb central 01J7….cbz") become "Ch. 3",
+/// plus the chapter title when there is one; anything else keeps its name.
 fn display_name(raw: &str) -> String {
-    std::path::Path::new(raw)
+    let stem = std::path::Path::new(raw)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| raw.to_string())
+        .unwrap_or_else(|| raw.to_string());
+    if crate::naming::starts_with_chapter(raw) {
+        let issue = crate::naming::parse_issue(raw);
+        if let Some(number) = issue.number {
+            return match issue.subtitle {
+                Some(sub) => format!("Ch. {number} · {sub}"),
+                None => format!("Ch. {number}"),
+            };
+        }
+    }
+    stem
 }
 
 /// Lists pages without decoding any.  Returns pages and chapter metadata.
@@ -345,10 +358,7 @@ pub fn collect_sources(path: &Path) -> Result<(Vec<PageSource>, Vec<ChapterInfo>
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let is_zip = is_zip_name(&name);
 
-        let ch_name = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| name.to_string());
+        let ch_name = display_name(&name);
 
         let archive = path.to_path_buf();
         let pages: Vec<PageSource> = if is_zip {

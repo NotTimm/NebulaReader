@@ -127,7 +127,13 @@ fn discover_in(dir: &Path, root: &str, depth: u32, out: &mut Vec<Discovered>) {
     for p in loose {
         let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let has_number = naming::parse_issue(&name).number.is_some();
-        let clean = naming::series_name_from_issue(&name);
+        let mut clean = naming::series_name_from_issue(&name);
+        if clean.display.is_empty() {
+            // Bare chapter files ("Ch 3 Vol none ….cbz") name no series:
+            // use their folder, so a folder of them still groups as one.
+            clean.display = naming::title_for_file(&p, |d| d == Path::new(root));
+            clean.search = clean.display.clone();
+        }
         let key = if has_number { naming::normalize_title(&clean.search) } else { name.clone() };
         groups.entry(key).or_insert_with(|| (clean.display.clone(), Vec::new())).1.push(p);
     }
@@ -297,6 +303,18 @@ pub fn scan_series(d: &Discovered, known: HashMap<String, usize>) -> Result<Scan
     let issues = issue_rows(&paths, &known, true);
 
     let mut clean = naming::clean_series_name(&d.raw_name);
+    if d.kind == SeriesKind::File {
+        // A lone chapter file takes its series' name from its folder.
+        let title = naming::title_for_file(Path::new(&d.key), |p| p == Path::new(&d.root));
+        if title != clean.display {
+            clean.search = if naming::starts_with_chapter(&d.raw_name) && title.starts_with("Chapter ") {
+                String::new()
+            } else {
+                title.clone()
+            };
+            clean.display = title;
+        }
+    }
 
     // Embedded ComicInfo.xml beats any name guessing. Only checked for new
     // series — it's an extra archive read (a full header pass for RAR).
@@ -371,8 +389,9 @@ mod tests {
         for d in discover(Path::new(&root)) {
             let paths = issue_paths(&d);
             let rows = issue_rows(&paths, &HashMap::new(), false);
-            let clean = naming::clean_series_name(&d.raw_name);
-            println!("{:?} {:?}  ->  {:?} (year {:?}, vol {:?}) [{} issues]", d.kind, d.raw_name, clean.display, clean.year, clean.volume, rows.len());
+            // The title a real scan would store (folder fallback etc.).
+            let title = scan_series(&d, HashMap::new()).map(|r| r.series.title).unwrap_or_else(|e| e);
+            println!("{:?} {:?}  ->  {:?} [{} issues]", d.kind, d.raw_name, title, rows.len());
             for r in rows.iter().take(4) {
                 println!("      #{:<5} {:?}  sub={:?}", r.number, r.name, r.subtitle);
             }
