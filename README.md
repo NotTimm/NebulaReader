@@ -89,7 +89,7 @@ Prebuilt packages are attached to each
 
 | Package | For | Install |
 |---------|-----|---------|
-| `NebulaReader-<version>-windows-x64-setup.exe` | Windows 10/11 | Run it; installs for your user only, no admin needed. Or `winget install NotTimm.CosmicComic` |
+| `NebulaReader-<version>-windows-x64-setup.exe` | Windows 10/11 | Run it; installs for your user only, no admin needed. Or `winget install NotTimm.NebulaReader` |
 | `NebulaReader-<version>-windows-x64.zip` | Windows 10/11 | Portable: unzip anywhere and run `nebula-reader.exe` |
 | `nebula-reader_<version>_amd64.deb` | Ubuntu/Pop!_OS 24.04+ | `sudo apt install ./nebula-reader_*_amd64.deb` |
 | `nebula-reader-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./nebula-reader-*.x86_64.rpm` |
@@ -181,7 +181,7 @@ fixed list that's only suitable for local testing.
 
 ### winget
 
-The Windows installer is published to winget as `NotTimm.CosmicComic`.
+The Windows installer is published to winget as `NotTimm.NebulaReader`.
 Once the first version is in
 [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), the
 `winget` job in `release.yml` submits each new release automatically. It

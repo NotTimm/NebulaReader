@@ -360,7 +360,7 @@ jobs:
       - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
         if: env.WINGET_TOKEN != ''
         with:
-          identifier: NotTimm.CosmicComic
+          identifier: NotTimm.NebulaReader
           release-tag: v${{ needs.version.outputs.version }}
           installers-regex: '-setup\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}
