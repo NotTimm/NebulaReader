@@ -40,6 +40,8 @@ pub struct Page {
 pub enum PageSource {
     File(PathBuf),
     Zip { archive: PathBuf, entry: String },
+    /// A page of an archive on a server, fetched with an HTTP range request.
+    Remote { archive: std::sync::Arc<crate::remote_zip::RemoteZip>, index: usize },
 }
 
 /// The page range one chapter occupies in the flat [`PageSource`] list.
@@ -53,7 +55,7 @@ pub struct ChapterInfo {
     pub page_count: usize,
 }
 
-fn is_image_name(name: &str) -> bool {
+pub(crate) fn is_image_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]
         .iter()
@@ -70,7 +72,7 @@ fn is_rar_name(name: &str) -> bool {
     lower.ends_with(".cbr") || lower.ends_with(".rar")
 }
 
-fn natural_key(name: &str) -> Vec<(String, u64)> {
+pub(crate) fn natural_key(name: &str) -> Vec<(String, u64)> {
     let mut key = Vec::new();
     let mut chars = name.chars().peekable();
     while chars.peek().is_some() {
@@ -264,6 +266,10 @@ pub fn decode_source(source: &PageSource) -> Result<Page, String> {
             decode_image(&path.to_string_lossy(), &data)
         }
         PageSource::Zip { archive, entry } => decode_zip_entry(archive, entry),
+        PageSource::Remote { archive, index } => {
+            let name = archive.entries.get(*index).map(|e| e.name.clone()).unwrap_or_default();
+            decode_image(&name, &archive.read(*index)?)
+        }
     }
 }
 
