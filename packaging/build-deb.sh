@@ -66,6 +66,8 @@ else
     DEPS="$FALLBACK_DEPS"
 fi
 echo "==> Depends: $DEPS"
+# winit dlopen()s libxkbcommon-x11 for X11 sessions, so dpkg-shlibdeps
+# can't see it; it's listed as Recommends in the control file below.
 
 INSTALLED_SIZE="$(du -sk --apparent-size "$STAGE" | cut -f1)"
 
@@ -78,6 +80,7 @@ Priority: optional
 Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE
 Depends: $DEPS
+Recommends: libxkbcommon-x11-0
 Maintainer: Tim Singel <gamer.tdogtim@gmail.com>
 Homepage: https://github.com/NotTimm/cosmic-reader
 Description: Comic book and ebook reader for the COSMIC desktop

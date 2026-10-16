@@ -9,6 +9,10 @@ Cargo.lock.bak
 /scratch/
 /tmp/
 dist/
+.flatpak-builder/
+
+# Generated from Cargo.lock by packaging/gen-cargo-sources.sh
+packaging/cargo-sources.json
 
 # Agent worktrees
 .claude/worktrees/

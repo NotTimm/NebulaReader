@@ -1,0 +1,70 @@
+# Builds a portable Windows .zip: cosmic-comic.exe plus the libarchive DLLs
+# it needs. Unzip anywhere and run; no installer or admin rights needed.
+#
+# Needs Rust (MSVC toolchain) and vcpkg with libarchive:
+#   vcpkg install "libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows"
+# and VCPKG_ROOT pointing at the vcpkg checkout.
+$ErrorActionPreference = 'Stop'
+
+$Repo = Resolve-Path (Join-Path $PSScriptRoot '..')
+$Dist = Join-Path $Repo 'dist'
+
+if (-not $env:VCPKG_ROOT) {
+    throw 'VCPKG_ROOT is not set (point it at your vcpkg checkout).'
+}
+$VcpkgBin = Join-Path $env:VCPKG_ROOT 'installed\x64-windows\bin'
+if (-not (Test-Path (Join-Path $VcpkgBin 'archive.dll'))) {
+    throw "libarchive not found in $VcpkgBin. Run: vcpkg install `"libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows`""
+}
+
+# Version comes from Cargo.toml's [package] table, like the Linux scripts.
+$Version = $null
+$InPackage = $false
+foreach ($line in Get-Content (Join-Path $Repo 'Cargo.toml')) {
+    if ($line -match '^\[') { $InPackage = ($line -eq '[package]'); continue }
+    if ($InPackage -and $line -match '^version\s*=\s*"([^"]+)"') { $Version = $Matches[1]; break }
+}
+if (-not $Version) { throw 'could not read version from Cargo.toml' }
+
+# Link libarchive dynamically; its DLLs ship next to the exe.
+$env:VCPKGRS_DYNAMIC = '1'
+Write-Host '==> Building release binary'
+Push-Location $Repo
+try {
+    $flags = @('build', '--release')
+    if ($env:CARGO_BUILD_FLAGS) { $flags += $env:CARGO_BUILD_FLAGS.Split(' ') }
+    cargo @flags
+    if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+} finally {
+    Pop-Location
+}
+
+$TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $Repo 'target' }
+$Exe = Join-Path $TargetDir 'release\cosmic-comic.exe'
+
+$Name = "CosmicComic-$Version-windows-x64"
+$Stage = Join-Path ([System.IO.Path]::GetTempPath()) $Name
+if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
+New-Item -ItemType Directory -Path $Stage | Out-Null
+
+Copy-Item $Exe $Stage
+Copy-Item (Join-Path $VcpkgBin '*.dll') $Stage
+Copy-Item (Join-Path $Repo 'LICENSE') (Join-Path $Stage 'LICENSE.txt')
+@"
+Cosmic Comic $Version for Windows (portable)
+
+Run cosmic-comic.exe. Keep the .dll files next to it.
+
+Your library and settings are stored in %APPDATA%\CosmicComic and the
+cache in %LOCALAPPDATA%\CosmicComic\Cache, so you can replace this folder
+with a newer version without losing anything.
+
+https://github.com/NotTimm/cosmic-reader
+"@ | Set-Content -Encoding utf8 (Join-Path $Stage 'README.txt')
+
+New-Item -ItemType Directory -Force -Path $Dist | Out-Null
+$Zip = Join-Path $Dist "$Name.zip"
+if (Test-Path $Zip) { Remove-Item $Zip }
+Compress-Archive -Path $Stage -DestinationPath $Zip
+Remove-Item -Recurse -Force $Stage
+Write-Host "==> $Zip"

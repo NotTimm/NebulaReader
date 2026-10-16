@@ -13,9 +13,16 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "==> Ensuring runtimes are installed"
 flatpak install --user --noninteractive --or-update flathub \
-    org.freedesktop.Platform//24.08 \
-    org.freedesktop.Sdk//24.08 \
-    org.freedesktop.Sdk.Extension.rust-stable//24.08
+    org.freedesktop.Platform//25.08 \
+    org.freedesktop.Sdk//25.08 \
+    org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+# The build is offline; crate sources come from cargo-sources.json.
+SOURCES="$(dirname "$MANIFEST")/cargo-sources.json"
+if [ ! -f "$SOURCES" ] || [ "$REPO_DIR/Cargo.lock" -nt "$SOURCES" ]; then
+    echo "==> Generating cargo-sources.json"
+    bash "$(dirname "${BASH_SOURCE[0]}")/gen-cargo-sources.sh"
+fi
 
 echo "==> Building"
 flatpak-builder --force-clean --user \

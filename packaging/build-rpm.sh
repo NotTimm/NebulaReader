@@ -35,6 +35,8 @@ Release:        1%{?dist}
 Summary:        Comic book and ebook reader for the COSMIC desktop
 License:        GPL-3.0-only
 URL:            https://github.com/NotTimm/cosmic-reader
+# dlopen()ed by winit on X11 sessions, so the automatic requires miss it.
+Recommends:     libxkbcommon-x11
 
 %description
 A native COSMIC desktop reader for comic book archives (.cbz/.cbr),

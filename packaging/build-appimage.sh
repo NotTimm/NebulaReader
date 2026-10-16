@@ -24,7 +24,7 @@ fi
 build_release
 
 APPDIR="$WORK/AppDir"
-install -Dm0755 "$REPO_DIR/target/release/$APP_NAME" "$APPDIR/usr/bin/$APP_NAME"
+install -Dm0755 "$BIN_PATH" "$APPDIR/usr/bin/$APP_NAME"
 install -Dm0644 "$REPO_DIR/res/$APP_ID.desktop" "$APPDIR/usr/share/applications/$APP_ID.desktop"
 install -Dm0644 "$REPO_DIR/res/$APP_ID.metainfo.xml" \
     "$APPDIR/usr/share/metainfo/$APP_ID.metainfo.xml"
@@ -58,5 +58,6 @@ chmod +x "$APPDIR/AppRun"
 
 mkdir -p "$DIST_DIR"
 OUT="$DIST_DIR/CosmicComic-$VERSION-$ARCH.AppImage"
-ARCH="$ARCH" "$TOOL" --no-appstream "$APPDIR" "$OUT"
+# APPIMAGE_EXTRACT_AND_RUN lets appimagetool run without FUSE (CI, containers).
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream "$APPDIR" "$OUT"
 echo "==> $OUT"

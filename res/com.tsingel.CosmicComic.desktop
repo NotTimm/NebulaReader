@@ -9,5 +9,5 @@ StartupNotify=true
 StartupWMClass=com.tsingel.CosmicComic
 MimeType=application/x-cbz;application/vnd.comicbook+zip;application/x-cbr;application/vnd.comicbook-rar;application/epub+zip;
 Icon=com.tsingel.CosmicComic
-Categories=COSMIC;Graphics;Viewer;
+Categories=Graphics;Viewer;X-COSMIC;
 Keywords=Comic;Comics;Manga;CBZ;CBR;EPUB;Ebook;Book;Reader;Library;ComicVine;AniList;
