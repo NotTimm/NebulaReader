@@ -1,5 +1,5 @@
 # Builds every package: .deb (Ubuntu 24.04), .rpm (Fedora), AppImage,
-# .flatpak bundle, and a portable Windows .zip.
+# .flatpak bundle, and for Windows a portable .zip and a setup .exe.
 #
 # - Pull requests / manual runs: build them all and upload them as workflow
 #   artifacts (downloadable from the run's summary page).
@@ -8,6 +8,10 @@
 #   attach every package. The version comes from Cargo.toml; a pushed tag
 #   must match it, and a manual publish creates that tag on the commit it
 #   ran on.
+# - After a publish, the `winget` job opens a PR updating the package in
+#   microsoft/winget-pkgs. It does nothing until the WINGET_TOKEN secret is
+#   set (a classic token with `public_repo` scope), and it needs the
+#   package's first version to be in winget already (see README).
 #
 # Only the default GITHUB_TOKEN is needed (contents: write, for the release).
 name: Release packages
@@ -254,6 +258,13 @@ jobs:
         shell: pwsh
         run: vcpkg install "libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows"
 
+      - name: Install Inno Setup (for the installer)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -268,14 +279,35 @@ jobs:
           $env:PATH = "$env:VCPKG_ROOT\installed\x64-windows\bin;$env:PATH"
           cargo test --release --locked
 
-      - name: Build package
+      - name: Build packages
         shell: pwsh
+        env:
+          REQUIRE_INSTALLER: "1"
         run: ./packaging/build-windows.ps1
+
+      # Proves the installer installs silently (as winget runs it) and that
+      # the installed exe and its DLLs are where the Start menu points.
+      - name: Test silent install
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER' -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Cosmic Comic\cosmic-comic.exe"
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Cosmic Comic\archive.dll")) { throw 'archive.dll missing' }
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter 'Cosmic Comic.lnk' | Out-Host
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Cosmic Comic\unins*.exe" | Select-Object -First 1
+          Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          # The uninstaller re-launches itself from %TEMP%, so -Wait returns early.
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw 'uninstall left the exe behind' }
 
       - uses: actions/upload-artifact@v4
         with:
           name: cosmic-comic-windows
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
           if-no-files-found: error
 
   release:
@@ -312,3 +344,23 @@ jobs:
             dist/*.AppImage
             dist/*.flatpak
             dist/*.zip
+            dist/*-setup.exe
+
+  winget:
+    name: Submit to winget
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Skip (no WINGET_TOKEN secret)
+        if: env.WINGET_TOKEN == ''
+        run: echo "WINGET_TOKEN isn't set; not submitting to winget."
+
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        if: env.WINGET_TOKEN != ''
+        with:
+          identifier: NotTimm.CosmicComic
+          release-tag: v${{ needs.version.outputs.version }}
+          installers-regex: '-setup\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
