@@ -80,6 +80,10 @@ fn continue_label(e: &SeriesEntry) -> String {
     if e.issue_count > 1 && !e.current_issue_label.is_empty() {
         let n = &e.current_issue_label;
         let label = if n.chars().all(|c| c.is_ascii_digit() || c == '.') { format!("#{n}") } else { truncate(n, 14) };
+        // A Jellyfin chapter has no page count until it is opened.
+        if e.current_issue_fraction <= 0.0 {
+            return label;
+        }
         return format!("{label} · {:.0}%", e.current_issue_fraction * 100.0);
     }
     format!("{:.0}%", e.progress_fraction() * 100.0)
@@ -186,6 +190,21 @@ impl App {
             let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(root);
             sections.push((name, items));
         }
+        // One section per Jellyfin library ("Manga · deepdish").
+        let mut remote_roots: Vec<&str> = visible
+            .iter()
+            .map(|e| e.library_root.as_str())
+            .filter(|r| crate::jellyfin::is_key(r))
+            .collect();
+        remote_roots.sort_unstable();
+        remote_roots.dedup();
+        for root in remote_roots {
+            let mut items: Vec<&SeriesEntry> = visible.iter().copied().filter(|e| e.library_root == root).collect();
+            items.sort_by_key(|e| e.name().to_lowercase());
+            let name = self.jf.library_names.get(root).cloned().unwrap_or_else(|| "Jellyfin".into());
+            sections.push((name, items));
+        }
+
         let mut other: Vec<&SeriesEntry> = visible
             .iter()
             .copied()
@@ -432,8 +451,10 @@ impl App {
         if issue.page_count > 0 {
             meta.push(format!("{} pages", issue.page_count));
         }
-        if !issue.title.is_empty() || issue.number.is_empty() {
-            // the file name isn't otherwise visible
+        // Show the file name only when it adds something: not for an
+        // official title, and not for manga-tui chapter files ("Ch 3 Vol
+        // none Weeb central 01J7…"), whose number and title are shown above.
+        if !issue.title.is_empty() || issue.number.is_empty() || crate::naming::starts_with_chapter(&issue.name) {
         } else {
             meta.push(truncate(&issue.name, 60));
         }

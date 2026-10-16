@@ -30,8 +30,10 @@ use crate::settings::{Background as BgStyle, Settings};
 mod book_view;
 mod library_view;
 mod window_icon;
+mod jellyfin_view;
 
 use book_view::{BookMsg, BookScroll};
+use jellyfin_view::{JfMsg, JfState, RemoteReading};
 
 /// Dropdown labels for [`BgStyle::ALL`], kept in the same order.
 const BG_LABELS: [&str; 2] = ["Theme", "Black"];
@@ -149,6 +151,7 @@ pub enum Message {
     DndDataReceived(String, Vec<u8>),
     // Books
     Book(BookMsg),
+    Jf(JfMsg),
     // Fit page
     FitPage,
     FitPageSize(cosmic::iced::Size),
@@ -235,6 +238,11 @@ pub struct App {
     cv_key_input: String,
     // settings
     settings: Settings,
+    /// Signed-in Jellyfin accounts (tokens only).
+    jellyfin: crate::jellyfin::Accounts,
+    jf: JfState,
+    /// The Jellyfin series being read, if any.
+    remote: Option<RemoteReading>,
     context_page: ContextPage,
 }
 
@@ -666,6 +674,9 @@ impl App {
         self.current_page = 0;
         self.show_chapter_select = false;
 
+        if crate::jellyfin::is_key(&key) {
+            return self.open_jellyfin(key, chapter);
+        }
         let entry = self.db.as_ref().and_then(|db| library::get_series(db, &key));
         if let Some(e) = entry.as_ref().filter(|e| e.kind == SeriesKind::Group) {
             let issues: Vec<PathBuf> = self
@@ -712,7 +723,11 @@ impl App {
                 self.series_page_covers.insert(issue.idx, widget::image::Handle::from_path(cover));
             } else {
                 self.series_covers_pending.insert(issue.idx);
-                tasks.push(issue_cover_task(key.clone(), issue.idx, PathBuf::from(&issue.path)));
+                if crate::jellyfin::is_key(&issue.path) {
+                    tasks.push(self.jellyfin_issue_cover(key.clone(), issue.idx, &issue.path));
+                } else {
+                    tasks.push(issue_cover_task(key.clone(), issue.idx, PathBuf::from(&issue.path)));
+                }
             }
         }
         Task::batch(tasks)
@@ -926,6 +941,9 @@ impl Application for App {
             meta_attempted: HashSet::new(),
             cv_key_input: String::new(),
             settings,
+            jellyfin: crate::jellyfin::Accounts::load(),
+            jf: JfState::default(),
+            remote: None,
             context_page: ContextPage::Settings,
         };
         app.set_header_title("Cosmic Comic".into());
@@ -945,6 +963,7 @@ impl Application for App {
         }];
 
         tasks.push(app.reload_library());
+        tasks.push(app.sync_all_jellyfin());
         if let Some(path) = flags {
             tasks.push(app.open_linked(path));
         }
@@ -1187,7 +1206,7 @@ impl Application for App {
     #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         let task = self.handle_message(message);
-        Task::batch([task, self.sync_window_icon()])
+        Task::batch([task, self.sync_window_icon(), self.jellyfin_tick()])
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -1720,6 +1739,7 @@ impl App {
             metadata_section.into(),
             library_section.into(),
             add_folder_row.into(),
+            self.build_jellyfin_section(),
         ])
         .into()
     }
@@ -1951,7 +1971,17 @@ impl App {
                 // open counts, not just library folders, so one-off files
                 // get tracked and a shelf cover too.
                 let mut tasks = Vec::new();
-                if let Some(db) = &self.db {
+                if let (Some(db), true) = (&self.db, crate::jellyfin::is_key(&key)) {
+                    // A Jellyfin series: its chapter list comes from the
+                    // server (only a window of it is loaded), so just record
+                    // the page counts we now know.
+                    for ch in &self.chapters {
+                        let _ = library::set_issue_page_count(db, &key, &ch.path.to_string_lossy(), ch.page_count);
+                    }
+                    let _ = library::touch_opened(db, &key);
+                    self.reader_entry = library::get_series(db, &key);
+                    self.reader_issues = library::issues_for(db, &key);
+                } else if let Some(db) = &self.db {
                     let raw_name =
                         path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let title = if path.is_dir() {
@@ -2217,13 +2247,25 @@ impl App {
                 if let Some(db) = &self.db {
                     let _ = library::set_issue_completed(db, id, completed);
                 }
-                return self.refresh_views();
+                let remote: Vec<String> = self
+                    .series_page_issues
+                    .iter()
+                    .filter(|i| i.id == id && crate::jellyfin::is_key(&i.path))
+                    .map(|i| i.path.clone())
+                    .collect();
+                return Task::batch([self.refresh_views(), self.jellyfin_mark(remote, completed)]);
             }
             Message::MarkSeriesRead(completed) => {
                 if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
                     let _ = library::set_series_completed(db, &key, completed);
                 }
-                return self.refresh_views();
+                let remote: Vec<String> = self
+                    .series_page_issues
+                    .iter()
+                    .filter(|i| crate::jellyfin::is_key(&i.path))
+                    .map(|i| i.path.clone())
+                    .collect();
+                return Task::batch([self.refresh_views(), self.jellyfin_mark(remote, completed)]);
             }
             Message::ChapterCoverReady { chapter_idx, result } => {
                 self.covers_pending.remove(&chapter_idx);
@@ -2515,6 +2557,7 @@ impl App {
                 }
             }
             Message::Book(msg) => return self.update_book(msg),
+            Message::Jf(msg) => return self.update_jellyfin(msg),
             Message::FitPage => {
                 let Some(page) = self.page_data(self.current_page) else { return Task::none() };
                 let Some(id) = self.core.main_window_id() else { return Task::none() };
