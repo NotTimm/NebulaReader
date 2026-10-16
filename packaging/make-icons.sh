@@ -6,7 +6,7 @@
 #
 # A PNG master should be square-ish and large (1024px+). If it has a solid
 # background instead of transparency (as AI image generators tend to give),
-# the background is keyed out from the corners. Outputs are committed, so
+# the background is keyed out (see KEY_SAT below). Outputs are committed, so
 # building the app never needs these tools:
 #
 #   res/icons/hicolor/<N>x<N>/apps/com.tsingel.CosmicComic.png  (Linux)
@@ -23,8 +23,10 @@ ICONS="$REPO_DIR/res/icons"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# How far (in % of colour distance) the keyed-out background may vary.
-FUZZ="${ICON_FUZZ:-12}"
+# Background keying for PNG/JPG masters: a pixel counts as background when
+# its HSL saturation and lightness are both under these percentages.
+KEY_SAT="${ICON_KEY_SAT:-18}"
+KEY_LIGHT="${ICON_KEY_LIGHT:-32}"
 
 # Renders master $1 to a transparent, square 1024px PNG at $2.
 master() {
@@ -43,16 +45,24 @@ master() {
     local opaque
     opaque="$(convert "$src" -format '%[fx:p{0,0}.a]' info:)"
     if [ "$opaque" = "1" ]; then
-        # Solid background: flood it out from all four corners, then soften
-        # the cut edge a little so it doesn't look jagged when downscaled.
-        local w h
-        w="$(identify -format '%w' "$src")"; h="$(identify -format '%h' "$src")"
-        convert "$src" -alpha set -fuzz "$FUZZ%" -fill none \
-            -draw "color 0,0 floodfill" -draw "color $((w-1)),0 floodfill" \
-            -draw "color 0,$((h-1)) floodfill" -draw "color $((w-1)),$((h-1)) floodfill" \
-            -channel A -morphology Erode Disk:1 -blur 0x0.7 +channel \
-            "$WORK/$name-keyed.png"
-        src="$WORK/$name-keyed.png"
+        # Solid background (and its drop shadow): remove pixels that are both
+        # dark and unsaturated and connected to the image border. Matching on
+        # saturation rather than colour distance keeps dark-but-coloured
+        # outlines that sit close to a dark grey background.
+        local t="$WORK/$name"
+        convert "$src" -resize 1024x1024 "$t-src.png"
+        convert "$t-src.png" -colorspace HSL -channel G -separate +channel \
+            -threshold "$KEY_SAT%" -negate "$t-lowsat.png"
+        convert "$t-src.png" -colorspace HSL -channel B -separate +channel \
+            -threshold "$KEY_LIGHT%" -negate "$t-dark.png"
+        convert "$t-lowsat.png" "$t-dark.png" -compose multiply -composite \
+            -fill red -draw "color 0,0 floodfill" -draw "color 1023,0 floodfill" \
+            -draw "color 0,1023 floodfill" -draw "color 1023,1023 floodfill" \
+            -fill black +opaque red -fill white -opaque red -negate \
+            -morphology Open Disk:1 -blur 0x1 "$t-alpha.png"
+        convert "$t-src.png" "$t-alpha.png" -alpha off -compose CopyOpacity -composite \
+            "$t-keyed.png"
+        src="$t-keyed.png"
     fi
     # Trim to the artwork, then centre it on a square canvas with a small margin.
     convert "$src" -trim +repage -resize 940x940 -background none \
