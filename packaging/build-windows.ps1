@@ -1,5 +1,9 @@
-# Builds a portable Windows .zip: cosmic-comic.exe plus the libarchive DLLs
-# it needs. Unzip anywhere and run; no installer or admin rights needed.
+# Builds the Windows packages from one staged folder (cosmic-comic.exe plus
+# the libarchive DLLs it needs):
+#   - a portable .zip: unzip anywhere and run
+#   - a per-user installer (Inno Setup, packaging/windows/cosmic-comic.iss),
+#     which is also what winget installs. Skipped with a warning if Inno
+#     Setup isn't installed, unless REQUIRE_INSTALLER=1 (as in CI).
 #
 # Needs Rust (MSVC toolchain) and vcpkg with libarchive:
 #   vcpkg install "libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows"
@@ -66,5 +70,29 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 $Zip = Join-Path $Dist "$Name.zip"
 if (Test-Path $Zip) { Remove-Item $Zip }
 Compress-Archive -Path $Stage -DestinationPath $Zip
-Remove-Item -Recurse -Force $Stage
 Write-Host "==> $Zip"
+
+# Installer. ISCC is Inno Setup's command-line compiler.
+$Iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+if (-not $Iscc) {
+    $Iscc = @(
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if ($Iscc) {
+    # Windows file versions are numeric: 0.1.0-beta.3 -> 0.1.0
+    $Numeric = ($Version -split '-')[0]
+    & $Iscc /Q "/DAppVersion=$Version" "/DNumericVersion=$Numeric" `
+        "/DStageDir=$Stage" "/DOutputDir=$Dist" `
+        (Join-Path $PSScriptRoot 'windows\cosmic-comic.iss')
+    if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
+    Write-Host "==> $(Join-Path $Dist "$Name-setup.exe")"
+} elseif ($env:REQUIRE_INSTALLER -eq '1') {
+    throw 'Inno Setup (ISCC.exe) not found; install it with: winget install JRSoftware.InnoSetup'
+} else {
+    Write-Warning 'Inno Setup not found; skipping the installer (winget install JRSoftware.InnoSetup)'
+}
+
+Remove-Item -Recurse -Force $Stage

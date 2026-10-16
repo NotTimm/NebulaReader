@@ -83,7 +83,8 @@ Prebuilt packages are attached to each
 
 | Package | For | Install |
 |---------|-----|---------|
-| `CosmicComic-<version>-windows-x64.zip` | Windows 10/11 | Unzip anywhere and run `cosmic-comic.exe` (no installer, no admin) |
+| `CosmicComic-<version>-windows-x64-setup.exe` | Windows 10/11 | Run it; installs for your user only, no admin needed. Or `winget install NotTimm.CosmicComic` |
+| `CosmicComic-<version>-windows-x64.zip` | Windows 10/11 | Portable: unzip anywhere and run `cosmic-comic.exe` |
 | `cosmic-comic_<version>_amd64.deb` | Ubuntu/Pop!_OS 24.04+ | `sudo apt install ./cosmic-comic_*_amd64.deb` |
 | `cosmic-comic-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./cosmic-comic-*.x86_64.rpm` |
 | `CosmicComic-<version>-x86_64.flatpak` | any distro with Flatpak | `flatpak install --user ./CosmicComic-*.flatpak` |
@@ -171,6 +172,23 @@ libarchive-devel openssl-devel libxkbcommon-devel`). A `.deb` meant for
 distribution should be built on Debian/Ubuntu so `dpkg-shlibdeps` can
 compute its dependencies; on other hosts the script falls back to a
 fixed list that's only suitable for local testing.
+
+### winget
+
+The Windows installer is published to winget as `NotTimm.CosmicComic`.
+Once the first version is in
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), the
+`winget` job in `release.yml` submits each new release automatically. It
+needs a repository secret `WINGET_TOKEN`: a classic personal access token
+with the `public_repo` scope, from the account that owns a fork of
+winget-pkgs. Without the secret the job just skips.
+
+The first version is submitted by hand from Windows:
+
+```
+winget install Microsoft.WingetCreate
+wingetcreate new https://github.com/NotTimm/cosmic-reader/releases/download/v<version>/CosmicComic-<version>-windows-x64-setup.exe
+```
 
 ### Icons
 
