@@ -180,17 +180,23 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-/// Normalises what the user typed: adds `https://` when no scheme was given
-/// and drops a trailing slash or a pasted `/web/...` path.
-pub fn normalize_url(input: &str) -> String {
+/// The addresses to try for what the user typed, dropping a trailing slash
+/// or a pasted `/web/...` path. Without a scheme it's https first, then
+/// http (home servers like `192.168.1.5:8096` are usually plain http).
+pub fn candidate_urls(input: &str) -> Vec<String> {
     let mut url = input.trim().to_string();
-    if !url.contains("://") {
-        url = format!("https://{url}");
-    }
     if let Some(i) = url.find("/web") {
         url.truncate(i);
     }
-    url.trim_end_matches('/').to_string()
+    let url = url.trim_end_matches('/').to_string();
+    if url.is_empty() {
+        return Vec::new();
+    }
+    if url.contains("://") {
+        vec![url]
+    } else {
+        vec![format!("https://{url}"), format!("http://{url}")]
+    }
 }
 
 async fn get_json<T: serde::de::DeserializeOwned>(url: &str, auth: &str) -> Result<T, String> {
@@ -233,17 +239,20 @@ async fn post_json<T: serde::de::DeserializeOwned>(url: &str, auth: &str, body: 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ServerInfo {
-    pub id: String,
     pub server_name: String,
-    #[serde(default)]
-    pub version: String,
 }
 
-/// Checks that `url` is a Jellyfin server (no sign-in needed).
-pub async fn server_info(url: &str) -> Result<ServerInfo, String> {
-    get_json(&format!("{url}/System/Info/Public"), &auth_header(None))
-        .await
-        .map_err(|e| format!("{e} — is this a Jellyfin address?"))
+/// Finds the Jellyfin server at what the user typed (see [`candidate_urls`]),
+/// returning the address that answered.
+pub async fn find_server(input: &str) -> Result<(String, ServerInfo), String> {
+    let mut last = "Type the address of your Jellyfin server.".to_string();
+    for url in candidate_urls(input) {
+        match get_json::<ServerInfo>(&format!("{url}/System/Info/Public"), &auth_header(None)).await {
+            Ok(info) => return Ok((url, info)),
+            Err(e) => last = format!("No Jellyfin server found at {url} ({e})."),
+        }
+    }
+    Err(last)
 }
 
 pub async fn quick_connect_enabled(url: &str) -> bool {
@@ -379,10 +388,6 @@ impl Item {
     pub fn resume_page(&self) -> usize {
         self.user_data.as_ref().map(|u| (u.playback_position_ticks / 10_000).max(0) as usize).unwrap_or(0)
     }
-
-    pub fn played(&self) -> bool {
-        self.user_data.as_ref().is_some_and(|u| u.played)
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -463,6 +468,144 @@ fn rfc3339(secs: u64) -> String {
         rem % 3600 / 60,
         rem % 60
     )
+}
+
+/// Parses Jellyfin's dates ("2026-10-16T20:00:00.0000000Z") to Unix seconds.
+pub fn parse_date(s: &str) -> Option<i64> {
+    let (date, time) = s.split_once('T')?;
+    let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
+    let (y, m, day) = (d.next()??, d.next()??, d.next()??);
+    let mut t = time.trim_end_matches('Z').split(':');
+    let (hh, mm) = (t.next()?.parse::<i64>().ok()?, t.next()?.parse::<i64>().ok()?);
+    let ss = t.next().and_then(|x| x.split('.').next()).and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+    // Days-from-civil (Howard Hinnant's algorithm).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + hh * 3600 + mm * 60 + ss)
+}
+
+// ── Library sync ────────────────────────────────────────────────────────────
+
+/// A series (or one-shot) on the server, ready to store in the library.
+#[derive(Clone, Debug)]
+pub struct RemoteSeries {
+    pub key: String,
+    pub title: String,
+    pub is_folder: bool,
+    /// `jellyfin://<account>/<library id>`: groups and prunes per library.
+    pub library_root: String,
+    /// The Jellyfin library's name ("Manga").
+    pub library_name: String,
+    /// Item whose image (or first page) is the series cover.
+    pub cover_item: Option<String>,
+    pub issues: Vec<RemoteIssue>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RemoteIssue {
+    pub key: String,
+    pub item_id: String,
+    pub name: String,
+    pub extension: String,
+    pub played: bool,
+    pub page: usize,
+    /// Unix seconds; 0 when never opened.
+    pub last_read: i64,
+}
+
+fn remote_issue(account: &Account, item: &Item) -> RemoteIssue {
+    let ud = item.user_data.clone().unwrap_or_default();
+    RemoteIssue {
+        key: account.item_key(&item.id),
+        item_id: item.id.clone(),
+        name: item.name.clone(),
+        extension: item.extension(),
+        played: ud.played,
+        page: item.resume_page(),
+        last_read: ud.last_played_date.as_deref().and_then(parse_date).unwrap_or(0),
+    }
+}
+
+/// Everything in the account's book libraries, organised as series:
+/// - a folder of books is a series (its chapters/issues);
+/// - a folder holding a single folder (manga-tui's `Series/English/`) is
+///   the series named by the outer folder;
+/// - a folder of several series folders (a publisher) yields each one;
+/// - a book at the top of a library is a one-shot.
+pub async fn fetch_library(account: &Account) -> Result<Vec<RemoteSeries>, String> {
+    let mut out = Vec::new();
+    for lib in book_libraries(account).await? {
+        let root = account.item_key(&lib.id);
+        for item in children(account, &lib.id).await? {
+            if item.is_folder() {
+                collect_folder(account, &root, &lib.name, &item.name, &item, 0, &mut out).await?;
+            } else {
+                out.push(RemoteSeries {
+                    key: account.item_key(&item.id),
+                    title: item.name.clone(),
+                    is_folder: false,
+                    library_root: root.clone(),
+                    library_name: lib.name.clone(),
+                    // Without an image, the cover comes from its first page.
+                    cover_item: Some(item.id.clone()),
+                    issues: vec![remote_issue(account, &item)],
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+async fn collect_folder(
+    account: &Account,
+    root: &str,
+    library_name: &str,
+    title: &str,
+    folder: &Item,
+    depth: u32,
+    out: &mut Vec<RemoteSeries>,
+) -> Result<(), String> {
+    let kids = children(account, &folder.id).await?;
+    let (folders, mut books): (Vec<Item>, Vec<Item>) = kids.into_iter().partition(Item::is_folder);
+    if books.is_empty() && depth < 2 {
+        match folders.len() {
+            0 => {}
+            // Wrapper folder: keep the outer name.
+            1 => return Box::pin(collect_folder(account, root, library_name, title, &folders[0], depth + 1, out)).await,
+            _ => {
+                for f in &folders {
+                    Box::pin(collect_folder(account, root, library_name, &f.name, f, depth + 1, out)).await?;
+                }
+            }
+        }
+        return Ok(());
+    }
+    if books.is_empty() {
+        return Ok(());
+    }
+    books.sort_by(|a, b| crate::comic::natural_key(&a.name).cmp(&crate::comic::natural_key(&b.name)));
+    // The folder's image, else a chapter's, else the first chapter's first
+    // page (the cover task falls back to that when there's no image).
+    let cover_item = if folder.has_cover() {
+        Some(folder.id.clone())
+    } else {
+        books.iter().find(|b| b.has_cover()).or(books.first()).map(|b| b.id.clone())
+    };
+    out.push(RemoteSeries {
+        key: account.item_key(&folder.id),
+        title: title.to_string(),
+        is_folder: true,
+        library_root: root.to_string(),
+        library_name: library_name.to_string(),
+        cover_item,
+        issues: books.iter().map(|b| remote_issue(account, b)).collect(),
+    });
+    Ok(())
 }
 
 // ── Range reads for streaming ───────────────────────────────────────────────
@@ -547,10 +690,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalizes_typed_urls() {
-        assert_eq!(normalize_url("sloppyjoe.org:6969"), "https://sloppyjoe.org:6969");
-        assert_eq!(normalize_url("http://192.168.50.87:8096/"), "http://192.168.50.87:8096");
-        assert_eq!(normalize_url("https://jf.example/web/#/home.html"), "https://jf.example");
+    fn candidate_urls_for_typed_addresses() {
+        assert_eq!(candidate_urls("sloppyjoe.org:6969"), ["https://sloppyjoe.org:6969", "http://sloppyjoe.org:6969"]);
+        assert_eq!(candidate_urls("http://192.168.50.87:8096/"), ["http://192.168.50.87:8096"]);
+        assert_eq!(candidate_urls("https://jf.example/web/#/home.html"), ["https://jf.example"]);
+        assert!(candidate_urls("  ").is_empty());
     }
 
     #[test]
@@ -605,6 +749,9 @@ mod tests {
     fn content_range_and_dates() {
         assert_eq!(parse_content_range_total("bytes 7275-7374/7375"), Some(7375));
         assert_eq!(parse_content_range_total("bytes 0-99/*"), None);
+        assert_eq!(parse_date("2025-10-16T20:03:20.0000000Z"), Some(1_760_645_000));
+        assert_eq!(parse_date("2000-02-29T00:00:00Z"), Some(951_782_400));
+        assert_eq!(parse_date("garbage"), None);
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(rfc3339(1_760_645_000), "2025-10-16T20:03:20Z");

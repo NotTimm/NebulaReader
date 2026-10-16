@@ -613,6 +613,50 @@ pub fn save_issue_progress(
     Ok(())
 }
 
+/// Applies read state from a server (Jellyfin) to one issue, but only when
+/// the server's copy is newer than ours, so a sync never overwrites newer
+/// local reading. A newer remote read also makes it the series' current
+/// issue, so Continue Reading follows reading done in other apps.
+pub fn apply_remote_progress(
+    conn: &Connection,
+    series_path: &str,
+    issue_path: &str,
+    page: usize,
+    completed: bool,
+    read_at: i64,
+) -> Result<(), String> {
+    if read_at <= 0 {
+        return Ok(());
+    }
+    let changed = conn
+        .execute(
+            "UPDATE issues SET last_page = ?3, completed = ?4, last_read_at = ?5
+             WHERE series_path = ?1 AND path = ?2 AND last_read_at < ?5",
+            params![series_path, issue_path, page as i64, completed, read_at],
+        )
+        .map_err(|e| format!("apply_remote_progress: {e}"))?;
+    if changed > 0 {
+        conn.execute(
+            "UPDATE series SET last_opened = ?2 WHERE path = ?1 AND last_opened < ?2",
+            params![series_path, read_at],
+        )
+        .map_err(|e| format!("apply_remote_progress: {e}"))?;
+        // "Continue" points at the chapter being read, not one just ticked
+        // off, so only an unfinished chapter takes over, and only from one
+        // read less recently.
+        if !completed {
+            conn.execute(
+                "UPDATE series SET last_issue_path = ?2 WHERE path = ?1 AND NOT EXISTS (
+                     SELECT 1 FROM issues i WHERE i.series_path = ?1 AND i.path = series.last_issue_path
+                     AND i.completed = 0 AND i.last_read_at > ?3)",
+                params![series_path, issue_path, read_at],
+            )
+            .map_err(|e| format!("apply_remote_progress: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Books: chapter + position within it. The book's single issue row holds
 /// it; `page_count` is the chapter count so shelf progress works as-is.
 pub fn save_book_progress(
@@ -811,6 +855,31 @@ pub fn remove_series_under_root(conn: &Connection, root: &str) {
     for p in paths {
         delete_series(conn, &p);
     }
+}
+
+/// Removes every series whose library root starts with `prefix` (all of a
+/// Jellyfin account's libraries when signing out).
+pub fn remove_series_under_root_prefix(conn: &Connection, prefix: &str) {
+    let paths: Vec<String> = conn
+        .prepare("SELECT path FROM series WHERE substr(library_root, 1, length(?1)) = ?1")
+        .and_then(|mut st| {
+            st.query_map(params![prefix], |r| r.get::<_, String>(0)).map(|it| it.flatten().collect())
+        })
+        .unwrap_or_default();
+    for p in paths {
+        delete_series(conn, &p);
+    }
+}
+
+/// Records an issue's page count once it's known (remote issues are listed
+/// before anyone has opened them).
+pub fn set_issue_page_count(conn: &Connection, series_path: &str, issue_path: &str, pages: usize) -> Result<(), String> {
+    conn.execute(
+        "UPDATE issues SET page_count = ?3 WHERE series_path = ?1 AND path = ?2",
+        params![series_path, issue_path, pages as i64],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("set_issue_page_count: {e}"))
 }
 
 // ── Read operations ───────────────────────────────────────────────────────────

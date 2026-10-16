@@ -258,6 +258,11 @@ fn extract_rar(archive: &Path) -> Result<Vec<(String, PathBuf)>, String> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// Decodes image bytes from anywhere (`name` picks the format).
+pub fn decode_bytes(name: &str, data: &[u8]) -> Result<Page, String> {
+    decode_image(name, data)
+}
+
 pub fn decode_source(source: &PageSource) -> Result<Page, String> {
     match source {
         PageSource::File(path) => {
@@ -341,7 +346,7 @@ fn find_sources(root: &Path, sources: &mut Vec<(String, Source)>) {
 /// A chapter's name for the chapter picker and details panel. Manga-style
 /// chapter files ("Ch 3 Vol none Weeb central 01J7….cbz") become "Ch. 3",
 /// plus the chapter title when there is one; anything else keeps its name.
-fn display_name(raw: &str) -> String {
+pub(crate) fn display_name(raw: &str) -> String {
     let stem = std::path::Path::new(raw)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
