@@ -1,7 +1,8 @@
 # Cosmic Comic
 
-A native [COSMIC desktop](https://system76.com/cosmic) reader for comics,
-manga and EPUB books. Point it at the folders your collection already lives
+A [COSMIC desktop](https://system76.com/cosmic) reader for comics, manga
+and EPUB books that also runs on KDE Plasma, GNOME and Windows, taking on
+each desktop's look. Point it at the folders your collection already lives
 in and it builds a library of series, with covers, per-issue progress and a
 Continue Reading shelf. Messy names are cleaned up and matched online for
 proper titles and descriptions.
@@ -51,11 +52,28 @@ in [`docs/listing.md`](docs/listing.md)).
 
 **General**
 
-- Native COSMIC look that follows the system theme
+- Native look per desktop (see below)
 - Drag and drop a file, folder or book onto the window to open it
 - Settings drawer: backdrop style and opacity, layout, online lookup,
   library folders
 - Data in the standard XDG folders (see below)
+
+## Native look per desktop
+
+The UI is libcosmic everywhere, but outside COSMIC it rebuilds its theme
+from the desktop it runs on (`src/platform/look.rs`):
+
+| Desktop | Style | Colours from | Title bar |
+|---------|-------|--------------|-----------|
+| COSMIC | COSMIC | the live COSMIC theme | libcosmic's header bar |
+| KDE Plasma | Breeze | your colour scheme (`kdeglobals`), accent included | KWin's |
+| Windows 10/11 | Windows 11 (Fluent) | light/dark mode and accent colour | Windows' |
+| GNOME, Budgie, ... | Adwaita | light/dark and accent (settings portal) | libcosmic's header bar |
+
+Corner radii follow the desktop too (Breeze's 3px buttons, Fluent's 4px,
+Adwaita's 6px, COSMIC's pills). Pick a different style under
+**Settings → Appearance → Style**; the title bar style changes on the
+next start.
 
 ## Download
 
@@ -63,10 +81,16 @@ Prebuilt packages are attached to each
 [GitHub Release](https://github.com/NotTimm/cosmic-reader/releases)
 (x86_64 only for now):
 
-| Package | Built on | Install |
-|---------|----------|---------|
-| `cosmic-comic_<version>_amd64.deb` | Ubuntu 24.04 | `sudo apt install ./cosmic-comic_*_amd64.deb` |
-| `cosmic-comic-<version>-1.fc<NN>.x86_64.rpm` | latest Fedora | `sudo dnf install ./cosmic-comic-*.x86_64.rpm` |
+| Package | For | Install |
+|---------|-----|---------|
+| `CosmicComic-<version>-windows-x64.zip` | Windows 10/11 | Unzip anywhere and run `cosmic-comic.exe` (no installer, no admin) |
+| `cosmic-comic_<version>_amd64.deb` | Ubuntu/Pop!_OS 24.04+ | `sudo apt install ./cosmic-comic_*_amd64.deb` |
+| `cosmic-comic-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./cosmic-comic-*.x86_64.rpm` |
+| `CosmicComic-<version>-x86_64.flatpak` | any distro with Flatpak | `flatpak install --user ./CosmicComic-*.flatpak` |
+| `CosmicComic-<version>-x86_64.AppImage` | any recent distro | `chmod +x CosmicComic-*.AppImage` and run it |
+
+Windows SmartScreen may warn about an unrecognised app, since the exe
+isn't code-signed; choose **More info → Run anyway**.
 
 Install with `apt`/`dnf` as above (not `dpkg -i`/`rpm -i`) so the library
 dependencies (`libarchive`, `libxkbcommon`, `openssl`, ...) are pulled in
@@ -89,6 +113,21 @@ On another distro, build from source (below) or use `./install.sh`.
 just build-release
 ```
 
+### On Windows
+
+Install Rust (MSVC toolchain) and [vcpkg](https://vcpkg.io), then from
+PowerShell:
+
+```
+vcpkg install "libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows"
+$env:VCPKG_ROOT = "C:\path\to\vcpkg"
+./packaging/build-windows.ps1
+```
+
+That builds the release exe and zips it with libarchive's DLLs into
+`dist\`. For a plain `cargo run`, also set `$env:VCPKGRS_DYNAMIC = "1"`
+and put `$env:VCPKG_ROOT\installed\x64-windows\bin` on `PATH`.
+
 ## Packaging a release
 
 ```
@@ -100,14 +139,20 @@ just package-flatpak
 ```
 
 Output lands in `./dist`. The version comes from `Cargo.toml` — bump it
-there and the packages follow.
+there and the packages follow. The Windows zip is built on Windows (see
+above) or by CI.
 
 The `.deb` and `.rpm` deliberately **do not** bundle libraries: their
 dependencies are generated from the binary's actual ELF links
 (`dpkg-shlibdeps` and rpm's automatic requires), so they pull
 `libarchive`, `libxkbcommon`, `openssl` etc. from the distro. The
 AppImage bundles those same libraries since it can't rely on packages,
-and the Flatpak builds against the freedesktop 24.08 runtime.
+and the Flatpak builds against the freedesktop 25.08 runtime, offline:
+its crates come from `packaging/cargo-sources.json`, which
+`packaging/gen-cargo-sources.sh` generates from `Cargo.lock` (the Flatpak
+script does this for you when it's missing or stale).
+[`packaging/flathub/`](packaging/flathub/) has what's needed to submit to
+Flathub, which is also how the app gets into the COSMIC Store.
 
 Tooling needed per format (each script tells you if something's missing):
 
@@ -116,7 +161,7 @@ Tooling needed per format (each script tells you if something's missing):
 | deb      | `dpkg-dev` |
 | rpm      | `rpm-build` |
 | AppImage | `curl` (fetches `appimagetool` on first run) |
-| Flatpak  | `flatpak`, `flatpak-builder` |
+| Flatpak  | `flatpak`, `flatpak-builder`, `python3` with `aiohttp`, `tomlkit`, `pyyaml` |
 
 Building also needs the usual native headers: `libarchive`, `openssl` and
 `libxkbcommon` development packages plus `pkg-config` and a C compiler
@@ -129,10 +174,11 @@ fixed list that's only suitable for local testing.
 
 ### Publishing a release
 
-`.github/workflows/release.yml` builds the `.deb` (Ubuntu 24.04) and
-`.rpm` (Fedora container) on every pull request that touches the code or
-packaging, and on manual runs, uploading them as workflow artifacts. To
-publish:
+`.github/workflows/release.yml` builds every package (`.deb` on Ubuntu
+24.04, `.rpm` in a Fedora container, AppImage, Flatpak, and the Windows
+zip, which also runs the tests on Windows) on every pull request that
+touches the code or packaging, and on manual runs, uploading them as
+workflow artifacts. To publish:
 
 1. Bump `version` in `Cargo.toml` (and add a `<release>` entry to
    `res/com.tsingel.CosmicComic.metainfo.xml`), commit, push.
@@ -143,21 +189,31 @@ publish:
    git push origin v0.1.0-beta.1
    ```
 
-The workflow refuses to publish if the tag doesn't match `Cargo.toml`,
-then creates the GitHub Release (marked as a pre-release when the version
-has a `-suffix`) with both packages attached. Re-running it updates the
+   Or, instead of tagging by hand: **Actions → Release packages → Run
+   workflow**, pick the branch, and tick **publish**. That creates the
+   `v<version>` tag on the commit it built.
+
+The workflow refuses to publish if a pushed tag doesn't match
+`Cargo.toml`, then creates the GitHub Release (marked as a pre-release
+when the version has a `-suffix`) with every package attached. Re-running it updates the
 same release. `.github/workflows/ci.yml` runs `cargo test --release` on
 pushes to `master` and on pull requests.
 
 ## Where your data lives
 
-Following the XDG spec, so it survives reinstalls and upgrades:
+Outside the install location, so it survives reinstalls and upgrades. On
+Linux (XDG):
 
 | Path | Contents |
 |------|----------|
 | `~/.local/share/cosmic-comic/library.db` | Library, reading progress, metadata |
 | `~/.config/cosmic-comic/settings.json` | Preferences |
 | `~/.cache/cosmic-comic/` | Cover thumbnails, extracted archives — safe to delete |
+
+On Windows, `library.db` and `settings.json` are in
+`%APPDATA%\CosmicComic\`, and the cache is
+`%LOCALAPPDATA%\CosmicComic\Cache\`. The Flatpak keeps its own copies
+under `~/.var/app/com.tsingel.CosmicComic/`.
 
 The database is versioned with SQLite's `user_version` pragma and migrated
 in place on startup, so upgrading never requires wiping your library.
@@ -182,7 +238,8 @@ won't match there. To also try [ComicVine](https://comicvine.gamespot.com/api/)
 for those, get a free API key and either:
 
 - set `COMICVINE_API_KEY` in your environment, or
-- write the key (nothing else) to `~/.local/share/cosmic-comic/comicvine_api_key.txt`
+- paste it into **Settings → Metadata** (saved as
+  `comicvine_api_key.txt` in the data folder above)
 
 Without a key, the debug panel just shows that no ComicVine key is set.
 
