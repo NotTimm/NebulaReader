@@ -1,10 +1,16 @@
-# Builds the .deb (Ubuntu 24.04) and .rpm (Fedora) packages.
+# PENDING: the new .github/workflows/release.yml. It could not be pushed
+# from the Claude session (its GitHub token lacks the "workflow" scope).
+# To apply it:  git mv -f packaging/pending/release.yml .github/workflows/release.yml
+# Builds every package: .deb (Ubuntu 24.04), .rpm (Fedora), AppImage,
+# .flatpak bundle, and a portable Windows .zip.
 #
-# - Pull requests / manual runs: build both and upload them as workflow
+# - Pull requests / manual runs: build them all and upload them as workflow
 #   artifacts (downloadable from the run's summary page).
-# - Pushing a tag `vX.Y.Z[-pre]`: same, then create (or update) the GitHub
-#   Release for that tag and attach both packages. The tag must match the
-#   `version` in Cargo.toml, which is where the package versions come from.
+# - Pushing a tag `vX.Y.Z[-pre]`, or a manual run with "publish" ticked:
+#   same, then create (or update) the GitHub Release `v<version>` and
+#   attach every package. The version comes from Cargo.toml; a pushed tag
+#   must match it, and a manual publish creates that tag on the commit it
+#   ran on.
 #
 # Only the default GITHUB_TOKEN is needed (contents: write, for the release).
 name: Release packages
@@ -21,6 +27,11 @@ on:
       - "Cargo.lock"
       - ".github/workflows/release.yml"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a GitHub Release v<Cargo.toml version> from this commit
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -142,10 +153,116 @@ jobs:
           path: dist/*.rpm
           if-no-files-found: error
 
+  appimage:
+    name: Build AppImage
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl \
+            libxkbcommon-dev libwayland-dev libarchive-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: appimage
+
+      - name: Build AppImage
+        run: bash packaging/build-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmic-comic-appimage
+          path: dist/CosmicComic-*.AppImage
+          if-no-files-found: error
+
+  flatpak:
+    name: Build .flatpak
+    needs: version
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      # Offline build: every crate is listed up front from Cargo.lock.
+      - name: Generate cargo-sources.json
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            curl python3-aiohttp python3-tomlkit python3-pyyaml
+          bash packaging/gen-cargo-sources.sh
+
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
+        with:
+          bundle: CosmicComic-${{ needs.version.outputs.version }}-x86_64.flatpak
+          manifest-path: packaging/com.tsingel.CosmicComic.yml
+          cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+          upload-artifact: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmic-comic-flatpak
+          path: CosmicComic-*.flatpak
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows .zip
+    needs: version
+    runs-on: windows-2022
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point VCPKG_ROOT at the runner's vcpkg
+        shell: pwsh
+        run: '"VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV'
+
+      # Building libarchive takes a few minutes; keep the result around.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}/installed
+          key: vcpkg-libarchive-x64-windows-v1
+
+      - name: Install libarchive (vcpkg)
+        shell: pwsh
+        run: vcpkg install "libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+
+      - name: Run tests
+        shell: pwsh
+        env:
+          VCPKGRS_DYNAMIC: "1"
+        run: |
+          $env:PATH = "$env:VCPKG_ROOT\installed\x64-windows\bin;$env:PATH"
+          cargo test --release --locked
+
+      - name: Build package
+        shell: pwsh
+        run: ./packaging/build-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cosmic-comic-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, deb, rpm]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: [version, deb, rpm, appimage, flatpak, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -162,6 +279,10 @@ jobs:
       # replaces same-named assets.
       - uses: softprops/action-gh-release@v2
         with:
+          # Explicit so a manual publish (not on a tag ref) creates the tag
+          # on the commit it built.
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: Cosmic Comic ${{ needs.version.outputs.version }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           generate_release_notes: true
@@ -169,3 +290,6 @@ jobs:
           files: |
             dist/*.deb
             dist/*.rpm
+            dist/*.AppImage
+            dist/*.flatpak
+            dist/*.zip
