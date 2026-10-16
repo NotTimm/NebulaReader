@@ -2,6 +2,10 @@
 
 ## Workflow
 
+- Commit as the owner: `git config user.name "Tim Singel"` and
+  `git config user.email "gamer.tdogtim@gmail.com"` before the first commit
+  (cloud sessions default to a Claude identity); Claude goes in the
+  `Co-Authored-By` trailer.
 - Commit small, logical steps with descriptive messages and push often, so
   work can be picked up locally at any time.
 - The owner wants finished, validated work merged into `master` without
