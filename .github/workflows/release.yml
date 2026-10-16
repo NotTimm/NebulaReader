@@ -1,6 +1,3 @@
-# PENDING: the new .github/workflows/release.yml. It could not be pushed
-# from the Claude session (its GitHub token lacks the "workflow" scope).
-# To apply it:  git mv -f packaging/pending/release.yml .github/workflows/release.yml
 # Builds every package: .deb (Ubuntu 24.04), .rpm (Fedora), AppImage,
 # .flatpak bundle, and a portable Windows .zip.
 #
@@ -182,9 +179,33 @@ jobs:
           path: dist/CosmicComic-*.AppImage
           if-no-files-found: error
 
+  # The Flatpak builds offline, so every crate is listed up front from
+  # Cargo.lock. Done here because the Flatpak builder image has no
+  # package manager to install the generator's Python dependencies.
+  cargo-sources:
+    name: Generate cargo-sources.json
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate
+        run: |
+          pip install aiohttp tomlkit pyyaml
+          bash packaging/gen-cargo-sources.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cargo-sources
+          path: packaging/cargo-sources.json
+          if-no-files-found: error
+
   flatpak:
     name: Build .flatpak
-    needs: version
+    needs: [version, cargo-sources]
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
@@ -192,12 +213,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Offline build: every crate is listed up front from Cargo.lock.
-      - name: Generate cargo-sources.json
-        run: |
-          dnf install -y --setopt=install_weak_deps=False \
-            curl python3-aiohttp python3-tomlkit python3-pyyaml
-          bash packaging/gen-cargo-sources.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: cargo-sources
+          path: packaging
 
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
         with:
