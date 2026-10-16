@@ -28,13 +28,12 @@ install -Dm0755 "$BIN_PATH" "$APPDIR/usr/bin/$APP_NAME"
 install -Dm0644 "$REPO_DIR/res/$APP_ID.desktop" "$APPDIR/usr/share/applications/$APP_ID.desktop"
 install -Dm0644 "$REPO_DIR/res/$APP_ID.metainfo.xml" \
     "$APPDIR/usr/share/metainfo/$APP_ID.metainfo.xml"
-install -Dm0644 "$REPO_DIR/res/icons/$APP_ID.svg" \
-    "$APPDIR/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg"
+install_icons "$APPDIR/usr/share/icons/hicolor"
 
 # AppImage expects the desktop file and icon at the AppDir root too.
 cp "$APPDIR/usr/share/applications/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
-cp "$APPDIR/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg" "$APPDIR/$APP_ID.svg"
-ln -sf "$APP_ID.svg" "$APPDIR/.DirIcon"
+cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/$APP_ID.png" "$APPDIR/$APP_ID.png"
+ln -sf "$APP_ID.png" "$APPDIR/.DirIcon"
 
 # Bundle the shared libraries that aren't part of a base system, skipping
 # the ones that must come from the host (glibc, the graphics stack).

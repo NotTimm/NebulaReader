@@ -11,8 +11,8 @@ bin-dst := base-dir / 'bin' / name
 desktop-src := 'res' / (APPID + '.desktop')
 desktop-dst := base-dir / 'share' / 'applications' / (APPID + '.desktop')
 
-icon-src := 'res' / 'icons' / (APPID + '.svg')
-icon-dst := base-dir / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps' / (APPID + '.svg')
+icon-sizes := '16 24 32 48 64 128 256 512'
+icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
 
 metainfo-src := 'res' / (APPID + '.metainfo.xml')
 metainfo-dst := base-dir / 'share' / 'metainfo' / (APPID + '.metainfo.xml')
@@ -39,7 +39,7 @@ run *args:
 install:
     install -Dm0755 {{bin-src}} {{bin-dst}}
     install -Dm0644 {{desktop-src}} {{desktop-dst}}
-    install -Dm0644 {{icon-src}} {{icon-dst}}
+    for s in {{icon-sizes}}; do install -Dm0644 "res/icons/hicolor/${s}x${s}/apps/{{APPID}}.png" "{{icons-dst}}/${s}x${s}/apps/{{APPID}}.png"; done
     install -Dm0644 {{metainfo-src}} {{metainfo-dst}}
 
 # Build release and install for the current user (~/.local, no sudo). Same as ./install.sh minus the git pull.
@@ -59,7 +59,9 @@ test *args:
 
 # Removes installed files
 uninstall:
-    rm -f {{bin-dst}} {{desktop-dst}} {{icon-dst}} {{metainfo-dst}}
+    rm -f {{bin-dst}} {{desktop-dst}} {{metainfo-dst}}
+    for s in {{icon-sizes}}; do rm -f "{{icons-dst}}/${s}x${s}/apps/{{APPID}}.png"; done
+    rm -f "{{icons-dst}}/scalable/apps/{{APPID}}.svg"  # from older versions
 
 # Build every package format this machine can (output in ./dist)
 package:
@@ -74,6 +76,10 @@ package-appimage:
     bash packaging/build-appimage.sh
 package-flatpak:
     bash packaging/build-flatpak.sh
+
+# Regenerate all icon sizes from res/icons/source/ (see the script)
+icons:
+    bash packaging/make-icons.sh
 
 # Runs `cargo clean`
 clean:

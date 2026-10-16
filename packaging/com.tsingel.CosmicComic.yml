@@ -47,8 +47,9 @@ modules:
       - install -Dm0755 target/release/cosmic-comic /app/bin/cosmic-comic
       - install -Dm0644 res/com.tsingel.CosmicComic.desktop
         /app/share/applications/com.tsingel.CosmicComic.desktop
-      - install -Dm0644 res/icons/com.tsingel.CosmicComic.svg
-        /app/share/icons/hicolor/scalable/apps/com.tsingel.CosmicComic.svg
+      - for png in res/icons/hicolor/*/apps/com.tsingel.CosmicComic.png; do
+          install -Dm0644 "$png" "/app/share/icons/hicolor/${png#res/icons/hicolor/}";
+        done
       - install -Dm0644 res/com.tsingel.CosmicComic.metainfo.xml
         /app/share/metainfo/com.tsingel.CosmicComic.metainfo.xml
     sources:

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbb454"/>
+      <stop offset="1" stop-color="#f15922"/>
+    </linearGradient>
+  </defs>
+  <!-- page block peeking out right and bottom -->
+  <rect x="26" y="15" width="84" height="103" rx="6" fill="#fff4e3"/>
+  <path d="M104 22 v88 M100 22 v90" stroke="#e8d2b2" stroke-width="1.5"/>
+  <path d="M33 112 h66 M33 115 h70" stroke="#e8d2b2" stroke-width="1.5"/>
+  <!-- cover -->
+  <rect x="18" y="10" width="84" height="102" rx="7" fill="url(#cover)"/>
+  <!-- spine -->
+  <path d="M25 10 h9 v102 h-9 a7 7 0 0 1 -7 -7 v-88 a7 7 0 0 1 7 -7 z" fill="#b93a10" opacity="0.85"/>
+  <path d="M34 10 v102" stroke="#ffd59a" stroke-width="2" opacity="0.6"/>
+  <!-- speech bubble -->
+  <path d="M56 70 l-6 12 l16 -9 z" fill="#fff8ef"/>
+  <ellipse cx="68" cy="52" rx="25" ry="18" fill="#fff8ef"/>
+  <circle cx="58" cy="52" r="3.6" fill="#f15922"/>
+  <circle cx="68" cy="52" r="3.6" fill="#f15922"/>
+  <circle cx="78" cy="52" r="3.6" fill="#f15922"/>
+  <!-- title bars -->
+  <rect x="46" y="90" width="44" height="6" rx="3" fill="#fff8ef" opacity="0.75"/>
+</svg>

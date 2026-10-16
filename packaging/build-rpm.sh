@@ -49,7 +49,7 @@ cp -a "$STAGE/." "%{buildroot}/"
 %files
 %{_bindir}/$APP_NAME
 %{_datadir}/applications/$APP_ID.desktop
-%{_datadir}/icons/hicolor/scalable/apps/$APP_ID.svg
+%{_datadir}/icons/hicolor/*/apps/$APP_ID.png
 %{_datadir}/metainfo/$APP_ID.metainfo.xml
 %doc %{_docdir}/$APP_NAME/README.md
 

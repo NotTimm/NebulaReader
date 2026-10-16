@@ -172,6 +172,22 @@ distribution should be built on Debian/Ubuntu so `dpkg-shlibdeps` can
 compute its dependencies; on other hosts the script falls back to a
 fixed list that's only suitable for local testing.
 
+### Icons
+
+`res/icons/source/` holds two masters: `book` (the app icon) and
+`book-open` (the window icon while reading), each as an `.svg` or a large
+`.png`. A PNG on a solid background (typical of image generators) is cut
+out automatically. After changing them, regenerate every size and commit
+the results:
+
+```
+just icons
+```
+
+That writes the Linux icon theme sizes (`res/icons/hicolor/`), the Windows
+`.ico` embedded in the exe by `build.rs`, and the window icons in
+`res/icons/window/`. Earlier designs are kept in `res/icons/alt/`.
+
 ### Publishing a release
 
 `.github/workflows/release.yml` builds every package (`.deb` on Ubuntu
