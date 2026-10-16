@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs (or updates) Cosmic Comic for the current user, no sudo required.
+# Installs (or updates) Nebula Reader for the current user, no sudo required.
 #
 # Run it fresh to install, or re-run it any time to update: it pulls the
 # latest changes (if this is a git checkout with nothing uncommitted),
@@ -9,7 +9,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$repo_dir"
 
-prefix="${COSMIC_COMIC_PREFIX:-$HOME/.local}"
+prefix="${NEBULA_PREFIX:-$HOME/.local}"
 
 if ! command -v cargo >/dev/null 2>&1; then
     echo "error: cargo is not installed (see https://rustup.rs)" >&2
@@ -42,14 +42,14 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f "$prefix/share/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
-echo "==> Done. Installed to $prefix/bin/cosmic-comic"
+echo "==> Done. Installed to $prefix/bin/nebula-reader"
 
 case ":$PATH:" in
     *":$prefix/bin:"*) ;;
     *)
         echo
         echo "Note: $prefix/bin is not on your PATH."
-        echo "Add this to your shell config to run 'cosmic-comic' directly:"
+        echo "Add this to your shell config to run 'nebula-reader' directly:"
         echo "  export PATH=\"$prefix/bin:\$PATH\""
         ;;
 esac

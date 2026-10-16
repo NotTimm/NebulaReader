@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-const CLIENT: &str = "Cosmic Comic";
+const CLIENT: &str = "Nebula Reader";
 
 /// One signed-in user on one server.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -140,7 +140,7 @@ fn new_device_id() -> String {
     std::time::SystemTime::now().hash(&mut h);
     std::process::id().hash(&mut h);
     device_name().hash(&mut h);
-    format!("cosmic-comic-{:016x}", h.finish())
+    format!("nebula-reader-{:016x}", h.finish())
 }
 
 fn device_name() -> String {

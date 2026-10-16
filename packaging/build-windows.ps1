@@ -1,7 +1,7 @@
-# Builds the Windows packages from one staged folder (cosmic-comic.exe plus
+# Builds the Windows packages from one staged folder (nebula-reader.exe plus
 # the libarchive DLLs it needs):
 #   - a portable .zip: unzip anywhere and run
-#   - a per-user installer (Inno Setup, packaging/windows/cosmic-comic.iss),
+#   - a per-user installer (Inno Setup, packaging/windows/nebula-reader.iss),
 #     which is also what winget installs. Skipped with a warning if Inno
 #     Setup isn't installed, unless REQUIRE_INSTALLER=1 (as in CI).
 #
@@ -44,9 +44,9 @@ try {
 }
 
 $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $Repo 'target' }
-$Exe = Join-Path $TargetDir 'release\cosmic-comic.exe'
+$Exe = Join-Path $TargetDir 'release\nebula-reader.exe'
 
-$Name = "CosmicComic-$Version-windows-x64"
+$Name = "NebulaReader-$Version-windows-x64"
 $Stage = Join-Path ([System.IO.Path]::GetTempPath()) $Name
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 New-Item -ItemType Directory -Path $Stage | Out-Null
@@ -55,15 +55,15 @@ Copy-Item $Exe $Stage
 Copy-Item (Join-Path $VcpkgBin '*.dll') $Stage
 Copy-Item (Join-Path $Repo 'LICENSE') (Join-Path $Stage 'LICENSE.txt')
 @"
-Cosmic Comic $Version for Windows (portable)
+Nebula Reader $Version for Windows (portable)
 
-Run cosmic-comic.exe. Keep the .dll files next to it.
+Run nebula-reader.exe. Keep the .dll files next to it.
 
-Your library and settings are stored in %APPDATA%\CosmicComic and the
-cache in %LOCALAPPDATA%\CosmicComic\Cache, so you can replace this folder
+Your library and settings are stored in %APPDATA%\NebulaReader and the
+cache in %LOCALAPPDATA%\NebulaReader\Cache, so you can replace this folder
 with a newer version without losing anything.
 
-https://github.com/NotTimm/cosmic-reader
+https://github.com/NotTimm/nebula-reader
 "@ | Set-Content -Encoding utf8 (Join-Path $Stage 'README.txt')
 
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
@@ -86,7 +86,7 @@ if ($Iscc) {
     $Numeric = ($Version -split '-')[0]
     & $Iscc /Q "/DAppVersion=$Version" "/DNumericVersion=$Numeric" `
         "/DStageDir=$Stage" "/DOutputDir=$Dist" `
-        (Join-Path $PSScriptRoot 'windows\cosmic-comic.iss')
+        (Join-Path $PSScriptRoot 'windows\nebula-reader.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
     Write-Host "==> $(Join-Path $Dist "$Name-setup.exe")"
 } elseif ($env:REQUIRE_INSTALLER -eq '1') {

@@ -1029,32 +1029,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic-comic"
-version = "0.1.0-beta.4"
-dependencies = [
- "arboard",
- "ashpd 0.12.3",
- "compress-tools",
- "env_logger",
- "flate2",
- "image",
- "libcosmic",
- "log",
- "quick-xml 0.37.5",
- "regex",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "url",
- "windows-registry",
- "windows-sys 0.61.2",
- "winresource",
- "zip",
-]
-
-[[package]]
 name = "cosmic-config"
 version = "1.0.0"
 source = "git+https://github.com/NotTimm/libcosmic.git?rev=d5c937c8a9707487c084465717ab21876187a4d5#d5c937c8a9707487c084465717ab21876187a4d5"
@@ -3533,6 +3507,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "nebula-reader"
+version = "0.1.0-beta.4"
+dependencies = [
+ "arboard",
+ "ashpd 0.12.3",
+ "compress-tools",
+ "env_logger",
+ "flate2",
+ "image",
+ "libcosmic",
+ "log",
+ "quick-xml 0.37.5",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "windows-registry",
+ "windows-sys 0.61.2",
+ "winresource",
+ "zip",
 ]
 
 [[package]]

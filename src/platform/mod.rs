@@ -6,12 +6,31 @@ pub mod look;
 
 use std::path::PathBuf;
 
-/// Folder name used under the per-OS data/config/cache roots. Linux keeps
-/// the historical `cosmic-comic` so existing libraries are found.
+/// Folder name used under the per-OS data/config/cache roots.
 #[cfg(target_os = "linux")]
-const DIR_NAME: &str = "cosmic-comic";
+const DIR_NAME: &str = "nebula-reader";
 #[cfg(not(target_os = "linux"))]
-const DIR_NAME: &str = "CosmicComic";
+const DIR_NAME: &str = "NebulaReader";
+
+/// The folder name from before the app was renamed (Cosmic Comic).
+#[cfg(target_os = "linux")]
+const OLD_DIR_NAME: &str = "cosmic-comic";
+#[cfg(not(target_os = "linux"))]
+const OLD_DIR_NAME: &str = "CosmicComic";
+
+/// `root/<DIR_NAME>`, first moving an existing `root/<OLD_DIR_NAME>` there
+/// so a library from before the rename carries over. If the move fails
+/// (say, a permissions problem) the old folder keeps being used.
+fn app_dir(root: PathBuf) -> PathBuf {
+    let new = root.join(DIR_NAME);
+    if !new.exists() {
+        let old = root.join(OLD_DIR_NAME);
+        if old.is_dir() && std::fs::rename(&old, &new).is_err() {
+            return old;
+        }
+    }
+    new
+}
 
 /// The desktop environment the app is running under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,33 +83,33 @@ pub fn home_dir() -> PathBuf {
 
 #[cfg(target_os = "linux")]
 fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
-    std::env::var(var)
+    let root = std::env::var(var)
         .ok()
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| home_dir().join(fallback))
-        .join(DIR_NAME)
+        .unwrap_or_else(|| home_dir().join(fallback));
+    app_dir(root)
 }
 
 #[cfg(windows)]
 fn known_dir(var: &str, fallback: &str) -> PathBuf {
-    std::env::var_os(var)
+    let root = std::env::var_os(var)
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| home_dir().join(fallback))
-        .join(DIR_NAME)
+        .unwrap_or_else(|| home_dir().join(fallback));
+    app_dir(root)
 }
 
 /// Durable user data — the library database. Never auto-cleared.
-/// `~/.local/share/cosmic-comic`, `%APPDATA%\CosmicComic`, or
-/// `~/Library/Application Support/CosmicComic`.
+/// `~/.local/share/nebula-reader`, `%APPDATA%\NebulaReader`, or
+/// `~/Library/Application Support/NebulaReader`.
 pub fn data_dir() -> PathBuf {
     #[cfg(target_os = "linux")]
     return xdg_dir("XDG_DATA_HOME", ".local/share");
     #[cfg(windows)]
     return known_dir("APPDATA", r"AppData\Roaming");
     #[cfg(target_os = "macos")]
-    return home_dir().join("Library/Application Support").join(DIR_NAME);
+    return app_dir(home_dir().join("Library/Application Support"));
 }
 
 /// User preferences. On Windows and macOS these sit next to the data.
@@ -101,15 +120,15 @@ pub fn config_dir() -> PathBuf {
     return data_dir();
 }
 
-/// Derived artifacts, safe to delete. `~/.cache/cosmic-comic`,
-/// `%LOCALAPPDATA%\CosmicComic\Cache`, or `~/Library/Caches/CosmicComic`.
+/// Derived artifacts, safe to delete. `~/.cache/nebula-reader`,
+/// `%LOCALAPPDATA%\NebulaReader\Cache`, or `~/Library/Caches/NebulaReader`.
 pub fn cache_dir() -> PathBuf {
     #[cfg(target_os = "linux")]
     return xdg_dir("XDG_CACHE_HOME", ".cache");
     #[cfg(windows)]
     return known_dir("LOCALAPPDATA", r"AppData\Local").join("Cache");
     #[cfg(target_os = "macos")]
-    return home_dir().join("Library/Caches").join(DIR_NAME);
+    return app_dir(home_dir().join("Library/Caches"));
 }
 
 /// Opens a web URL in the default browser.

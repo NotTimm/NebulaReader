@@ -1052,10 +1052,10 @@ mod tests {
         }
     }
 
-    /// COSMIC_COMIC_EPUB_TEST=/path/book.epub prints what the parser sees.
+    /// NEBULA_EPUB_TEST=/path/book.epub prints what the parser sees.
     #[test]
     fn real_book() {
-        let Ok(path) = std::env::var("COSMIC_COMIC_EPUB_TEST") else { return };
+        let Ok(path) = std::env::var("NEBULA_EPUB_TEST") else { return };
         let book = open(Path::new(&path)).unwrap();
         println!("{} by {:?}: {} chapters, {} toc, {} images, {} words",
             book.title, book.author, book.chapters.len(), book.toc.len(), book.images.len(), book.total_words());

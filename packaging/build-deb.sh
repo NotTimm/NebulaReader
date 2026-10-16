@@ -81,8 +81,10 @@ Architecture: $ARCH
 Installed-Size: $INSTALLED_SIZE
 Depends: $DEPS
 Recommends: libxkbcommon-x11-0
+Replaces: cosmic-comic
+Breaks: cosmic-comic
 Maintainer: Tim Singel <gamer.tdogtim@gmail.com>
-Homepage: https://github.com/NotTimm/cosmic-reader
+Homepage: https://github.com/NotTimm/nebula-reader
 Description: Comic book and ebook reader for the COSMIC desktop
  A native COSMIC desktop reader for comic book archives (.cbz/.cbr),
  manga and comic series folders, and .epub books. Includes a scanned

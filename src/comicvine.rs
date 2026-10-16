@@ -111,7 +111,7 @@ pub fn save_api_key(key: &str) -> Result<(), String> {
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("cosmic-comic/0.1 (+https://github.com/NotTimm/cosmic-reader)")
+        .user_agent("nebula-reader/0.1 (+https://github.com/NotTimm/nebula-reader)")
         .build()
         .map_err(|e| format!("http client error: {e}"))
 }

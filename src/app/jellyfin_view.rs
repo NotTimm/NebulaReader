@@ -596,7 +596,7 @@ impl App {
 
     /// Settings: signed-in servers and adding one.
     pub(super) fn build_jellyfin_section(&self) -> Element<'_, Message> {
-        let mut section = widget::settings::section().title("Jellyfin");
+        let mut section = widget::settings::section().title("🪼 Jellyfin");
 
         for account in &self.jellyfin.accounts {
             let key = account.key();

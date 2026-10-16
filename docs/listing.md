@@ -1,6 +1,6 @@
-# Store listing — Cosmic Comic
+# Store listing — Nebula Reader
 
-Source text for the AppStream metainfo (`res/com.tsingel.CosmicComic.metainfo.xml`),
+Source text for the AppStream metainfo (`res/io.github.NotTimm.NebulaReader.metainfo.xml`),
 Flathub and the COSMIC Store. Everything inside the fenced `xml` blocks is valid
 AppStream description markup (`<p>`, `<ul>`/`<li>` only — no links, no
 emphasis, no nested lists) and can be pasted as-is.
@@ -8,7 +8,7 @@ emphasis, no nested lists) and can be pasted as-is.
 ## Name
 
 ```
-Cosmic Comic
+Nebula Reader
 ```
 
 ## Summary
@@ -25,7 +25,7 @@ Paste between `<description>` and `</description>`:
 
 ```xml
 <p>
-  Cosmic Comic is a reader for comic books, manga and EPUB books, built for
+  Nebula Reader is a reader for comic books, manga and EPUB books, built for
   the COSMIC desktop. Point it at the folders where your collection already
   lives and it turns them into a library of series, with covers, per-issue
   reading progress and a Continue Reading shelf.
@@ -123,19 +123,19 @@ sentence case, no trailing period:
 ```xml
 <screenshots>
   <screenshot type="default">
-    <image>https://raw.githubusercontent.com/NotTimm/cosmic-reader/master/res/screenshots/library.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/library.png</image>
     <caption>Your collection as a library of series</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/cosmic-reader/master/res/screenshots/series.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/series.png</image>
     <caption>Series pages with issue lists and progress</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/cosmic-reader/master/res/screenshots/reader.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader.png</image>
     <caption>Read comics one page or two at a time</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/cosmic-reader/master/res/screenshots/book.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
     <caption>Comfortable reading for EPUB books</caption>
   </screenshot>
 </screenshots>

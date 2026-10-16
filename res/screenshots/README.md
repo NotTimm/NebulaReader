@@ -21,9 +21,9 @@ res/screenshots/capture.sh reader                 # redo one
 res/screenshots/capture.sh --self-test            # check capture works
 ```
 
-It launches `cosmic-comic`, tells you what to set up for each view, then
+It launches `nebula-reader`, tells you what to set up for each view, then
 opens COSMIC's screenshot picker (`cosmic-screenshot`, via
-xdg-desktop-portal-cosmic). Pick **Window**, click the Cosmic Comic window,
+xdg-desktop-portal-cosmic). Pick **Window**, click the Nebula Reader window,
 and save. The PNG is copied here with its metadata stripped. `--full` takes
 whole-screen captures without the picker if that doesn't work, but then you
 crop by hand.

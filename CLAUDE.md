@@ -1,5 +1,10 @@
 # Notes for Claude
 
+The app is **Nebula Reader** ("Nebula" in launchers and the title bar),
+app ID `io.github.NotTimm.NebulaReader`, binary `nebula-reader`. It was
+Cosmic Comic up to 0.1.0-beta.4; data folders are moved over on first
+start (`src/platform/mod.rs`). The winget ID is still `NotTimm.CosmicComic`.
+
 ## Workflow
 
 - Commit as the owner: `git config user.name "Tim Singel"` and

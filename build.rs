@@ -4,22 +4,22 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=res/icons/com.tsingel.CosmicComic.ico");
-    println!("cargo:rerun-if-changed=res/icons/com.tsingel.CosmicComic-open.ico");
+    println!("cargo:rerun-if-changed=res/icons/io.github.NotTimm.NebulaReader.ico");
+    println!("cargo:rerun-if-changed=res/icons/io.github.NotTimm.NebulaReader-open.ico");
 
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
         // ID 1 is the exe's own icon; 2 is swapped in while reading (see
         // src/app/window_icon.rs).
-        res.set_icon("res/icons/com.tsingel.CosmicComic.ico")
-            .set_icon_with_id("res/icons/com.tsingel.CosmicComic-open.ico", "2")
-            .set("ProductName", "Cosmic Comic")
-            .set("FileDescription", "Cosmic Comic")
+        res.set_icon("res/icons/io.github.NotTimm.NebulaReader.ico")
+            .set_icon_with_id("res/icons/io.github.NotTimm.NebulaReader-open.ico", "2")
+            .set("ProductName", "Nebula Reader")
+            .set("FileDescription", "Nebula Reader")
             .set("CompanyName", "Tim Singel")
             .set("LegalCopyright", "Copyright © Tim Singel. Licensed under GPL-3.0-only.")
-            .set("OriginalFilename", "cosmic-comic.exe")
-            .set("InternalName", "cosmic-comic");
+            .set("OriginalFilename", "nebula-reader.exe")
+            .set("InternalName", "nebula-reader");
         res.compile().expect("failed to embed Windows resources (icon, version info)");
     }
 }

@@ -382,10 +382,10 @@ mod tests {
     use super::*;
 
     /// Runs discovery + scanning against a real folder: set
-    /// `COSMIC_COMIC_SCAN_TEST=/path/to/library` and run with --nocapture.
+    /// `NEBULA_SCAN_TEST=/path/to/library` and run with --nocapture.
     #[test]
     fn scan_real_library() {
-        let Ok(root) = std::env::var("COSMIC_COMIC_SCAN_TEST") else { return };
+        let Ok(root) = std::env::var("NEBULA_SCAN_TEST") else { return };
         for d in discover(Path::new(&root)) {
             let paths = issue_paths(&d);
             let rows = issue_rows(&paths, &HashMap::new(), false);

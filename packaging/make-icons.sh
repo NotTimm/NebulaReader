@@ -9,9 +9,9 @@
 # the background is keyed out (see KEY_SAT below). Outputs are committed, so
 # building the app never needs these tools:
 #
-#   res/icons/hicolor/<N>x<N>/apps/com.tsingel.CosmicComic.png  (Linux)
-#   res/icons/com.tsingel.CosmicComic.ico                       (Windows exe)
-#   res/icons/com.tsingel.CosmicComic-open.ico                  (Windows, reading)
+#   res/icons/hicolor/<N>x<N>/apps/io.github.NotTimm.NebulaReader.png  (Linux)
+#   res/icons/io.github.NotTimm.NebulaReader.ico                       (Windows exe)
+#   res/icons/io.github.NotTimm.NebulaReader-open.ico                  (Windows, reading)
 #   res/icons/window/book.png, book-open.png                   (runtime icon)
 #
 # Needs ImageMagick, plus rsvg-convert for SVG masters.

@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.tsingel.CosmicComic</id>
+  <id>io.github.NotTimm.NebulaReader</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
 
-  <name>Cosmic Comic</name>
+  <name>Nebula Reader</name>
   <summary>Read comic books and ebooks</summary>
 
   <description>
@@ -22,12 +22,12 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">com.tsingel.CosmicComic.desktop</launchable>
+  <launchable type="desktop-id">io.github.NotTimm.NebulaReader.desktop</launchable>
 
-  <url type="homepage">https://github.com/NotTimm/cosmic-reader</url>
-  <url type="bugtracker">https://github.com/NotTimm/cosmic-reader/issues</url>
+  <url type="homepage">https://github.com/NotTimm/nebula-reader</url>
+  <url type="bugtracker">https://github.com/NotTimm/nebula-reader/issues</url>
 
-  <developer id="com.tsingel">
+  <developer id="io.github.NotTimm">
     <name>Tim Singel</name>
   </developer>
 

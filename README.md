@@ -1,4 +1,4 @@
-# Cosmic Comic
+# Nebula Reader
 
 A [COSMIC desktop](https://system76.com/cosmic) reader for comics, manga
 and EPUB books that also runs on KDE Plasma, GNOME and Windows, taking on
@@ -6,6 +6,10 @@ each desktop's look. Point it at the folders your collection already lives
 in and it builds a library of series, with covers, per-issue progress and a
 Continue Reading shelf. Messy names are cleaned up and matched online for
 proper titles and descriptions.
+
+Nebula Reader was called **Cosmic Comic** up to 0.1.0-beta.4. Your
+library, progress and settings carry over: the first start moves them to
+the new folders.
 
 Screenshots: [`res/screenshots/`](res/screenshots/) (store copy and captions
 in [`docs/listing.md`](docs/listing.md)).
@@ -80,17 +84,17 @@ next start.
 ## Download
 
 Prebuilt packages are attached to each
-[GitHub Release](https://github.com/NotTimm/cosmic-reader/releases)
+[GitHub Release](https://github.com/NotTimm/nebula-reader/releases)
 (x86_64 only for now):
 
 | Package | For | Install |
 |---------|-----|---------|
-| `CosmicComic-<version>-windows-x64-setup.exe` | Windows 10/11 | Run it; installs for your user only, no admin needed. Or `winget install NotTimm.CosmicComic` |
-| `CosmicComic-<version>-windows-x64.zip` | Windows 10/11 | Portable: unzip anywhere and run `cosmic-comic.exe` |
-| `cosmic-comic_<version>_amd64.deb` | Ubuntu/Pop!_OS 24.04+ | `sudo apt install ./cosmic-comic_*_amd64.deb` |
-| `cosmic-comic-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./cosmic-comic-*.x86_64.rpm` |
-| `CosmicComic-<version>-x86_64.flatpak` | any distro with Flatpak | `flatpak install --user ./CosmicComic-*.flatpak` |
-| `CosmicComic-<version>-x86_64.AppImage` | any recent distro | `chmod +x CosmicComic-*.AppImage` and run it |
+| `NebulaReader-<version>-windows-x64-setup.exe` | Windows 10/11 | Run it; installs for your user only, no admin needed. Or `winget install NotTimm.CosmicComic` |
+| `NebulaReader-<version>-windows-x64.zip` | Windows 10/11 | Portable: unzip anywhere and run `nebula-reader.exe` |
+| `nebula-reader_<version>_amd64.deb` | Ubuntu/Pop!_OS 24.04+ | `sudo apt install ./nebula-reader_*_amd64.deb` |
+| `nebula-reader-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./nebula-reader-*.x86_64.rpm` |
+| `NebulaReader-<version>-x86_64.flatpak` | any distro with Flatpak | `flatpak install --user ./NebulaReader-*.flatpak` |
+| `NebulaReader-<version>-x86_64.AppImage` | any recent distro | `chmod +x NebulaReader-*.AppImage` and run it |
 
 Windows SmartScreen may warn about an unrecognised app, since the exe
 isn't code-signed; choose **More info → Run anyway**.
@@ -100,8 +104,8 @@ dependencies (`libarchive`, `libxkbcommon`, `openssl`, ...) are pulled in
 automatically. The `.deb` targets Ubuntu 24.04 / Pop!_OS 24.04 and newer
 Debian-based releases; the `.rpm` targets the Fedora release it was built
 on and newer. To upgrade, download the newer package and run the same
-command; to remove, `sudo apt remove cosmic-comic` or
-`sudo dnf remove cosmic-comic`. Your library and settings are kept either
+command; to remove, `sudo apt remove nebula-reader` or
+`sudo dnf remove nebula-reader`. Your library and settings are kept either
 way (see [Where your data lives](#where-your-data-lives)).
 
 Pre-release versions such as `0.1.0-beta.1` are packaged as `0.1.0~beta.1`,
@@ -189,7 +193,7 @@ The first version is submitted by hand from Windows:
 
 ```
 winget install Microsoft.WingetCreate
-wingetcreate new https://github.com/NotTimm/cosmic-reader/releases/download/v<version>/CosmicComic-<version>-windows-x64-setup.exe
+wingetcreate new https://github.com/NotTimm/nebula-reader/releases/download/v<version>/NebulaReader-<version>-windows-x64-setup.exe
 ```
 
 ### Icons
@@ -217,7 +221,7 @@ touches the code or packaging, and on manual runs, uploading them as
 workflow artifacts. To publish:
 
 1. Bump `version` in `Cargo.toml` (and add a `<release>` entry to
-   `res/com.tsingel.CosmicComic.metainfo.xml`), commit, push.
+   `res/io.github.NotTimm.NebulaReader.metainfo.xml`), commit, push.
 2. Tag that commit with the same version prefixed by `v` and push the tag:
 
    ```
@@ -242,15 +246,15 @@ Linux (XDG):
 
 | Path | Contents |
 |------|----------|
-| `~/.local/share/cosmic-comic/library.db` | Library, reading progress, metadata |
-| `~/.config/cosmic-comic/settings.json` | Preferences |
-| `~/.config/cosmic-comic/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
-| `~/.cache/cosmic-comic/` | Cover thumbnails, extracted archives — safe to delete |
+| `~/.local/share/nebula-reader/library.db` | Library, reading progress, metadata |
+| `~/.config/nebula-reader/settings.json` | Preferences |
+| `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
+| `~/.cache/nebula-reader/` | Cover thumbnails, extracted archives — safe to delete |
 
 On Windows, `library.db` and `settings.json` are in
-`%APPDATA%\CosmicComic\`, and the cache is
-`%LOCALAPPDATA%\CosmicComic\Cache\`. The Flatpak keeps its own copies
-under `~/.var/app/com.tsingel.CosmicComic/`.
+`%APPDATA%\NebulaReader\`, and the cache is
+`%LOCALAPPDATA%\NebulaReader\Cache\`. The Flatpak keeps its own copies
+under `~/.var/app/io.github.NotTimm.NebulaReader/`.
 
 The database is versioned with SQLite's `user_version` pragma and migrated
 in place on startup, so upgrading never requires wiping your library.
@@ -265,7 +269,7 @@ Installs to `~/.local` (binary, `.desktop` entry, icon) with no sudo
 needed. Re-run the same script any time to update: it pulls the latest
 commit (if this is a clean git checkout), rebuilds, and reinstalls.
 
-Override the install prefix with `COSMIC_COMIC_PREFIX=/usr/local ./install.sh`,
+Override the install prefix with `NEBULA_PREFIX=/usr/local ./install.sh`,
 or use `just prefix=/usr install` / `just uninstall` directly.
 
 ## ComicVine metadata (optional)
@@ -282,7 +286,7 @@ Without a key, the debug panel just shows that no ComicVine key is set.
 
 ## Jellyfin
 
-Cosmic Comic can read the **book** libraries of a Jellyfin server (10.9 or
+Nebula Reader can read the **book** libraries of a Jellyfin server (10.9 or
 newer; tested against 12.2). Video libraries are ignored.
 
 1. **Settings → Jellyfin**, type the server address (`192.168.1.20:8096`
@@ -308,7 +312,7 @@ How it works:
   in the book reader.
 - Progress uses the same fields as Jellyfin's own web reader (page in
   `PlaybackPositionTicks`, `Played` when a chapter is finished), so it
-  carries over between Cosmic Comic on different machines and the Jellyfin
+  carries over between Nebula Reader on different machines and the Jellyfin
   web app. Marking chapters read or unread in the app updates Jellyfin too.
 - Libraries re-sync on startup and with the refresh button next to the
   account in settings. Server-side progress wins only when it is newer

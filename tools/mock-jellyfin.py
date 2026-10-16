@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A tiny fake Jellyfin server for testing Cosmic Comic's Jellyfin support.
+"""A tiny fake Jellyfin server for testing Nebula Reader's Jellyfin support.
 
 Serves a folder of comics as a "books" library, with the same endpoints and
 reply shapes a real Jellyfin 12.x server gives (checked against one), byte

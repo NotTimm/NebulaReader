@@ -8,7 +8,7 @@ HERE="$(dirname "${BASH_SOURCE[0]}")"
 VERSION="$(version)"
 mkdir -p "$DIST_DIR"
 
-echo "=== Building cosmic-comic $VERSION packages ==="
+echo "=== Building nebula-reader $VERSION packages ==="
 built=()
 skipped=()
 

@@ -1,14 +1,18 @@
-# Flathub manifest: identical to ../com.tsingel.CosmicComic.yml except it
-# builds from a release tag instead of the local checkout. This file and a
-# cargo-sources.json generated for that tag are what go in the
-# flathub/com.tsingel.CosmicComic repo; see README.md next to this file.
-app-id: com.tsingel.CosmicComic
+# Flatpak manifest.
+#
+# Builds from the local checkout (`type: dir`) fully offline: every crate,
+# including the libcosmic fork's git dependencies, comes from
+# cargo-sources.json, which packaging/gen-cargo-sources.sh generates from
+# Cargo.lock (it's not committed; regenerate after changing Cargo.lock).
+# packaging/flathub/ has the variant that builds from a git tag, for
+# submitting to Flathub (which is where the COSMIC Store gets its apps).
+app-id: io.github.NotTimm.NebulaReader
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: cosmic-comic
+command: nebula-reader
 
 finish-args:
   - --socket=wayland
@@ -31,28 +35,28 @@ finish-args:
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
-    CARGO_HOME: /run/build/cosmic-comic/cargo
+    CARGO_HOME: /run/build/nebula-reader/cargo
     CARGO_NET_OFFLINE: 'true'
 
 modules:
-  - name: cosmic-comic
+  - name: nebula-reader
     buildsystem: simple
     build-commands:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
       - cargo --offline build --release --verbose
-      - install -Dm0755 target/release/cosmic-comic /app/bin/cosmic-comic
-      - install -Dm0644 res/com.tsingel.CosmicComic.desktop
-        /app/share/applications/com.tsingel.CosmicComic.desktop
-      - for png in res/icons/hicolor/*/apps/com.tsingel.CosmicComic.png; do
+      - install -Dm0755 target/release/nebula-reader /app/bin/nebula-reader
+      - install -Dm0644 res/io.github.NotTimm.NebulaReader.desktop
+        /app/share/applications/io.github.NotTimm.NebulaReader.desktop
+      - for png in res/icons/hicolor/*/apps/io.github.NotTimm.NebulaReader.png; do
           install -Dm0644 "$png" "/app/share/icons/hicolor/${png#res/icons/hicolor/}";
         done
-      - install -Dm0644 res/com.tsingel.CosmicComic.metainfo.xml
-        /app/share/metainfo/com.tsingel.CosmicComic.metainfo.xml
+      - install -Dm0644 res/io.github.NotTimm.NebulaReader.metainfo.xml
+        /app/share/metainfo/io.github.NotTimm.NebulaReader.metainfo.xml
     sources:
-      - type: git
-        url: https://github.com/NotTimm/cosmic-reader.git
-        tag: v0.1.0-beta.2
-        # Set to the tag's commit when submitting (Flathub requires it):
-        #   git rev-parse v0.1.0-beta.2^{commit}
-        commit: TAG_COMMIT_SHA
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - dist
+          - .flatpak-builder
       - cargo-sources.json

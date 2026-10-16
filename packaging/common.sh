@@ -2,8 +2,8 @@
 # Shared helpers for the packaging scripts. Source, don't execute.
 set -euo pipefail
 
-APP_ID="com.tsingel.CosmicComic"
-APP_NAME="cosmic-comic"
+APP_ID="io.github.NotTimm.NebulaReader"
+APP_NAME="nebula-reader"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_DIR/dist"

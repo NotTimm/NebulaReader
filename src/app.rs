@@ -45,7 +45,7 @@ const BG_LABELS: [&str; 2] = ["Theme", "Black"];
 const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 8.0;
 
-pub const APP_ID: &str = "com.tsingel.CosmicComic";
+pub const APP_ID: &str = "io.github.NotTimm.NebulaReader";
 
 const PRELOAD_NEAR: usize = 1;
 const PRELOAD_FAR: usize = 6;
@@ -916,7 +916,7 @@ impl Application for App {
             native_titlebar,
             icon_open: None,
             app_view: if flags.is_none() { AppView::Library } else { AppView::Reader },
-            title: "Cosmic Comic".to_string(),
+            title: "Nebula".to_string(),
             open_path: None,
             sources: Vec::new(),
             chapters: Vec::new(),
@@ -986,7 +986,7 @@ impl Application for App {
             remote: None,
             context_page: ContextPage::Settings,
         };
-        app.set_header_title("Cosmic Comic".into());
+        app.set_header_title("Nebula".into());
         if app.native_titlebar {
             // The system title bar has the window buttons and title, so
             // libcosmic's header bar becomes a plain toolbar.
@@ -998,7 +998,7 @@ impl Application for App {
         }
 
         let mut tasks = vec![match app.core.main_window_id() {
-            Some(id) => app.set_window_title("Cosmic Comic".into(), id),
+            Some(id) => app.set_window_title("Nebula".into(), id),
             None => Task::none(),
         }];
 
@@ -1648,7 +1648,7 @@ impl App {
                 ),
             ))
             .add_maybe((self.look().native_titlebar() != self.native_titlebar).then(|| {
-                widget::text::caption("The title bar changes the next time Cosmic Comic starts.")
+                widget::text::caption("The title bar changes the next time Nebula starts.")
             }))
             // COSMIC Settings already sets roundness for the COSMIC style.
             .add_maybe((self.look() != Look::Cosmic).then(|| {
@@ -1938,7 +1938,7 @@ impl App {
                 }
                 self.app_view = AppView::Library;
                 self.series_page = None;
-                self.set_header_title("Cosmic Comic".into());
+                self.set_header_title("Nebula".into());
                 return self.refresh_views();
             }
             Message::OpenSeriesPage(key) => {

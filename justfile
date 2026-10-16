@@ -1,5 +1,5 @@
-name := 'cosmic-comic'
-export APPID := 'com.tsingel.CosmicComic'
+name := 'nebula-reader'
+export APPID := 'io.github.NotTimm.NebulaReader'
 
 rootdir := ''
 prefix := '/usr'
@@ -47,7 +47,7 @@ install-local: build-release
     just prefix="$HOME/.local" install
     -update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
     -gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" 2>/dev/null
-    @echo "Installed to $HOME/.local/bin/cosmic-comic"
+    @echo "Installed to $HOME/.local/bin/nebula-reader"
 
 # Remove a user-local install
 uninstall-local:

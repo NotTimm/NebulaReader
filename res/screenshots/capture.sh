@@ -4,7 +4,7 @@
 #
 # Uses `cosmic-screenshot` (ships with COSMIC), which goes through
 # xdg-desktop-portal-cosmic. In the default interactive mode COSMIC's own
-# screenshot picker opens: choose "Window", click the Cosmic Comic window and
+# screenshot picker opens: choose "Window", click the Nebula Reader window and
 # save. That gives a window-only PNG with no desktop around it.
 #
 #   res/screenshots/capture.sh                 # all four, interactive
@@ -17,8 +17,8 @@
 #   --profile DIR  Run the app with XDG_DATA_HOME/XDG_CACHE_HOME under DIR, so
 #                  the shots show a demo library instead of your real one.
 #                  (Config stays put so the COSMIC theme still applies.)
-#   --bin PATH     Binary to run (default: cosmic-comic on PATH, else
-#                  target/release/cosmic-comic in this repo).
+#   --bin PATH     Binary to run (default: nebula-reader on PATH, else
+#                  target/release/nebula-reader in this repo).
 #   --no-launch    Don't start the app; use the window that's already open.
 #   --full         Non-interactive full-screen capture (every monitor). You
 #                  then have to crop each PNG to the window yourself.
@@ -103,7 +103,7 @@ capture() {
   fi
 }
 
-TMP="$(mktemp -d -t cosmic-comic-shots.XXXXXX)"
+TMP="$(mktemp -d -t nebula-reader-shots.XXXXXX)"
 APP_PID=""
 cleanup() {
   rm -rf "$TMP"
@@ -124,23 +124,23 @@ fi
 # ── launch the app ──────────────────────────────────────────────────────────
 if ((launch)); then
   if [[ -z "$bin" ]]; then
-    if command -v cosmic-comic >/dev/null; then bin="$(command -v cosmic-comic)"
-    elif [[ -x "$REPO/target/release/cosmic-comic" ]]; then bin="$REPO/target/release/cosmic-comic"
-    else die "cosmic-comic not found; build it (just build-release) or pass --bin"
+    if command -v nebula-reader >/dev/null; then bin="$(command -v nebula-reader)"
+    elif [[ -x "$REPO/target/release/nebula-reader" ]]; then bin="$REPO/target/release/nebula-reader"
+    else die "nebula-reader not found; build it (just build-release) or pass --bin"
     fi
   fi
-  if pgrep -x cosmic-comic >/dev/null; then
-    echo "Cosmic Comic is already running. Close it first so the window opens at"
+  if pgrep -x nebula-reader >/dev/null; then
+    echo "Nebula Reader is already running. Close it first so the window opens at"
     echo "its default size, or re-run with --no-launch to use it as is."
     exit 1
   fi
   env_args=()
   if [[ -n "$profile" ]]; then
     mkdir -p "$profile/data" "$profile/cache"
-    real_key="${XDG_DATA_HOME:-$HOME/.local/share}/cosmic-comic/comicvine_api_key.txt"
-    if [[ -f "$real_key" && ! -f "$profile/data/cosmic-comic/comicvine_api_key.txt" ]]; then
-      mkdir -p "$profile/data/cosmic-comic"
-      cp "$real_key" "$profile/data/cosmic-comic/"
+    real_key="${XDG_DATA_HOME:-$HOME/.local/share}/nebula-reader/comicvine_api_key.txt"
+    if [[ -f "$real_key" && ! -f "$profile/data/nebula-reader/comicvine_api_key.txt" ]]; then
+      mkdir -p "$profile/data/nebula-reader"
+      cp "$real_key" "$profile/data/nebula-reader/"
     fi
     env_args=(XDG_DATA_HOME="$profile/data" XDG_CACHE_HOME="$profile/cache")
     echo "Using demo profile $profile (add library folders there; it persists between runs)."
@@ -158,7 +158,7 @@ if ((full)); then
   echo "Full-screen mode: each shot captures every monitor. Crop to the window afterwards."
 else
   echo "For each shot COSMIC's screenshot picker opens: pick \"Window\", click the"
-  echo "Cosmic Comic window, then Save (Copy to clipboard also works)."
+  echo "Nebula Reader window, then Save (Copy to clipboard also works)."
 fi
 
 saved=()

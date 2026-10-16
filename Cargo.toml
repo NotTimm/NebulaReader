@@ -1,9 +1,9 @@
 [package]
-name = "cosmic-comic"
+name = "nebula-reader"
 version = "0.1.0-beta.4"
 edition = "2021"
 license = "GPL-3.0-only"
-description = "A native COSMIC desktop comic book (.cbz/.cbr) reader"
+description = "Nebula Reader: a comic, manga and ebook reader for COSMIC and other desktops"
 
 [dependencies]
 env_logger = "0.11"

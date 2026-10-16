@@ -51,12 +51,12 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE="$(dirname "$(readlink -f "$0")")"
 export LD_LIBRARY_PATH="$HERE/usr/lib:${LD_LIBRARY_PATH:-}"
 export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-exec "$HERE/usr/bin/cosmic-comic" "$@"
+exec "$HERE/usr/bin/nebula-reader" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
 mkdir -p "$DIST_DIR"
-OUT="$DIST_DIR/CosmicComic-$VERSION-$ARCH.AppImage"
+OUT="$DIST_DIR/NebulaReader-$VERSION-$ARCH.AppImage"
 # APPIMAGE_EXTRACT_AND_RUN lets appimagetool run without FUSE (CI, containers).
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream "$APPDIR" "$OUT"
 echo "==> $OUT"

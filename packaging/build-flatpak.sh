@@ -30,7 +30,7 @@ flatpak-builder --force-clean --user \
     "$WORK/build" "$MANIFEST"
 
 mkdir -p "$DIST_DIR"
-OUT="$DIST_DIR/CosmicComic-$VERSION.flatpak"
+OUT="$DIST_DIR/NebulaReader-$VERSION.flatpak"
 flatpak build-bundle "$WORK/repo" "$OUT" "$APP_ID"
 echo "==> $OUT"
 echo "    install with: flatpak install --user $OUT"

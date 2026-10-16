@@ -107,7 +107,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cosmic-comic-deb
+          name: nebula-reader-deb
           path: dist/*.deb
           if-no-files-found: error
 
@@ -150,7 +150,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cosmic-comic-rpm
+          name: nebula-reader-rpm
           path: dist/*.rpm
           if-no-files-found: error
 
@@ -179,8 +179,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cosmic-comic-appimage
-          path: dist/CosmicComic-*.AppImage
+          name: nebula-reader-appimage
+          path: dist/NebulaReader-*.AppImage
           if-no-files-found: error
 
   # The Flatpak builds offline, so every crate is listed up front from
@@ -224,15 +224,15 @@ jobs:
 
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
         with:
-          bundle: CosmicComic-${{ needs.version.outputs.version }}-x86_64.flatpak
-          manifest-path: packaging/com.tsingel.CosmicComic.yml
+          bundle: NebulaReader-${{ needs.version.outputs.version }}-x86_64.flatpak
+          manifest-path: packaging/io.github.NotTimm.NebulaReader.yml
           cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
           upload-artifact: false
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cosmic-comic-flatpak
-          path: CosmicComic-*.flatpak
+          name: nebula-reader-flatpak
+          path: NebulaReader-*.flatpak
           if-no-files-found: error
 
   windows:
@@ -292,11 +292,11 @@ jobs:
         run: |
           $setup = Get-ChildItem dist\*-setup.exe | Select-Object -First 1
           Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER' -Wait
-          $exe = "$env:LOCALAPPDATA\Programs\Cosmic Comic\cosmic-comic.exe"
+          $exe = "$env:LOCALAPPDATA\Programs\Nebula Reader\nebula-reader.exe"
           if (-not (Test-Path $exe)) { throw "not installed at $exe" }
-          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Cosmic Comic\archive.dll")) { throw 'archive.dll missing' }
-          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter 'Cosmic Comic.lnk' | Out-Host
-          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Cosmic Comic\unins*.exe" | Select-Object -First 1
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Nebula Reader\archive.dll")) { throw 'archive.dll missing' }
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter 'Nebula Reader.lnk' | Out-Host
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Nebula Reader\unins*.exe" | Select-Object -First 1
           Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
           # The uninstaller re-launches itself from %TEMP%, so -Wait returns early.
           for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
@@ -304,7 +304,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cosmic-comic-windows
+          name: nebula-reader-windows
           path: |
             dist/*.zip
             dist/*-setup.exe
@@ -334,7 +334,7 @@ jobs:
           # on the commit it built.
           tag_name: v${{ needs.version.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Cosmic Comic ${{ needs.version.outputs.version }}
+          name: Nebula Reader ${{ needs.version.outputs.version }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           generate_release_notes: true
           fail_on_unmatched_files: true

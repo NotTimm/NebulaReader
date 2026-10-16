@@ -1,13 +1,13 @@
 [Desktop Entry]
-Name=Cosmic Comic
-GenericName=Comic Book Reader
+Name=Nebula
+GenericName=Book & Comic Reader
 Comment=Read comics, manga and EPUB books from your library
-Exec=cosmic-comic %f
+Exec=nebula-reader %f
 Terminal=false
 Type=Application
 StartupNotify=true
-StartupWMClass=com.tsingel.CosmicComic
+StartupWMClass=io.github.NotTimm.NebulaReader
 MimeType=application/x-cbz;application/vnd.comicbook+zip;application/x-cbr;application/vnd.comicbook-rar;application/epub+zip;
-Icon=com.tsingel.CosmicComic
+Icon=io.github.NotTimm.NebulaReader
 Categories=Graphics;Viewer;X-COSMIC;
-Keywords=Comic;Comics;Manga;CBZ;CBR;EPUB;Ebook;Book;Reader;Library;ComicVine;AniList;
+Keywords=Nebula;Jellyfin;Comic;Comics;Manga;CBZ;CBR;EPUB;Ebook;Book;Reader;Library;ComicVine;AniList;

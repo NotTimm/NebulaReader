@@ -37,9 +37,12 @@ Version:        $VERSION
 Release:        $RELEASE%{?dist}
 Summary:        Comic book and ebook reader for the COSMIC desktop
 License:        GPL-3.0-only
-URL:            https://github.com/NotTimm/cosmic-reader
+URL:            https://github.com/NotTimm/nebula-reader
 # dlopen()ed by winit on X11 sessions, so the automatic requires miss it.
 Recommends:     libxkbcommon-x11
+# The app was called Cosmic Comic before 0.1.0-beta.5; upgrade over it.
+Obsoletes:      cosmic-comic < 0.1.0~beta.5
+Provides:       cosmic-comic = %{version}-%{release}
 
 %description
 A native COSMIC desktop reader for comic book archives (.cbz/.cbr),

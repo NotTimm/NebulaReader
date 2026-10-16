@@ -364,10 +364,10 @@ pub(crate) fn strip_html(s: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Live lookup against AniList/ComicVine: COSMIC_COMIC_META_TEST=1.
+    /// Live lookup against AniList/ComicVine: NEBULA_META_TEST=1.
     #[test]
     fn live_match() {
-        if std::env::var("COSMIC_COMIC_META_TEST").is_err() {
+        if std::env::var("NEBULA_META_TEST").is_err() {
             return;
         }
         let rt = tokio::runtime::Runtime::new().unwrap();
