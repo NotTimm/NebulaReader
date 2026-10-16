@@ -34,6 +34,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.1.0-beta.3" date="2026-10-16">
+      <description>
+        <p>A new icon, and a Windows installer.</p>
+        <ul>
+          <li>New galaxy book app icon, on every platform</li>
+          <li>Windows: per-user installer with Start menu entry and "Open with" for comics and books, and the icon embedded in the exe</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0-beta.2" date="2026-10-16">
       <description>
         <p>Runs on Windows, and takes on the look of the desktop it runs on.</p>
