@@ -34,6 +34,16 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.1.0-beta.2" date="2026-10-16">
+      <description>
+        <p>Runs on Windows, and takes on the look of the desktop it runs on.</p>
+        <ul>
+          <li>Native look on KDE Plasma (Breeze colours from your colour scheme), Windows 11 and GNOME, selectable under Settings, Appearance, Style</li>
+          <li>Native title bar on KDE and Windows</li>
+          <li>Windows build, plus AppImage and Flatpak packages</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0-beta.1" date="2026-08-18">
       <description>
         <p>First beta release.</p>
