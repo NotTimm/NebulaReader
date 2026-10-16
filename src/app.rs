@@ -23,7 +23,7 @@ use crate::library::{self, IssueEntry, IssueRow, SeriesEntry, SeriesKind};
 use crate::metadata::{self, SeriesMatch};
 use crate::naming;
 use crate::scan;
-use crate::platform::look::{self, Look};
+use crate::platform::look::{self, Corners, Look};
 use crate::platform::Desktop;
 use crate::settings::{Background as BgStyle, Settings};
 
@@ -133,6 +133,7 @@ pub enum Message {
     SetBackgroundOpacity(f32),
     SetBackground(usize),
     SetLook(usize),
+    SetCorners(usize),
     /// A window opened; (re)apply the window icon to it.
     WindowOpened,
     SetFetchMetadata(bool),
@@ -1591,6 +1592,17 @@ impl App {
             .add_maybe((self.look().native_titlebar() != self.native_titlebar).then(|| {
                 widget::text::caption("The title bar changes the next time Cosmic Comic starts.")
             }))
+            // COSMIC Settings already sets roundness for the COSMIC style.
+            .add_maybe((self.look() != Look::Cosmic).then(|| {
+                widget::settings::item(
+                    "Buttons",
+                    widget::dropdown(
+                        &Corners::LABELS[..],
+                        Corners::ALL.iter().position(|c| *c == s.corners),
+                        Message::SetCorners,
+                    ),
+                )
+            }))
             .add(widget::settings::item(
                 "Background",
                 widget::dropdown(
@@ -2356,6 +2368,13 @@ impl App {
                     self.settings.save();
                 }
             }
+            Message::SetCorners(idx) => {
+                if let Some(corners) = Corners::ALL.get(idx).copied() {
+                    self.settings.corners = corners;
+                    self.settings.save();
+                    return cosmic::command::set_theme(look::theme(self.look(), corners));
+                }
+            }
             Message::WindowOpened => {
                 // `update` re-sends the icon after this.
                 self.icon_open = None;
@@ -2364,7 +2383,7 @@ impl App {
                 if let Some(look) = Look::ALL.get(idx).copied() {
                     self.settings.look = look;
                     self.settings.save();
-                    return cosmic::command::set_theme(look::theme(self.look()));
+                    return cosmic::command::set_theme(look::theme(self.look(), self.settings.corners));
                 }
             }
             Message::SetFetchMetadata(enabled) => {

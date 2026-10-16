@@ -122,6 +122,8 @@ pub struct Settings {
     pub book: BookSettings,
     /// Which desktop's look the UI takes on (see `platform::look`).
     pub look: crate::platform::look::Look,
+    /// Button/corner shape override for the non-COSMIC styles.
+    pub corners: crate::platform::look::Corners,
 }
 
 impl Default for Settings {
@@ -134,6 +136,7 @@ impl Default for Settings {
             fetch_metadata: true,
             book: BookSettings::default(),
             look: crate::platform::look::Look::Auto,
+            corners: crate::platform::look::Corners::Auto,
         }
     }
 }

@@ -21,7 +21,7 @@
 use std::sync::{Arc, OnceLock};
 
 use cosmic::cosmic_theme::palette::{Srgb, Srgba};
-use cosmic::cosmic_theme::{CornerRadii, ThemeBuilder};
+use cosmic::cosmic_theme::{CornerRadii, Roundness, ThemeBuilder};
 use serde::{Deserialize, Serialize};
 
 use super::Desktop;
@@ -63,6 +63,33 @@ impl Look {
     }
 }
 
+/// Button and corner shape. `Auto` keeps the style's own shape (Breeze's
+/// small corners, Fluent's 4px, Adwaita's 6px); the others are COSMIC's
+/// three roundness options, for people who'd rather have those anywhere.
+/// The COSMIC style ignores this: COSMIC Settings already controls it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Corners {
+    #[default]
+    Auto,
+    Round,
+    SlightlyRound,
+    Square,
+}
+
+impl Corners {
+    pub const ALL: [Corners; 4] = [Corners::Auto, Corners::Round, Corners::SlightlyRound, Corners::Square];
+    pub const LABELS: [&'static str; 4] = ["Match style", "Round", "Slightly round", "Square"];
+
+    fn radii(self) -> Option<CornerRadii> {
+        match self {
+            Corners::Auto => None,
+            Corners::Round => Some(Roundness::Round.into()),
+            Corners::SlightlyRound => Some(Roundness::SlightlyRound.into()),
+            Corners::Square => Some(Roundness::Square.into()),
+        }
+    }
+}
+
 /// What we could learn about the host desktop's colours. Every field is
 /// optional; the look's built-in defaults fill the gaps.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -89,7 +116,7 @@ fn host() -> &'static HostColors {
 }
 
 /// Builds the libcosmic theme for an already-resolved look.
-pub fn theme(look: Look) -> cosmic::Theme {
+pub fn theme(look: Look, corners: Corners) -> cosmic::Theme {
     let host = host();
     let preset = match look {
         Look::Auto | Look::Cosmic => return cosmic::theme::system_preference(),
@@ -105,7 +132,7 @@ pub fn theme(look: Look) -> cosmic::Theme {
 
     let builder = if dark { ThemeBuilder::dark() } else { ThemeBuilder::light() };
     let built = builder
-        .corner_radii(preset.radii)
+        .corner_radii(corners.radii().unwrap_or(preset.radii))
         .accent(host.accent.unwrap_or_else(|| rgb(preset.accent)))
         .bg_color(opaque(host.window.unwrap_or_else(|| rgb(colors.window))))
         .primary_container_bg(opaque(host.view.unwrap_or_else(|| rgb(colors.view))))
@@ -386,6 +413,14 @@ ColorScheme=BreezeDark
         assert_eq!(c.accent, Some(rgb(0xe9643a)));
         assert_eq!(c.window, Some(rgb(0xeff0f1)));
         assert_eq!(c.dark, Some(false));
+    }
+
+    #[test]
+    fn corner_override() {
+        assert_eq!(Corners::Auto.radii(), None);
+        // Round gives COSMIC's pill buttons (buttons use radius_xl).
+        assert!(Corners::Round.radii().unwrap().radius_xl[0] > 100.0);
+        assert_eq!(Corners::Square.radii().unwrap().radius_xl[0], 2.0);
     }
 
     #[test]

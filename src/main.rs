@@ -23,13 +23,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Take on the host desktop's look (Breeze on KDE, Fluent on Windows...).
     let desktop = platform::Desktop::detect();
-    let look = settings::Settings::load().look.resolve(desktop);
+    let saved = settings::Settings::load();
+    let look = saved.look.resolve(desktop);
     platform::look::init(desktop);
     log::info!("desktop {desktop:?}, look {look:?}");
 
     let settings = Settings::default()
         .size(Size::new(1024.0, 768.0))
-        .theme(platform::look::theme(look))
+        .theme(platform::look::theme(look, saved.corners))
         // Breeze and Fluent use the system's own title bar.
         .client_decorations(!look.native_titlebar())
         // A native frame doesn't round or shadow libcosmic's content.
