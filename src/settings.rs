@@ -48,6 +48,23 @@ impl BookTheme {
     pub const LABELS: [&'static str; 5] = ["Auto", "Paper", "Sepia", "Dark", "Night"];
 }
 
+/// How a book's chapter is laid out on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BookLayout {
+    /// One page at a time; arrows, clicks and the wheel turn pages.
+    Page,
+    /// Two pages side by side, read left column then right, like an open
+    /// book. Falls back to one page when the window is too narrow.
+    TwoPages,
+    /// One long scrolling column per chapter.
+    Scroll,
+}
+
+impl BookLayout {
+    pub const ALL: [BookLayout; 3] = [BookLayout::Page, BookLayout::TwoPages, BookLayout::Scroll];
+    pub const LABELS: [&'static str; 3] = ["Single page", "Two pages", "Scroll"];
+}
+
 /// Text column width, as a reading measure (characters per line).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BookWidth {
@@ -85,6 +102,7 @@ pub struct BookSettings {
     pub width: BookWidth,
     pub theme: BookTheme,
     pub justify: bool,
+    pub layout: BookLayout,
 }
 
 impl BookSettings {
@@ -103,6 +121,7 @@ impl Default for BookSettings {
             width: BookWidth::Medium,
             theme: BookTheme::Auto,
             justify: true,
+            layout: BookLayout::Page,
         }
     }
 }

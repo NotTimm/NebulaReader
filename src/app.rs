@@ -28,6 +28,7 @@ use crate::platform::Desktop;
 use crate::settings::{Background as BgStyle, Settings};
 
 mod book_view;
+mod paged;
 mod library_view;
 mod window_icon;
 mod jellyfin_view;
@@ -205,6 +206,10 @@ pub struct App {
     epub_images: Vec<widget::image::Handle>,
     book_scroll: BookScroll,
     book_saved_pos: f32,
+    /// Page breaks of the current chapter, from the last layout.
+    book_pages: paged::Pages,
+    /// A book image opened full-window, by index into `epub_images`.
+    book_image: Option<usize>,
     // pointer / touch state
     modifiers: keyboard::Modifiers,
     touches: HashSet<touch::Finger>,
@@ -257,6 +262,23 @@ fn open_task(path: PathBuf) -> Task<Message> {
             Err(e) => Message::LoadFailed(format!("listing task panicked: {e}")),
         }
     })
+}
+
+/// Wraps a header control in a hover hint, so every button says what it does.
+pub(crate) fn tip<'a>(el: impl Into<Element<'a, Message>>, hint: impl Into<Cow<'a, str>>) -> Element<'a, Message> {
+    widget::tooltip(el, widget::text(hint.into()), widget::tooltip::Position::Bottom).into()
+}
+
+/// The icon button that enters or leaves full screen. One button that
+/// stays highlighted while full screen is on, so it can't be mistaken for
+/// the window's own maximize button.
+fn fullscreen_button<'a>(on: bool) -> Element<'a, Message> {
+    tip(
+        widget::button::icon(icon::from_name("view-fullscreen-symbolic"))
+            .selected(on)
+            .on_press(Message::ToggleFullscreen),
+        if on { "Leave full screen (F or Esc)" } else { "Full screen (F)" },
+    )
 }
 
 fn epub_open_task(path: PathBuf) -> Task<Message> {
@@ -917,6 +939,8 @@ impl Application for App {
             epub_images: Vec::new(),
             book_scroll: BookScroll::default(),
             book_saved_pos: 0.0,
+            book_pages: paged::Pages::default(),
+            book_image: None,
             modifiers: keyboard::Modifiers::default(),
             touches: HashSet::new(),
             chapter_covers: HashMap::new(),
@@ -1020,14 +1044,18 @@ impl Application for App {
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
         match self.app_view {
-            AppView::Reader if self.back_to_series => vec![widget::button::icon(icon::from_name(
-                "go-previous-symbolic",
-            ))
-            .on_press(Message::GoToLibrary)
-            .into()],
-            AppView::Reader | AppView::Series => vec![widget::button::icon(icon::from_name("go-home-symbolic"))
-                .on_press(Message::GoToLibrary)
-                .into()],
+            AppView::Reader if self.back_to_series => vec![tip(
+                widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::GoToLibrary),
+                "Back to series (Esc)",
+            )],
+            AppView::Reader => vec![tip(
+                widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
+                "Back to library (Esc)",
+            )],
+            AppView::Series => vec![tip(
+                widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
+                "Back to library",
+            )],
             AppView::Library => vec![],
         }
     }
@@ -1068,49 +1096,42 @@ impl Application for App {
             }
             AppView::Reader if self.epub_book.is_some() => {
                 let book = self.epub_book.as_ref().unwrap();
-                els.push(
+                els.push(tip(
                     widget::button::icon(icon::from_name("go-previous-symbolic"))
-                        .on_press(Message::Book(BookMsg::PrevChapter))
-                        .into(),
-                );
-                els.push(
-                    widget::text(format!("{} / {}", self.epub_chapter + 1, book.chapters.len())).into(),
-                );
-                els.push(
+                        .on_press(Message::Book(BookMsg::PrevChapter)),
+                    "Previous chapter",
+                ));
+                els.push(tip(
+                    widget::text(format!("{} / {}", self.epub_chapter + 1, book.chapters.len())),
+                    "Chapter",
+                ));
+                els.push(tip(
                     widget::button::icon(icon::from_name("go-next-symbolic"))
-                        .on_press(Message::Book(BookMsg::NextChapter))
-                        .into(),
-                );
+                        .on_press(Message::Book(BookMsg::NextChapter)),
+                    "Next chapter",
+                ));
                 els.push(widget::divider::vertical::light().into());
-                els.push(
-                    widget::tooltip(
-                        widget::button::icon(icon::from_name("view-list-symbolic"))
-                            .on_press(Message::ToggleChapterSelect),
-                        widget::text("Contents (C)"),
-                        widget::tooltip::Position::Bottom,
-                    )
-                    .into(),
-                );
-                els.push(
-                    widget::tooltip(
-                        widget::button::standard("Aa").on_press(Message::Book(BookMsg::ToggleTypography)),
-                        widget::text("Text & page settings"),
-                        widget::tooltip::Position::Bottom,
-                    )
-                    .into(),
-                );
-                els.push(
+                els.push(tip(
+                    widget::button::icon(icon::from_name("view-list-symbolic"))
+                        .selected(self.show_chapter_select)
+                        .on_press(Message::ToggleChapterSelect),
+                    "Contents (C)",
+                ));
+                els.push(tip(
+                    widget::button::standard("Aa").on_press(Message::Book(BookMsg::ToggleTypography)),
+                    "Text, layout and page settings (A)",
+                ));
+                els.push(tip(
                     widget::button::icon(icon::from_name("dialog-information-symbolic"))
-                        .on_press(Message::ToggleInfo)
-                        .into(),
-                );
-                let fs_icon = if self.fullscreen { "view-restore-symbolic" } else { "view-fullscreen-symbolic" };
-                els.push(widget::button::icon(icon::from_name(fs_icon)).on_press(Message::ToggleFullscreen).into());
-                els.push(
+                        .on_press(Message::ToggleInfo),
+                    "Book details (I)",
+                ));
+                els.push(fullscreen_button(self.fullscreen));
+                els.push(tip(
                     widget::button::icon(icon::from_name("emblem-system-symbolic"))
-                        .on_press(Message::ToggleSettings)
-                        .into(),
-                );
+                        .on_press(Message::ToggleSettings),
+                    "Settings (S)",
+                ));
             }
             AppView::Reader => {
                 if !self.sources.is_empty() {
@@ -1125,42 +1146,42 @@ impl Application for App {
                         format!("{} / {}", self.current_page + 1, self.sources.len())
                     };
 
-                    els.push(
-                        widget::button::icon(icon::from_name("go-previous-symbolic"))
-                            .on_press(Message::PrevPage)
-                            .into(),
-                    );
-                    els.push(widget::text(counter).into());
-                    els.push(
-                        widget::button::icon(icon::from_name("go-next-symbolic"))
-                            .on_press(Message::NextPage)
-                            .into(),
-                    );
+                    els.push(tip(
+                        widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::PrevPage),
+                        "Previous page (←)",
+                    ));
+                    els.push(tip(widget::text(counter), "Page"));
+                    els.push(tip(
+                        widget::button::icon(icon::from_name("go-next-symbolic")).on_press(Message::NextPage),
+                        "Next page (→)",
+                    ));
                     els.push(widget::divider::vertical::light().into());
 
                     // Chapter select (only for multi-chapter series)
                     if self.chapters.len() > 1 {
-                        els.push(
+                        els.push(tip(
                             widget::button::icon(icon::from_name("view-list-symbolic"))
-                                .on_press(Message::ToggleChapterSelect)
-                                .into(),
-                        );
+                                .selected(self.show_chapter_select)
+                                .on_press(Message::ToggleChapterSelect),
+                            "Chapters (C)",
+                        ));
                     }
-                    els.push(
+                    els.push(tip(
                         widget::button::icon(icon::from_name("view-dual-symbolic"))
-                            .on_press(Message::ToggleLayout)
-                            .into(),
-                    );
-                    els.push(
+                            .selected(self.layout == Layout::Dual)
+                            .on_press(Message::ToggleLayout),
+                        if self.layout == Layout::Dual { "Show one page (L)" } else { "Show two pages (L)" },
+                    ));
+                    els.push(tip(
                         widget::button::icon(icon::from_name("zoom-in-symbolic"))
-                            .on_press(Message::ToggleZoom)
-                            .into(),
-                    );
-                    els.push(
-                        widget::button::icon(icon::from_name("edit-copy-symbolic"))
-                            .on_press(Message::CopyPage)
-                            .into(),
-                    );
+                            .selected(self.zoom_active)
+                            .on_press(Message::ToggleZoom),
+                        if self.zoom_active { "Stop zooming (M)" } else { "Zoom and pan (M, or Ctrl + scroll)" },
+                    ));
+                    els.push(tip(
+                        widget::button::icon(icon::from_name("edit-copy-symbolic")).on_press(Message::CopyPage),
+                        "Copy page image (P)",
+                    ));
                     els.push(widget::divider::vertical::light().into());
                 }
 
@@ -1228,6 +1249,12 @@ impl Application for App {
 impl App {
     fn handle_key(&mut self, key: Key) -> Task<Message> {
         if self.app_view == AppView::Reader && self.epub_book.is_some() {
+            if self.book_image.is_some() {
+                if matches!(key, Key::Named(Named::Escape | Named::Backspace)) {
+                    self.book_image = None;
+                }
+                return Task::none();
+            }
             let ctrl = self.modifiers.control();
             let shift = self.modifiers.shift();
             let msg = match &key {
@@ -1266,6 +1293,9 @@ impl App {
                 return self.update(Message::PrevPage);
             }
             Key::Named(Named::Escape) => {
+                if self.fullscreen {
+                    return self.update(Message::ToggleFullscreen);
+                }
                 if self.zoom_active { self.zoom_active = false; self.zoom = 1.0; }
                 else if self.show_chapter_select { self.show_chapter_select = false; }
                 else if self.app_view != AppView::Library { return self.update(Message::GoToLibrary); }
@@ -1279,13 +1309,7 @@ impl App {
                 self.zoom = 1.0;
             }
             Key::Character(c) if self.app_view == AppView::Reader => match c.as_str() {
-                "f" | "F" => {
-                    self.fullscreen = !self.fullscreen;
-                    let mode = if self.fullscreen { window::Mode::Fullscreen } else { window::Mode::Windowed };
-                    if let Some(id) = self.core.main_window_id() {
-                        return window::set_mode(id, mode);
-                    }
-                }
+                "f" | "F" => return self.update(Message::ToggleFullscreen),
                 "t" | "T" => self.theater_mode = !self.theater_mode,
                 "l" | "L" => {
                     self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
@@ -1572,26 +1596,25 @@ impl App {
     /// everything with a persistent preference now lives in the settings
     /// drawer instead of the header bar.
     fn reader_common_controls(&self) -> Vec<Element<'_, Message>> {
-        let fs_icon = if self.fullscreen {
-            icon::from_name("view-restore-symbolic")
-        } else {
-            icon::from_name("view-fullscreen-symbolic")
-        };
         vec![
-            widget::button::icon(icon::from_name("zoom-fit-best-symbolic"))
-                .on_press(Message::FitPage)
-                .into(),
-            widget::button::icon(icon::from_name("dialog-information-symbolic"))
-                .on_press(Message::ToggleInfo)
-                .into(),
-            widget::button::icon(fs_icon).on_press(Message::ToggleFullscreen).into(),
-            widget::button::icon(icon::from_name("emblem-system-symbolic"))
-                .on_press(Message::ToggleSettings)
-                .into(),
+            tip(
+                widget::button::icon(icon::from_name("zoom-fit-best-symbolic")).on_press(Message::FitPage),
+                "Fit page to window",
+            ),
+            tip(
+                widget::button::icon(icon::from_name("dialog-information-symbolic")).on_press(Message::ToggleInfo),
+                "Details (I)",
+            ),
+            fullscreen_button(self.fullscreen),
+            tip(
+                widget::button::icon(icon::from_name("emblem-system-symbolic")).on_press(Message::ToggleSettings),
+                "Settings (S)",
+            ),
             widget::divider::vertical::light().into(),
-            widget::button::icon(icon::from_name("document-open-symbolic"))
-                .on_press(Message::OpenFile)
-                .into(),
+            tip(
+                widget::button::icon(icon::from_name("document-open-symbolic")).on_press(Message::OpenFile),
+                "Open a file",
+            ),
         ]
     }
 
@@ -1962,6 +1985,7 @@ impl App {
                 self.zoom = 1.0;
                 self.comic_info = None;
                 self.epub_book = None;
+                self.book_image = None;
                 self.epub_chapter = 0;
                 self.epub_cover = None;
                 self.show_chapter_select = false;

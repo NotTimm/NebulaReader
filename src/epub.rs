@@ -153,7 +153,10 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
                             images.len() - 1
                         }),
                     };
-                    if let Some(i) = idx {
+                    // Glyph stand-ins and social icons (a few pixels
+                    // tall) mean nothing as a block of their own.
+                    let tiny = idx.and_then(|i| image_size(&images[i])).is_some_and(|(w, h)| w.max(h) <= 32);
+                    if let (Some(i), false) = (idx, tiny) {
                         blocks.push(Block::Image(i));
                     }
                 }
@@ -1066,4 +1069,9 @@ mod tests {
             }
         }
     }
+}
+
+/// Pixel size of an encoded image, read from its header only.
+fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()
 }

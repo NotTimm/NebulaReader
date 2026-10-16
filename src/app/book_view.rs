@@ -14,10 +14,11 @@ use cosmic::iced::{Alignment, Background, Color, ContentFit, Font, Length};
 use cosmic::widget::{self, icon};
 use cosmic::{app::Task, Element};
 
-use super::{App, ContextPage, Message};
+use super::paged::{BoxKind, Paged};
+use super::{tip, App, ContextPage, Message};
 use crate::epub::{Align, Block, Inline};
 use crate::library;
-use crate::settings::{BookFont, BookSettings, BookTheme, BookWidth};
+use crate::settings::{BookFont, BookLayout, BookSettings, BookTheme, BookWidth};
 
 /// Reading speed used for "time left" estimates.
 const WORDS_PER_MINUTE: f32 = 250.0;
@@ -45,7 +46,13 @@ pub enum BookMsg {
     SetWidth(usize),
     SetTheme(usize),
     SetJustify(bool),
+    SetLayout(usize),
+    /// Show a book image full-window, zoomable (maps, photos).
+    OpenImage(usize),
+    CloseImage,
     ToggleTypography,
+    /// The page layout changed (resize, new chapter, new font); just redraw.
+    Repaginated,
 }
 
 /// Where the book view's scrollable currently is.
@@ -139,14 +146,21 @@ impl App {
             return widget::text("This book has no chapters.").into();
         };
 
+        let paged = bs.layout != BookLayout::Scroll;
+        // Tallest an image may be: one page, so it never gets cut off.
+        let page_h = if paged { self.book_pages.lock().map(|p| p.page_h).unwrap_or(0.0) } else { 0.0 };
+
         // ── The page ──────────────────────────────────────────────────────
+        // `kinds` says, child by child, where pages may break.
         let mut page = widget::Column::new().width(Length::Fill);
+        let mut kinds = Vec::new();
         // Chapter openings start a third of the way down, like print.
         page = page.push(widget::Space::new().height(Length::Fixed(size * 3.0)));
+        kinds.push(BoxKind::Gap);
 
         let mut prev_breaks_flow = true; // start of chapter
         for (i, block) in chapter.blocks.iter().enumerate() {
-            let (el, top, breaks_flow): (Element<'_, Message>, f32, bool) = match block {
+            let (el, kind, top, breaks_flow): (Element<'_, Message>, BoxKind, f32, bool) = match block {
                 Block::Heading { level, spans: runs } => {
                     let hs = size * heading_scale(*level);
                     let mut f = font;
@@ -158,7 +172,7 @@ impl App {
                         .width(Length::Fill)
                         .into();
                     let top = if i == 0 { 0.0 } else { size * 1.2 };
-                    (el, top, true)
+                    (el, BoxKind::Lines(hs * 1.25), top, true)
                 }
                 Block::Paragraph { spans: runs, align, indent } => {
                     let mut sp = spans(runs, font, size, false);
@@ -180,7 +194,7 @@ impl App {
                         .into();
                     // Indented paragraphs run on; others get a half line.
                     let top = if indented { size * 0.1 } else if i == 0 { 0.0 } else { size * 0.6 };
-                    (el, top, *align != Align::Default)
+                    (el, BoxKind::Lines(size * bs.line_spacing), top, *align != Align::Default)
                 }
                 Block::Quote(runs) => {
                     let el = widget::container(
@@ -192,7 +206,7 @@ impl App {
                     )
                     .padding([0.0, size * 1.6])
                     .into();
-                    (el, size * 0.7, true)
+                    (el, BoxKind::Lines(size * 0.95 * bs.line_spacing), size * 0.7, true)
                 }
                 Block::ListItem(runs) => {
                     let el = widget::Row::new()
@@ -201,7 +215,7 @@ impl App {
                         .push(rich_text(spans(runs, font, size, false)).size(size).line_height(body_lh).width(Length::Fill))
                         .padding([0.0, 0.0, 0.0, size])
                         .into();
-                    (el, size * 0.25, true)
+                    (el, BoxKind::Lines(size * bs.line_spacing), size * 0.25, true)
                 }
                 Block::Rule => {
                     // Next to a heading it's decoration: a short hairline.
@@ -220,64 +234,101 @@ impl App {
                         widget::text("⁂").size(size * 1.1).font(font).into()
                     };
                     let el = widget::container(mark).width(Length::Fill).center_x(Length::Fill).into();
-                    (el, size * 0.9, true)
+                    (el, BoxKind::Solid, size * 0.9, true)
                 }
                 Block::Image(idx) => {
                     let el = match self.epub_images.get(*idx) {
-                        Some(h) => widget::container(
-                            widget::image(h.clone()).content_fit(ContentFit::ScaleDown).width(Length::Shrink),
-                        )
-                        .width(Length::Fill)
-                        .center_x(Length::Fill)
-                        .into(),
+                        Some(h) => {
+                            let img =
+                                widget::image(h.clone()).content_fit(ContentFit::ScaleDown).width(Length::Shrink);
+                            let mut c = widget::container(img).width(Length::Fill).center_x(Length::Fill);
+                            if page_h > 0.0 {
+                                c = c.max_height(page_h);
+                            }
+                            c.into()
+                        }
                         None => widget::Space::new().height(0).into(),
                     };
-                    (el, size * 0.8, true)
+                    (el, BoxKind::Image(*idx), size * 0.8, true)
                 }
             };
             if top > 0.0 {
                 page = page.push(widget::Space::new().height(Length::Fixed(top)));
+                kinds.push(BoxKind::Gap);
             }
             page = page.push(el);
+            kinds.push(kind);
             // After a heading/break/image the next paragraph isn't indented.
             prev_breaks_flow = breaks_flow;
         }
 
         // ── End of chapter ────────────────────────────────────────────────
+        // Paged, the next page is simply the next chapter; scrolling, a
+        // button at the bottom saves a trip to the header.
         page = page.push(widget::Space::new().height(Length::Fixed(size * 3.0)));
-        if let Some(next) = book.chapters.get(self.epub_chapter + 1) {
-            page = page.push(
-                widget::container(
-                    widget::button::standard(format!("Next: {}  →", truncate(&next.title, 40)))
-                        .on_press(Message::Book(BookMsg::NextChapter)),
-                )
-                .width(Length::Fill)
-                .center_x(Length::Fill),
-            );
-        } else {
-            page = page.push(
-                widget::container(widget::text("The End").size(size * 1.1).font(font))
+        kinds.push(BoxKind::Gap);
+        let next = book.chapters.get(self.epub_chapter + 1);
+        match next {
+            Some(next) if !paged => {
+                page = page.push(
+                    widget::container(
+                        widget::button::standard(format!("Next: {}  →", truncate(&next.title, 40)))
+                            .on_press(Message::Book(BookMsg::NextChapter)),
+                    )
                     .width(Length::Fill)
                     .center_x(Length::Fill),
-            );
+                );
+                kinds.push(BoxKind::Solid);
+            }
+            Some(_) => {}
+            None => {
+                page = page.push(
+                    widget::container(widget::text("The End").size(size * 1.1).font(font))
+                        .width(Length::Fill)
+                        .center_x(Length::Fill),
+                );
+                kinds.push(BoxKind::Solid);
+            }
         }
-        page = page.push(widget::Space::new().height(Length::Fixed(size * 4.0)));
+        if !paged {
+            page = page.push(widget::Space::new().height(Length::Fixed(size * 4.0)));
+        }
 
         let measure = size * bs.width.ems();
-        let column = widget::container(page)
-            .max_width(measure + size * 3.0)
-            .padding([0.0, size * 1.5]);
-
-        let scroller = widget::scrollable(
-            widget::container(column).width(Length::Fill).center_x(Length::Fill),
-        )
-        .id(book_scroll_id())
-        .on_scroll(|v| Message::Book(BookMsg::Scrolled(v)))
-        .width(Length::Fill)
-        .height(Length::Fill);
+        let reading: Element<'_, Message> = if paged {
+            Paged::new(
+                page,
+                kinds,
+                self.book_pages.clone(),
+                self.epub_chapter,
+                self.book_scroll.rel_y,
+                Message::Book(BookMsg::PageDown),
+                Message::Book(BookMsg::PageUp),
+                Message::Book(BookMsg::Repaginated),
+            )
+            .measure(measure)
+            .two_pages(bs.layout == BookLayout::TwoPages, size * 18.0)
+            .margins(size * 2.0, size * 1.5)
+            .on_image(|i| Message::Book(BookMsg::OpenImage(i)))
+            .into()
+        } else {
+            let column = widget::container(page)
+                .max_width(measure + size * 3.0)
+                .padding([0.0, size * 1.5]);
+            widget::scrollable(widget::container(column).width(Length::Fill).center_x(Length::Fill))
+                .id(book_scroll_id())
+                .on_scroll(|v| Message::Book(BookMsg::Scrolled(v)))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        };
 
         // ── Status line: where you are in the chapter / book ──────────────
-        let rel = self.book_scroll.rel_y.clamp(0.0, 1.0);
+        let pages = if paged { self.book_pages.lock().ok().filter(|p| p.chapter == self.epub_chapter).map(|p| p.clone()) } else { None };
+        let rel = match &pages {
+            Some(p) => p.read_through(self.book_scroll.rel_y),
+            None => self.book_scroll.rel_y.clamp(0.0, 1.0),
+        };
         let words_left = chapter.words as f32 * (1.0 - rel);
         let mins = (words_left / WORDS_PER_MINUTE).ceil() as u32;
         let total = book.total_words().max(1) as f32;
@@ -298,6 +349,15 @@ impl App {
                     .width(Length::Fill),
             )
             .push(widget::text(left_label).size(12))
+            .push_maybe(pages.as_ref().filter(|p| p.count() > 0).map(|p| {
+                let first = p.page_at(self.book_scroll.rel_y);
+                let label = if p.step() == 2 && first + 1 < p.count() {
+                    format!("   Pages {}–{} of {}", first + 1, first + 2, p.count())
+                } else {
+                    format!("   Page {} of {}", first + 1, p.count())
+                };
+                widget::text(label).size(12)
+            }))
             .push(widget::text(format!("   {book_pct:.0}%")).size(12));
         let muted = pal.muted;
         let status = widget::container(status).style(move |_: &cosmic::Theme| widget::container::Style {
@@ -307,7 +367,7 @@ impl App {
 
         let (bg, fg) = (pal.bg, pal.fg);
         let content: Element<'_, Message> = widget::container(
-            widget::Column::new().push(scroller).push(status),
+            widget::Column::new().push(reading).push(status),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -317,6 +377,12 @@ impl App {
             ..Default::default()
         })
         .into();
+
+        // A picture opened from the page takes over the reading area.
+        let content = match self.book_image.and_then(|i| self.epub_images.get(i)) {
+            Some(h) => self.view_book_image(h, bg),
+            None => content,
+        };
 
         let main_row: Element<'_, Message> = if self.show_chapter_select {
             widget::Row::new()
@@ -334,6 +400,37 @@ impl App {
         col.push(main_row).into()
     }
 
+    /// One of the book's images, filling the reading area: scroll or pinch
+    /// to zoom, drag to pan.
+    fn view_book_image(&self, h: &widget::image::Handle, bg: Color) -> Element<'_, Message> {
+        let bar = widget::Row::new()
+            .spacing(8)
+            .padding([6, 12])
+            .align_y(Alignment::Center)
+            .push(
+                widget::text::caption("Scroll or pinch to zoom · drag to move · Esc to go back")
+                    .width(Length::Fill),
+            )
+            .push(tip(
+                widget::button::standard("Back to book").on_press(Message::Book(BookMsg::CloseImage)),
+                "Back to the page (Esc)",
+            ));
+        let viewer = widget::image::viewer(h.clone())
+            .content_fit(ContentFit::Contain)
+            .min_scale(1.0)
+            .max_scale(8.0)
+            .width(Length::Fill)
+            .height(Length::Fill);
+        widget::container(widget::Column::new().push(bar).push(viewer))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_: &cosmic::Theme| widget::container::Style {
+                background: Some(Background::Color(bg)),
+                ..Default::default()
+            })
+            .into()
+    }
+
     /// Table of contents, from the book's own navigation.
     pub(super) fn build_epub_chapter_select(&self) -> Element<'_, Message> {
         let book = self.epub_book.as_ref().unwrap();
@@ -345,10 +442,11 @@ impl App {
                 .align_y(Alignment::Center)
                 .padding(12)
                 .push(widget::text::title4("Contents").width(Length::Fill))
-                .push(
+                .push(tip(
                     widget::button::icon(icon::from_name("window-close-symbolic"))
                         .on_press(Message::ToggleChapterSelect),
-                ),
+                    "Close contents (C)",
+                )),
         );
         col = col.push(widget::divider::horizontal::light());
 
@@ -420,7 +518,10 @@ impl App {
         let size_row = widget::Row::new()
             .spacing(8)
             .align_y(Alignment::Center)
-            .push(widget::button::standard("A−").on_press(Message::Book(BookMsg::FontSmaller)))
+            .push(tip(
+                widget::button::standard("A−").on_press(Message::Book(BookMsg::FontSmaller)),
+                "Smaller text (Ctrl −)",
+            ))
             .push(
                 widget::slider(
                     f32::from(BookSettings::MIN_SIZE)..=f32::from(BookSettings::MAX_SIZE),
@@ -430,7 +531,10 @@ impl App {
                 .step(1.0)
                 .width(Length::Fill),
             )
-            .push(widget::button::standard("A+").on_press(Message::Book(BookMsg::FontBigger)));
+            .push(tip(
+                widget::button::standard("A+").on_press(Message::Book(BookMsg::FontBigger)),
+                "Larger text (Ctrl +)",
+            ));
 
         let spacing_idx = BookSettings::LINE_SPACINGS
             .iter()
@@ -465,6 +569,14 @@ impl App {
         let layout = widget::settings::section()
             .title("Page")
             .add(widget::settings::item(
+                "Layout",
+                widget::dropdown(
+                    &BookLayout::LABELS[..],
+                    BookLayout::ALL.iter().position(|l| *l == bs.layout),
+                    |i| Message::Book(BookMsg::SetLayout(i)),
+                ),
+            ))
+            .add(widget::settings::item(
                 "Line width",
                 widget::dropdown(
                     &BookWidth::LABELS[..],
@@ -482,7 +594,7 @@ impl App {
             ));
 
         let help = widget::settings::section().title("Keys").add(widget::text::caption(
-            "Space / → / Page Down: next page  ·  ← / Page Up: previous page  ·  ↑ ↓: scroll  ·  C: contents  ·  Ctrl 0: default size",
+            "→ / Space / Page Down, or click the right edge: next page  ·  ← / Page Up, or click the left edge: previous page  ·  Mouse wheel: turn pages (scrolls in Scroll layout)  ·  C: contents  ·  F: full screen  ·  Ctrl 0: default size",
         ));
 
         widget::settings::view_column(vec![section.into(), layout.into(), help.into()]).into()
@@ -506,6 +618,36 @@ impl App {
                 };
                 if (self.book_scroll.rel_y - self.book_saved_pos).abs() > 0.02 {
                     self.persist_book_position();
+                }
+            }
+            BookMsg::PageDown | BookMsg::LineDown if self.is_paged() => {
+                let Some((page, count, step)) = self.current_book_page() else { return Task::none() };
+                if page + step >= count {
+                    return self.update_book(BookMsg::NextChapter);
+                }
+                self.book_scroll.rel_y = self.book_pages.lock().map(|p| p.anchor_of(page + step)).unwrap_or(0.0);
+                self.persist_book_position();
+            }
+            BookMsg::PageUp | BookMsg::LineUp if self.is_paged() => {
+                let Some((page, _, step)) = self.current_book_page() else { return Task::none() };
+                if page == 0 {
+                    if self.epub_chapter > 0 {
+                        return self.go_to_chapter(self.epub_chapter - 1, 1.0);
+                    }
+                    return Task::none();
+                }
+                self.book_scroll.rel_y =
+                    self.book_pages.lock().map(|p| p.anchor_of(page.saturating_sub(step))).unwrap_or(0.0);
+                self.persist_book_position();
+            }
+            BookMsg::Repaginated => {}
+            BookMsg::OpenImage(i) => self.book_image = Some(i),
+            BookMsg::CloseImage => self.book_image = None,
+            BookMsg::SetLayout(i) => {
+                if let Some(l) = BookLayout::ALL.get(i) {
+                    self.settings.book.layout = *l;
+                    self.settings.save();
+                    return self.keep_book_position();
                 }
             }
             BookMsg::PageDown => {
@@ -584,6 +726,18 @@ impl App {
         Task::none()
     }
 
+    fn is_paged(&self) -> bool {
+        self.settings.book.layout != BookLayout::Scroll
+    }
+
+    /// (first page on screen, pages in chapter, pages per turn), once the
+    /// current chapter has been laid out.
+    fn current_book_page(&self) -> Option<(usize, usize, usize)> {
+        let p = self.book_pages.lock().ok()?;
+        (p.chapter == self.epub_chapter && p.count() > 0)
+            .then(|| (p.page_at(self.book_scroll.rel_y), p.count(), p.step()))
+    }
+
     fn set_book_size(&mut self, size: u16) -> Task<Message> {
         let size = size.clamp(BookSettings::MIN_SIZE, BookSettings::MAX_SIZE);
         if size == self.settings.book.font_size {
@@ -601,6 +755,7 @@ impl App {
     }
 
     pub(super) fn go_to_chapter(&mut self, ch: usize, rel_y: f32) -> Task<Message> {
+        self.book_image = None;
         self.epub_chapter = ch;
         self.book_scroll.rel_y = rel_y;
         self.persist_book_position();
@@ -613,7 +768,9 @@ impl App {
         let key = path.to_string_lossy();
         let n = book.chapters.len();
         let pos = self.book_scroll.rel_y.clamp(0.0, 1.0);
-        let finished = self.epub_chapter + 1 >= n && pos >= 0.97;
+        let last_page = self.is_paged()
+            && self.current_book_page().is_some_and(|(page, count, step)| page + step >= count);
+        let finished = self.epub_chapter + 1 >= n && (pos >= 0.97 || last_page);
         let _ = library::save_book_progress(db, &key, self.epub_chapter, n, pos, finished);
         self.book_saved_pos = pos;
     }
