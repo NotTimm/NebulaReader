@@ -3,7 +3,7 @@
 The app is **Nebula Reader** ("Nebula" in launchers and the title bar),
 app ID `io.github.NotTimm.NebulaReader`, binary `nebula-reader`. It was
 Cosmic Comic up to 0.1.0-beta.4; data folders are moved over on first
-start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (the unmerged `NotTimm.CosmicComic` PR #454352 is being replaced).
+start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader`; the old `NotTimm.CosmicComic` PR #454352 was closed unmerged.
 
 ## Workflow
 
@@ -52,8 +52,13 @@ the owner's laptop).
   paginate like a Kindle (`src/app/paged.rs`, single/two pages, scroll as
   an option) with click-to-zoom images; hover hints on reader buttons;
   All/Local/Jellyfin library switch; v0.1.0-beta.4 released.
-- Next: watch winget PR; maybe register the app with Jellyfin's session
-  capabilities so it shows nicely in the dashboard (owner asked).
+- Next: owner tests the renamed build, then release 0.1.0-beta.5 (or
+  0.1.0). After that release, open a *new package* PR in
+  microsoft/winget-pkgs for `NotTimm.NebulaReader` (PackageVersion equal to
+  the release version, inno installer URL + SHA256 from that release); the
+  workflow's `winget` job only updates packages already in winget. Flathub
+  is on hold until the owner says go. Maybe register Jellyfin session
+  capabilities so the app shows in the dashboard (owner asked).
 - Owner's laptop: don't run release builds there unless asked to test;
   `cargo check` is fine, CI builds the packages. `just rpm` builds an rpm.
 - Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
