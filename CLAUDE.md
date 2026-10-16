@@ -43,11 +43,14 @@ the owner's laptop).
 - Done: per-desktop looks and button roundness; Windows build, icons and
   Inno installer; release workflow for all formats; winget submission
   (microsoft/winget-pkgs#454352, awaiting review); manga-tui name cleanup;
-  Jellyfin reading with Quick Connect, streaming and two-way progress
-  (tested end to end against the mock, not yet against the owner's server).
-- Next: owner tests Jellyfin against the real server; bump the version and
-  publish once the winget PR merges (later releases go to winget through
-  the workflow's `winget` job).
+  Jellyfin reading (owner confirms it works on the real server); books
+  paginate like a Kindle (`src/app/paged.rs`, single/two pages, scroll as
+  an option) with click-to-zoom images; hover hints on reader buttons;
+  All/Local/Jellyfin library switch; v0.1.0-beta.4 released.
+- Next: watch winget PR; maybe register the app with Jellyfin's session
+  capabilities so it shows nicely in the dashboard (owner asked).
+- Owner's laptop: don't run release builds there unless asked to test;
+  `cargo check` is fine, CI builds the packages. `just rpm` builds an rpm.
 - Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
   (`conversion::icon` builds a RawImage that winit ignores); a patch for the
   fork is pending. Flathub submission (app ID, screenshots). Code signing.

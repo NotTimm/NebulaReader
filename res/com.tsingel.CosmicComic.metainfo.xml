@@ -34,6 +34,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.1.0-beta.4" date="2026-10-16">
+      <description>
+        <p>Jellyfin, and books that turn pages.</p>
+        <ul>
+          <li>Read comic and book libraries from a Jellyfin server: Quick Connect sign-in, pages streamed as you read, progress synced both ways</li>
+          <li>All / Local / Jellyfin switch in the library when you have both</li>
+          <li>Books turn pages like an e-reader, one page or two side by side; scrolling is still an option</li>
+          <li>Book images fit the page, and clicking one opens it to zoom and pan</li>
+          <li>Hover hints on every reader button; full screen is a single toggle</li>
+          <li>Button roundness setting outside COSMIC, and cleaner manga-tui chapter names</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0-beta.3" date="2026-10-16">
       <description>
         <p>A new icon, and a Windows installer.</p>
