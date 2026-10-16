@@ -14,6 +14,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 need rpmbuild "sudo dnf install rpm-build"
 
 VERSION="$(version_native)"
+# Release builds use 1; `just rpm` passes a timestamped snapshot release so
+# each local rebuild sorts newer and dnf treats it as an upgrade.
+RELEASE="${RPM_RELEASE:-1}"
 TOP="$(mktemp -d)"
 trap 'rm -rf "$TOP"' EXIT
 
@@ -31,7 +34,7 @@ cat > "$TOP/SPECS/$APP_NAME.spec" <<EOF
 
 Name:           $APP_NAME
 Version:        $VERSION
-Release:        1%{?dist}
+Release:        $RELEASE%{?dist}
 Summary:        Comic book and ebook reader for the COSMIC desktop
 License:        GPL-3.0-only
 URL:            https://github.com/NotTimm/cosmic-reader
@@ -54,7 +57,7 @@ cp -a "$STAGE/." "%{buildroot}/"
 %doc %{_docdir}/$APP_NAME/README.md
 
 %changelog
-* $(LC_ALL=C date '+%a %b %d %Y') Tim Singel <gamer.tdogtim@gmail.com> - $VERSION-1
+* $(LC_ALL=C date '+%a %b %d %Y') Tim Singel <gamer.tdogtim@gmail.com> - $VERSION-$RELEASE
 - Built from git $(cd "$REPO_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown).
 EOF
 

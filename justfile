@@ -72,6 +72,15 @@ package-deb:
     bash packaging/build-deb.sh
 package-rpm:
     bash packaging/build-rpm.sh
+
+# Build an .rpm from the current checkout into ./dist. The snapshot release
+# (timestamp + git hash) makes every rebuild an upgrade for dnf.
+rpm:
+    RPM_RELEASE="1.$(date +%Y%m%d%H%M).git$(git rev-parse --short HEAD)" bash packaging/build-rpm.sh
+
+# Build an .rpm and install it system-wide (asks for sudo)
+install-rpm: rpm
+    sudo dnf install -y "$(ls -t dist/*.rpm | head -1)"
 package-appimage:
     bash packaging/build-appimage.sh
 package-flatpak:
