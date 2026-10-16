@@ -8,7 +8,7 @@ description = "A native COSMIC desktop comic book (.cbz/.cbr) reader"
 [dependencies]
 env_logger = "0.11"
 log = "0.4"
-tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
 image = { version = "0.25", default-features = false, features = [
     "png",
@@ -47,7 +47,22 @@ regex = "1"
 git = "https://github.com/NotTimm/libcosmic.git"
 rev = "d5c937c8a9707487c084465717ab21876187a4d5"
 default-features = false
-features = ["dbus-config", "wgpu", "wayland", "winit", "tokio", "xdg-portal", "multi-window"]
+features = ["wgpu", "winit", "tokio", "multi-window"]
+
+# Linux gets Wayland, COSMIC's settings daemon and XDG portal dialogs;
+# Windows/macOS use plain winit windows and native (rfd) file dialogs.
+# Same git/rev as above, so cargo merges these into one libcosmic.
+[target.'cfg(target_os = "linux")'.dependencies]
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d5c937c8a9707487c084465717ab21876187a4d5", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+# Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
+ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d5c937c8a9707487c084465717ab21876187a4d5", default-features = false, features = ["rfd"] }
+
+[target.'cfg(windows)'.dependencies]
+# Dark mode and accent colour for the Windows 11 look.
+windows-registry = "0.6"
 
 [profile.release]
 lto = true

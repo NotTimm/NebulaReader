@@ -23,6 +23,8 @@ use crate::library::{self, IssueEntry, IssueRow, SeriesEntry, SeriesKind};
 use crate::metadata::{self, SeriesMatch};
 use crate::naming;
 use crate::scan;
+use crate::platform::look::{self, Look};
+use crate::platform::Desktop;
 use crate::settings::{Background as BgStyle, Settings};
 
 mod book_view;
@@ -129,6 +131,7 @@ pub enum Message {
     CloseContext,
     SetBackgroundOpacity(f32),
     SetBackground(usize),
+    SetLook(usize),
     SetFetchMetadata(bool),
     // Keys / pointer / touch
     Key(Key),
@@ -151,6 +154,9 @@ pub enum Message {
 
 pub struct App {
     core: Core,
+    /// Whether this window was created with the system title bar. Fixed
+    /// at startup: decorations can't be swapped on a live window.
+    native_titlebar: bool,
     // view
     app_view: AppView,
     // reader
@@ -482,16 +488,33 @@ fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> T
     })
 }
 
+/// The Open File dialog's filter. The XDG portal (Linux) takes globs;
+/// native dialogs on Windows/macOS (rfd) take bare extensions.
+fn comic_file_filter() -> FileFilter {
+    const EXTENSIONS: [&str; 5] = ["cbz", "cbr", "zip", "rar", "epub"];
+    let mut filter = FileFilter::new("Comics & Books");
+    for ext in EXTENSIONS {
+        #[cfg(target_os = "linux")]
+        {
+            filter = filter.glob(&format!("*.{ext}"));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            filter = filter.extension(ext);
+        }
+    }
+    filter
+}
+
 /// Expand a leading `~` or `~/...` to the user's home directory, so the
 /// typed library-path field accepts what a shell would.
 fn shellexpand_home(path: &str) -> String {
+    let home = crate::platform::home_dir();
     if path == "~" {
-        return std::env::var("HOME").unwrap_or_default();
+        return home.to_string_lossy().into_owned();
     }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{home}/{rest}");
-        }
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        return home.join(rest).to_string_lossy().into_owned();
     }
     path.to_string()
 }
@@ -499,6 +522,11 @@ fn shellexpand_home(path: &str) -> String {
 // ── App helpers ───────────────────────────────────────────────────────────────
 
 impl App {
+    /// The look in use, with `Auto` resolved for this desktop.
+    fn look(&self) -> Look {
+        self.settings.look.resolve(Desktop::detect())
+    }
+
     /// Queues decodes for pages around the current one, biased toward
     /// whichever direction the reader is actually flipping — reading is
     /// overwhelmingly sequential, so weighting the preload window that way
@@ -834,8 +862,10 @@ impl Application for App {
             .map(|db| library::list_library_dirs(db).into_iter().map(PathBuf::from).collect())
             .unwrap_or_default();
 
+        let native_titlebar = settings.look.resolve(Desktop::detect()).native_titlebar();
         let mut app = App {
             core,
+            native_titlebar,
             app_view: if flags.is_none() { AppView::Library } else { AppView::Reader },
             title: "Cosmic Comic".to_string(),
             open_path: None,
@@ -891,6 +921,15 @@ impl Application for App {
             context_page: ContextPage::Settings,
         };
         app.set_header_title("Cosmic Comic".into());
+        if app.native_titlebar {
+            // The system title bar has the window buttons and title, so
+            // libcosmic's header bar becomes a plain toolbar.
+            let window = &mut app.core.window;
+            window.show_close = false;
+            window.show_maximize = false;
+            window.show_minimize = false;
+            window.sharp_corners = true;
+        }
 
         let mut tasks = vec![match app.core.main_window_id() {
             Some(id) => app.set_window_title("Cosmic Comic".into(), id),
@@ -1159,8 +1198,7 @@ impl Application for App {
             }
             Message::OpenFile => {
                 return cosmic::task::future(async move {
-                    let filter = FileFilter::new("Comics & Books")
-                        .glob("*.cbz").glob("*.cbr").glob("*.zip").glob("*.rar").glob("*.epub");
+                    let filter = comic_file_filter();
                     let dialog = file_chooser::open::Dialog::new()
                         .title("Open Comic or Book").filter(filter);
                     match dialog.open_file().await {
@@ -1477,7 +1515,7 @@ impl Application for App {
                 }
             }
             Message::OpenUrl(url) => {
-                let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+                crate::platform::open_url(&url);
             }
             Message::ToggleIssueRead(id, completed) => {
                 if let Some(db) = &self.db {
@@ -1632,6 +1670,13 @@ impl Application for App {
                 if let Some(bg) = BgStyle::ALL.get(idx).copied() {
                     self.settings.background = bg;
                     self.settings.save();
+                }
+            }
+            Message::SetLook(idx) => {
+                if let Some(look) = Look::ALL.get(idx).copied() {
+                    self.settings.look = look;
+                    self.settings.save();
+                    return cosmic::command::set_theme(look::theme(self.look()));
                 }
             }
             Message::SetFetchMetadata(enabled) => {
@@ -2176,6 +2221,17 @@ impl App {
 
         let appearance = widget::settings::section()
             .title("Appearance")
+            .add(widget::settings::item(
+                "Style",
+                widget::dropdown(
+                    &Look::LABELS[..],
+                    Look::ALL.iter().position(|l| *l == s.look),
+                    Message::SetLook,
+                ),
+            ))
+            .add_maybe((self.look().native_titlebar() != self.native_titlebar).then(|| {
+                widget::text::caption("The title bar changes the next time Cosmic Comic starts.")
+            }))
             .add(widget::settings::item(
                 "Background",
                 widget::dropdown(

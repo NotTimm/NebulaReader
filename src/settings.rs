@@ -120,6 +120,8 @@ pub struct Settings {
     /// Look up metadata online (AniList / ComicVine) when opening a comic.
     pub fetch_metadata: bool,
     pub book: BookSettings,
+    /// Which desktop's look the UI takes on (see `platform::look`).
+    pub look: crate::platform::look::Look,
 }
 
 impl Default for Settings {
@@ -131,6 +133,7 @@ impl Default for Settings {
             theater_mode: false,
             fetch_metadata: true,
             book: BookSettings::default(),
+            look: crate::platform::look::Look::Auto,
         }
     }
 }

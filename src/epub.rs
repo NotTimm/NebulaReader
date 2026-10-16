@@ -985,10 +985,11 @@ fn join_epub_path(base: &Path, href: &str) -> String {
     } else {
         base.join(href)
     };
-    // Normalize `..`/`.` components (zip entry names are always forward-slash).
+    // Normalize `..`/`.` components (zip entry names are always forward-slash,
+    // but `Path::join` uses `\` on Windows, so split on both).
     let joined = joined.to_string_lossy().into_owned();
     let mut parts: Vec<&str> = Vec::new();
-    for part in joined.split('/') {
+    for part in joined.split(['/', '\\']) {
         match part {
             "" | "." => {}
             ".." => {

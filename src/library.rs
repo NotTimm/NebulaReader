@@ -177,33 +177,20 @@ pub struct IssueRow {
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
-fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
-}
-
-fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
-    std::env::var(var)
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| home().join(fallback))
-        .join("cosmic-comic")
-}
-
 /// Durable user data — the library database. Never auto-cleared.
 pub fn app_data_dir() -> PathBuf {
-    xdg_dir("XDG_DATA_HOME", ".local/share")
+    crate::platform::data_dir()
 }
 
 /// User preferences.
 pub fn config_dir() -> PathBuf {
-    xdg_dir("XDG_CONFIG_HOME", ".config")
+    crate::platform::config_dir()
 }
 
 /// Derived artifacts (cover thumbnails, extracted RAR pages). Safe to
 /// delete at any time — everything here is regenerated on demand.
 pub fn cache_dir() -> PathBuf {
-    xdg_dir("XDG_CACHE_HOME", ".cache")
+    crate::platform::cache_dir()
 }
 
 pub fn db_path() -> PathBuf {

@@ -1,3 +1,6 @@
+// No console window behind the app on Windows release builds.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod comic;
 mod comicinfo;
@@ -6,6 +9,7 @@ mod epub;
 mod library;
 mod metadata;
 mod naming;
+mod platform;
 mod scan;
 mod settings;
 
@@ -17,7 +21,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
-    let settings = Settings::default().size(Size::new(1024.0, 768.0));
+    // Take on the host desktop's look (Breeze on KDE, Fluent on Windows...).
+    let desktop = platform::Desktop::detect();
+    let look = settings::Settings::load().look.resolve(desktop);
+    platform::look::init(desktop);
+    log::info!("desktop {desktop:?}, look {look:?}");
+
+    let settings = Settings::default()
+        .size(Size::new(1024.0, 768.0))
+        .theme(platform::look::theme(look))
+        // Breeze and Fluent use the system's own title bar.
+        .client_decorations(!look.native_titlebar())
+        // A native frame doesn't round or shadow libcosmic's content.
+        .transparent(!look.native_titlebar());
 
     cosmic::app::run::<app::App>(settings, path)?;
 

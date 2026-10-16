@@ -1033,6 +1033,7 @@ name = "cosmic-comic"
 version = "0.1.0-beta.1"
 dependencies = [
  "arboard",
+ "ashpd 0.12.3",
  "compress-tools",
  "env_logger",
  "image",
@@ -1046,6 +1047,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "windows-registry",
  "zip",
 ]
 
