@@ -1048,6 +1048,7 @@ dependencies = [
  "tokio",
  "url",
  "windows-registry",
+ "windows-sys 0.61.2",
  "winresource",
  "zip",
 ]

@@ -2544,10 +2544,14 @@ impl App {
         if self.icon_open == Some(open) {
             return Task::none();
         }
-        let (Some(id), Some(icon)) = (self.core.main_window_id(), window_icon::load(open)) else {
-            return Task::none();
-        };
+        let Some(id) = self.core.main_window_id() else { return Task::none() };
         self.icon_open = Some(open);
-        window::set_icon(id, icon)
+        #[cfg(windows)]
+        return window_icon::set_native(id, open);
+        #[cfg(not(windows))]
+        match window_icon::load(open) {
+            Some(icon) => window::set_icon(id, icon),
+            None => Task::none(),
+        }
     }
 }

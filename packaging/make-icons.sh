@@ -11,6 +11,7 @@
 #
 #   res/icons/hicolor/<N>x<N>/apps/com.tsingel.CosmicComic.png  (Linux)
 #   res/icons/com.tsingel.CosmicComic.ico                       (Windows exe)
+#   res/icons/com.tsingel.CosmicComic-open.ico                  (Windows, reading)
 #   res/icons/window/book.png, book-open.png                   (runtime icon)
 #
 # Needs ImageMagick, plus rsvg-convert for SVG masters.
@@ -80,9 +81,11 @@ for s in 16 24 32 48 64 128 256 512; do
     convert "$WORK/book.png" -filter Lanczos -resize "${s}x${s}" "$dir/$APP_ID.png"
 done
 
-echo "==> Windows .ico"
+echo "==> Windows .ico (closed book, and open book for while reading)"
 convert "$WORK/book.png" -filter Lanczos \
     -define icon:auto-resize=256,128,64,48,40,32,24,20,16 "$ICONS/$APP_ID.ico"
+convert "$WORK/book-open.png" -filter Lanczos \
+    -define icon:auto-resize=256,128,64,48,40,32,24,20,16 "$ICONS/$APP_ID-open.ico"
 
 echo "==> Runtime window icons"
 mkdir -p "$ICONS/window"

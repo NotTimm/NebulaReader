@@ -5,11 +5,15 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=res/icons/com.tsingel.CosmicComic.ico");
+    println!("cargo:rerun-if-changed=res/icons/com.tsingel.CosmicComic-open.ico");
 
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
+        // ID 1 is the exe's own icon; 2 is swapped in while reading (see
+        // src/app/window_icon.rs).
         res.set_icon("res/icons/com.tsingel.CosmicComic.ico")
+            .set_icon_with_id("res/icons/com.tsingel.CosmicComic-open.ico", "2")
             .set("ProductName", "Cosmic Comic")
             .set("FileDescription", "Cosmic Comic")
             .set("CompanyName", "Tim Singel")
