@@ -28,3 +28,27 @@
   the .deb, .rpm, AppImage, .flatpak and Windows .zip, and a manual run with
   `publish` ticked creates the GitHub Release `v<Cargo.toml version>`.
 - The owner's editor is Neovim; use `nvim`, not `nano`, in instructions.
+- Jellyfin: `src/jellyfin.rs` (API client, accounts in `jellyfin.json`),
+  `src/remote_zip.rs` (CBZ pages over HTTP ranges) and
+  `src/app/jellyfin_view.rs` (sync, reader window, settings UI). Library keys
+  are `jellyfin://<serverId>-<userId>/<itemId>`; never call
+  `library::sync_issues` on them from the reader, since it deletes chapters
+  that aren't loaded. Test against `tools/mock-jellyfin.py`.
+
+## Where things stand
+
+Keep this short and current; it is the handoff between sessions (cloud or
+the owner's laptop).
+
+- Done: per-desktop looks and button roundness; Windows build, icons and
+  Inno installer; release workflow for all formats; winget submission
+  (microsoft/winget-pkgs#454352, awaiting review); manga-tui name cleanup;
+  Jellyfin reading with Quick Connect, streaming and two-way progress
+  (tested end to end against the mock, not yet against the owner's server).
+- Next: owner tests Jellyfin against the real server; bump the version and
+  publish once the winget PR merges (later releases go to winget through
+  the workflow's `winget` job).
+- Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
+  (`conversion::icon` builds a RawImage that winit ignores); a patch for the
+  fork is pending. Flathub submission (app ID, screenshots). Code signing.
+  Scan-group names like `Jaimini's~box~` aren't stripped yet.

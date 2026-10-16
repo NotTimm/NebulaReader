@@ -27,6 +27,8 @@ in [`docs/listing.md`](docs/listing.md)).
 - Per-issue progress (read, unread, or in progress at a page), a Continue
   Reading shelf, and library search. Opening a loose file that belongs to a
   library series continues that series
+- Jellyfin book libraries alongside local folders: pages stream from the
+  server, and reading progress is shared with Jellyfin (see below)
 
 **Comics**
 
@@ -242,6 +244,7 @@ Linux (XDG):
 |------|----------|
 | `~/.local/share/cosmic-comic/library.db` | Library, reading progress, metadata |
 | `~/.config/cosmic-comic/settings.json` | Preferences |
+| `~/.config/cosmic-comic/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
 | `~/.cache/cosmic-comic/` | Cover thumbnails, extracted archives — safe to delete |
 
 On Windows, `library.db` and `settings.json` are in
@@ -276,6 +279,51 @@ for those, get a free API key and either:
   `comicvine_api_key.txt` in the data folder above)
 
 Without a key, the debug panel just shows that no ComicVine key is set.
+
+## Jellyfin
+
+Cosmic Comic can read the **book** libraries of a Jellyfin server (10.9 or
+newer; tested against 12.2). Video libraries are ignored.
+
+1. **Settings → Jellyfin**, type the server address (`192.168.1.20:8096`
+   or `jellyfin.example.org`; https is tried first, then http) and press
+   **Connect**.
+2. A Quick Connect code is shown. In Jellyfin, open your profile →
+   **Quick Connect**, enter the code and approve it; the app signs in by
+   itself (**Open Jellyfin** takes you straight there). If Quick Connect
+   is turned off on the server (Dashboard → General), a password sign-in
+   is offered instead; the password is sent once and never saved.
+3. Each book library appears as its own section, such as "Manga · myserver".
+   Add as many servers and accounts as you like; **Sign out** ends the
+   session on the server and forgets the token.
+
+How it works:
+
+- Only Jellyfin's access token is stored, in `jellyfin.json`, which only
+  your user can read.
+- CBZ chapters are not downloaded: the app reads the archive's index with
+  a few HTTP range requests and then fetches one page per request as you
+  read, a few chapters ahead. CBR/RAR chapters and EPUBs are downloaded
+  to the cache first (RAR has no index to seek in), and EPUB one-shots open
+  in the book reader.
+- Progress uses the same fields as Jellyfin's own web reader (page in
+  `PlaybackPositionTicks`, `Played` when a chapter is finished), so it
+  carries over between Cosmic Comic on different machines and the Jellyfin
+  web app. Marking chapters read or unread in the app updates Jellyfin too.
+- Libraries re-sync on startup and with the refresh button next to the
+  account in settings. Server-side progress wins only when it is newer
+  than what this machine has.
+
+To try it without a server, `tools/mock-jellyfin.py` serves a folder as a
+fake Jellyfin books library (Quick Connect approves itself on the second
+poll; password login is `tester` / `secret`):
+
+```
+python3 tools/mock-jellyfin.py ~/Comics/Manga --port 8097
+```
+
+Then connect to `localhost:8097`. It prints each download range and progress
+update the app sends.
 
 ## Trackpad/touchscreen pinch-to-zoom fork
 
