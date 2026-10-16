@@ -52,8 +52,7 @@ the owner's laptop).
   paginate like a Kindle (`src/app/paged.rs`, single/two pages, scroll as
   an option) with click-to-zoom images; hover hints on reader buttons;
   All/Local/Jellyfin library switch; v0.1.0-beta.4 released.
-- Next: owner tests the renamed build, then release 0.1.0-beta.5 (or
-  0.1.0). After that release, open a *new package* PR in
+- Next: 0.1.0 (first stable, as Nebula Reader) released. After it, open a *new package* PR in
   microsoft/winget-pkgs for `NotTimm.NebulaReader` (PackageVersion equal to
   the release version, inno installer URL + SHA256 from that release); the
   workflow's `winget` job only updates packages already in winget. Flathub

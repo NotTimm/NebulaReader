@@ -34,6 +34,18 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.1.0" date="2026-10-16" type="stable">
+      <description>
+        <p>The first stable release, under a new name: Cosmic Comic is now Nebula Reader.</p>
+        <ul>
+          <li>Comics, manga and EPUB books in one library, with covers, progress and a Continue Reading shelf</li>
+          <li>Books turn pages like an e-reader, one page or two side by side, with click-to-zoom images</li>
+          <li>Jellyfin libraries: Quick Connect sign-in, streamed pages, progress synced both ways</li>
+          <li>Runs on COSMIC, KDE Plasma, GNOME and Windows, taking on each desktop's look</li>
+          <li>Libraries and settings from Cosmic Comic carry over automatically</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0-beta.4" date="2026-10-16">
       <description>
         <p>Jellyfin, and books that turn pages.</p>
