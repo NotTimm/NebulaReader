@@ -48,6 +48,15 @@ impl BookTheme {
     pub const LABELS: [&'static str; 5] = ["Auto", "Paper", "Sepia", "Dark", "Night"];
 }
 
+/// Which books the library shows when it has both local and Jellyfin ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LibrarySource {
+    #[default]
+    All,
+    Local,
+    Jellyfin,
+}
+
 /// How a book's chapter is laid out on screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BookLayout {
@@ -143,6 +152,8 @@ pub struct Settings {
     pub look: crate::platform::look::Look,
     /// Button/corner shape override for the non-COSMIC styles.
     pub corners: crate::platform::look::Corners,
+    /// The library's All / Local / Jellyfin switch.
+    pub library_source: LibrarySource,
 }
 
 impl Default for Settings {
@@ -156,6 +167,7 @@ impl Default for Settings {
             book: BookSettings::default(),
             look: crate::platform::look::Look::Auto,
             corners: crate::platform::look::Corners::Auto,
+            library_source: LibrarySource::All,
         }
     }
 }

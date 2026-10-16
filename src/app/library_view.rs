@@ -9,6 +9,7 @@ use cosmic::Element;
 
 use super::{error_banner, App, Message};
 use crate::library::{IssueEntry, SeriesEntry};
+use crate::settings::LibrarySource;
 use crate::scan::{THUMB_H, THUMB_W};
 
 /// Shelf cards are shown at half the thumbnail resolution (crisp on HiDPI).
@@ -116,6 +117,28 @@ impl App {
 
         let visible: Vec<&SeriesEntry> =
             self.library_entries.iter().filter(|e| self.is_visible(e)).collect();
+
+        // All / Local / Jellyfin, once there's some of each.
+        let is_remote = |e: &SeriesEntry| crate::jellyfin::is_key(&e.library_root) || crate::jellyfin::is_key(&e.path);
+        let has_both = visible.iter().any(|e| is_remote(e)) && visible.iter().any(|e| !is_remote(e));
+        let visible: Vec<&SeriesEntry> = if has_both {
+            col = col.push(
+                widget::container(
+                    widget::segmented_control::horizontal(&self.source_tabs)
+                        .on_activate(Message::LibrarySource)
+                        .width(Length::Fixed(320.0)),
+                )
+                .width(Length::Fill)
+                .center_x(Length::Fill),
+            );
+            match self.settings.library_source {
+                LibrarySource::All => visible,
+                LibrarySource::Local => visible.into_iter().filter(|e| !is_remote(e)).collect(),
+                LibrarySource::Jellyfin => visible.into_iter().filter(|e| is_remote(e)).collect(),
+            }
+        } else {
+            visible
+        };
 
         if visible.is_empty() {
             let msg = if self.library_search.is_empty() {
