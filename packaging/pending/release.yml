@@ -1,0 +1,419 @@
+# Builds every package: .deb (Ubuntu 24.04), .rpm (Fedora), AppImage,
+# .flatpak bundle, for Windows a portable .zip and a setup .exe, and for
+# Apple Silicon Macs a .dmg.
+#
+# - Pull requests / manual runs: build them all and upload them as workflow
+#   artifacts (downloadable from the run's summary page).
+# - Pushing a tag `vX.Y.Z[-pre]`, or a manual run with "publish" ticked:
+#   same, then create (or update) the GitHub Release `v<version>` and
+#   attach every package. The version comes from Cargo.toml; a pushed tag
+#   must match it, and a manual publish creates that tag on the commit it
+#   ran on.
+# - After a publish, the `winget` job opens a PR updating the package in
+#   microsoft/winget-pkgs. It does nothing until the WINGET_TOKEN secret is
+#   set (a classic token with `public_repo` scope), and it needs the
+#   package's first version to be in winget already (see README).
+#
+# Only the default GITHUB_TOKEN is needed (contents: write, for the release).
+name: Release packages
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "src/**"
+      - "res/**"
+      - "packaging/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a GitHub Release v<Cargo.toml version> from this commit
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_FLAGS: --locked
+
+jobs:
+  version:
+    name: Read version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Read version from Cargo.toml
+        run: |
+          version="$(bash -c 'source packaging/common.sh && version')"
+          if [ -z "$version" ]; then
+            echo "::error::could not read version from Cargo.toml"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "Cargo.toml version: $version"
+      - name: Check tag matches Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "v${{ steps.v.outputs.version }}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${{ steps.v.outputs.version }} (expected v${{ steps.v.outputs.version }})"
+            exit 1
+          fi
+
+  deb:
+    name: Build .deb (Ubuntu 24.04)
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config dpkg-dev \
+            libxkbcommon-dev libwayland-dev libarchive-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: deb
+
+      - name: Build package
+        run: bash packaging/build-deb.sh
+
+      - name: Inspect package
+        run: |
+          for f in dist/*.deb; do
+            dpkg-deb --info "$f"
+            dpkg-deb --contents "$f"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  rpm:
+    name: Build .rpm (Fedora)
+    needs: version
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    steps:
+      # git first so actions/checkout makes a real clone (and the rpm
+      # changelog can record the commit); tar/zstd for the cargo cache.
+      - name: Install build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            git tar zstd gcc gcc-c++ make pkgconf-pkg-config rpm-build \
+            libxkbcommon-devel wayland-devel libarchive-devel openssl-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Mark checkout as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rpm-fedora
+
+      - name: Build package
+        run: bash packaging/build-rpm.sh
+
+      - name: Inspect package
+        run: |
+          for f in dist/*.rpm; do
+            rpm -qip "$f"
+            rpm -qlp "$f"
+            echo "--- Requires:"
+            rpm -qRp "$f"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  appimage:
+    name: Build AppImage
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl \
+            libxkbcommon-dev libwayland-dev libarchive-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: appimage
+
+      - name: Build AppImage
+        run: bash packaging/build-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-appimage
+          path: dist/NebulaReader-*.AppImage
+          if-no-files-found: error
+
+  # The Flatpak builds offline, so every crate is listed up front from
+  # Cargo.lock. Done here because the Flatpak builder image has no
+  # package manager to install the generator's Python dependencies.
+  cargo-sources:
+    name: Generate cargo-sources.json
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate
+        run: |
+          pip install aiohttp tomlkit pyyaml
+          bash packaging/gen-cargo-sources.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cargo-sources
+          path: packaging/cargo-sources.json
+          if-no-files-found: error
+
+  flatpak:
+    name: Build .flatpak
+    needs: [version, cargo-sources]
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cargo-sources
+          path: packaging
+
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
+        with:
+          bundle: NebulaReader-${{ needs.version.outputs.version }}-x86_64.flatpak
+          manifest-path: packaging/io.github.NotTimm.NebulaReader.yml
+          cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+          upload-artifact: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-flatpak
+          path: NebulaReader-*.flatpak
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows .zip
+    needs: version
+    runs-on: windows-2022
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point VCPKG_ROOT at the runner's vcpkg
+        shell: pwsh
+        run: '"VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV'
+
+      # Building libarchive takes a few minutes; keep the result around.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_ROOT }}/installed
+          key: vcpkg-libarchive-x64-windows-v1
+
+      - name: Install libarchive (vcpkg)
+        shell: pwsh
+        run: vcpkg install "libarchive[core,bzip2,lz4,lzma,zstd]:x64-windows"
+
+      - name: Install Inno Setup (for the installer)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+
+      - name: Run tests
+        shell: pwsh
+        env:
+          VCPKGRS_DYNAMIC: "1"
+        run: |
+          $env:PATH = "$env:VCPKG_ROOT\installed\x64-windows\bin;$env:PATH"
+          cargo test --release --locked
+
+      - name: Build packages
+        shell: pwsh
+        env:
+          REQUIRE_INSTALLER: "1"
+        run: ./packaging/build-windows.ps1
+
+      # Proves the installer installs silently (as winget runs it) and that
+      # the installed exe and its DLLs are where the Start menu points.
+      - name: Test silent install
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER' -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Nebula Reader\nebula-reader.exe"
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Nebula Reader\archive.dll")) { throw 'archive.dll missing' }
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter 'Nebula Reader.lnk' | Out-Host
+          $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Nebula Reader\unins*.exe" | Select-Object -First 1
+          Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          # The uninstaller re-launches itself from %TEMP%, so -Wait returns early.
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw 'uninstall left the exe behind' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-windows
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+          if-no-files-found: error
+
+  macos:
+    name: Build macOS .dmg (Apple Silicon)
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: brew install libarchive pkgconf dylibbundler
+
+      - name: Point pkg-config at Homebrew's libarchive
+        run: echo "PKG_CONFIG_PATH=$(brew --prefix libarchive)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-arm64
+
+      - name: Run tests
+        run: cargo test --release --locked
+
+      - name: Build package
+        run: bash packaging/build-macos.sh
+
+      # Opens the app from the mounted image (as a user would) and checks it
+      # is still running a few seconds later. CI Macs are VMs without a real
+      # GPU, so a failure here is reported but doesn't fail the build.
+      - name: Smoke test
+        continue-on-error: true
+        run: |
+          dmg="$(ls dist/*.dmg)"
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          spctl --assess --type execute -vv "$mnt/Nebula Reader.app" || true
+          "$mnt/Nebula Reader.app/Contents/MacOS/nebula-reader" > app.log 2>&1 &
+          pid=$!
+          sleep 10
+          alive=0; kill -0 "$pid" 2>/dev/null && alive=1
+          kill "$pid" 2>/dev/null || true
+          sleep 1
+          hdiutil detach "$mnt" || true
+          cat app.log
+          [ "$alive" = 1 ] || { echo "::warning::the app exited within 10 seconds"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: [version, deb, rpm, appimage, flatpak, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - run: ls -l dist
+
+      # Creates the release if it doesn't exist yet; if it does (e.g. a
+      # re-run, or a release drafted by hand first), updates it and
+      # replaces same-named assets.
+      - uses: softprops/action-gh-release@v2
+        with:
+          # Explicit so a manual publish (not on a tag ref) creates the tag
+          # on the commit it built.
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Nebula Reader ${{ needs.version.outputs.version }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.flatpak
+            dist/*.zip
+            dist/*-setup.exe
+            dist/*.dmg
+
+  winget:
+    name: Submit to winget
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Skip (no WINGET_TOKEN secret)
+        if: env.WINGET_TOKEN == ''
+        run: echo "WINGET_TOKEN isn't set; not submitting to winget."
+
+      - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
+        if: env.WINGET_TOKEN != ''
+        with:
+          identifier: NotTimm.NebulaReader
+          release-tag: v${{ needs.version.outputs.version }}
+          installers-regex: '-setup\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}

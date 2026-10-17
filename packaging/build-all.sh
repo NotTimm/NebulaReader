@@ -31,6 +31,7 @@ try "deb"      build-deb.sh      dpkg-deb
 try "rpm"      build-rpm.sh      rpmbuild
 try "AppImage" build-appimage.sh curl
 try "Flatpak"  build-flatpak.sh  flatpak-builder
+try "macOS dmg" build-macos.sh   hdiutil
 
 echo
 echo "=== Summary ==="

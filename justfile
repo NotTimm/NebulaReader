@@ -85,6 +85,8 @@ package-appimage:
     bash packaging/build-appimage.sh
 package-flatpak:
     bash packaging/build-flatpak.sh
+package-macos:
+    bash packaging/build-macos.sh
 
 # Regenerate all icon sizes from res/icons/source/ (see the script)
 icons:

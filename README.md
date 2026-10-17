@@ -75,6 +75,7 @@ from the desktop it runs on (`src/platform/look.rs`):
 | KDE Plasma | Breeze | your colour scheme (`kdeglobals`), accent included | KWin's |
 | Windows 10/11 | Windows 11 (Fluent) | light/dark mode and accent colour | Windows' |
 | GNOME, Budgie, ... | Adwaita | light/dark and accent (settings portal) | libcosmic's header bar |
+| macOS | Adwaita shapes | light/dark mode and accent colour | macOS's |
 
 Corner radii follow the desktop too (Breeze's 3px buttons, Fluent's 4px,
 Adwaita's 6px, COSMIC's pills). Pick a different style under
@@ -85,7 +86,7 @@ next start.
 
 Prebuilt packages are attached to each
 [GitHub Release](https://github.com/NotTimm/nebula-reader/releases)
-(x86_64 only for now):
+(x86_64, plus Apple Silicon for macOS):
 
 | Package | For | Install |
 |---------|-----|---------|
@@ -95,9 +96,16 @@ Prebuilt packages are attached to each
 | `nebula-reader-<version>-1.fc<NN>.x86_64.rpm` | Fedora | `sudo dnf install ./nebula-reader-*.x86_64.rpm` |
 | `NebulaReader-<version>-x86_64.flatpak` | any distro with Flatpak | `flatpak install --user ./NebulaReader-*.flatpak` |
 | `NebulaReader-<version>-x86_64.AppImage` | any recent distro | `chmod +x NebulaReader-*.AppImage` and run it |
+| `NebulaReader-<version>-macos-arm64.dmg` | Apple Silicon Macs, macOS 11+ | Open it and drag Nebula Reader into Applications |
 
 Windows SmartScreen may warn about an unrecognised app, since the exe
 isn't code-signed; choose **More info → Run anyway**.
+
+The Mac app isn't notarized by Apple either, so the first launch is
+blocked: open it once, then go to **System Settings → Privacy & Security**
+and click **Open Anyway** (on macOS 14 and older, right-click the app and
+choose **Open** instead). Or clear the download flag in Terminal:
+`xattr -dr com.apple.quarantine "/Applications/Nebula Reader.app"`.
 
 Install with `apt`/`dnf` as above (not `dpkg -i`/`rpm -i`) so the library
 dependencies (`libarchive`, `libxkbcommon`, `openssl`, ...) are pulled in
@@ -169,6 +177,7 @@ Tooling needed per format (each script tells you if something's missing):
 | rpm      | `rpm-build` |
 | AppImage | `curl` (fetches `appimagetool` on first run) |
 | Flatpak  | `flatpak`, `flatpak-builder`, `python3` with `aiohttp`, `tomlkit`, `pyyaml` |
+| macOS dmg | a Mac with Xcode's command line tools and `brew install libarchive pkgconf dylibbundler` (`just package-macos`) |
 
 Building also needs the usual native headers: `libarchive`, `openssl` and
 `libxkbcommon` development packages plus `pkg-config` and a C compiler
@@ -253,7 +262,9 @@ Linux (XDG):
 
 On Windows, `library.db` and `settings.json` are in
 `%APPDATA%\NebulaReader\`, and the cache is
-`%LOCALAPPDATA%\NebulaReader\Cache\`. The Flatpak keeps its own copies
+`%LOCALAPPDATA%\NebulaReader\Cache\`. On macOS they are in
+`~/Library/Application Support/NebulaReader/` and the cache is
+`~/Library/Caches/NebulaReader/`. The Flatpak keeps its own copies
 under `~/.var/app/io.github.NotTimm.NebulaReader/`.
 
 The database is versioned with SQLite's `user_version` pragma and migrated
