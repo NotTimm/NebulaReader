@@ -6,6 +6,7 @@ Store screenshots referenced from the metainfo (captions are in
 | File | Shows |
 |------|-------|
 | `library.png` | Library with the Continue Reading shelf and All/Local/Jellyfin tabs (default shot) |
+| `series.png` | A series matched on AniList: description, genres, chapter list with progress |
 | `book.png` | The EPUB reader in two-page layout at a chapter opening |
 | `book-settings.png` | The book's Reading panel (typeface, size, layout, theme) |
 | `reader.png` | The comic reader in two-page spread |

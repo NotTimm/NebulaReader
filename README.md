@@ -44,6 +44,10 @@ the way so you can read.
   shelf, and search across the library.
 - Drag a file or folder onto the window to open it.
 
+<p align="center">
+  <img src="res/screenshots/series.png" width="820" alt="The Chainsaw Man series page: cover, AniList description and genres, and a chapter list with read and in-progress chapters">
+</p>
+
 ### 📖 Books that read like a book
 
 <p align="center">

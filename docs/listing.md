@@ -116,6 +116,7 @@ sentence case, no trailing period:
 | File | Caption |
 |------|---------|
 | `library.png` | Your comics, manga and books as one library |
+| `series.png` | Series pages with descriptions, chapters and progress |
 | `book.png` | Books turn pages like an e-reader, one or two at a time |
 | `book-settings.png` | Choose the typeface, size, spacing and theme |
 | `reader.png` | Read comics one page or two at a time |
@@ -127,6 +128,10 @@ sentence case, no trailing period:
   <screenshot type="default">
     <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/library.png</image>
     <caption>Your comics, manga and books as one library</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/series.png</image>
+    <caption>Series pages with descriptions, chapters and progress</caption>
   </screenshot>
   <screenshot>
     <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
