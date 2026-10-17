@@ -131,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/Items/([^/]+)/Images/Primary", p)
         if m:
             return self.send_empty(404)  # no covers: the app falls back to page 1
-        m = re.fullmatch(r"/Items/([^/]+)/Download", p)
+        m = re.fullmatch(r"/Items/([^/]+)/(?:Download|File)", p)
         if m and m.group(1) in ITEMS:
             return self.download(ITEMS[m.group(1)]["path"])
         return self.send_empty(404)

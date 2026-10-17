@@ -13,6 +13,7 @@
 //! resume where the other left off.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,13 @@ impl Account {
         auth_header(Some(&self.token))
     }
 
+    /// The item's file. Unlike `/Download`, reading it doesn't add a
+    /// "downloading" entry to the server's activity log, which would happen
+    /// for every page we fetch.
+    pub fn file_url(&self, item_id: &str) -> String {
+        format!("{}/Items/{item_id}/File", self.url)
+    }
+
     pub fn download_url(&self, item_id: &str) -> String {
         format!("{}/Items/{item_id}/Download", self.url)
     }
@@ -60,7 +68,11 @@ impl Account {
 
     /// Byte-range access to an item's file, for streaming pages.
     pub fn range_source(&self, item_id: &str) -> HttpRange {
-        HttpRange { url: self.download_url(item_id), auth: self.auth() }
+        HttpRange {
+            urls: [self.file_url(item_id), self.download_url(item_id)],
+            current: AtomicUsize::new(0),
+            auth: self.auth(),
+        }
     }
 }
 
@@ -612,8 +624,12 @@ async fn collect_folder(
 
 /// An item's file on the server, read with HTTP `Range` requests. Used from
 /// the reader's blocking decode threads, hence the blocking client.
+///
+/// Tries `/File` first and falls back to `/Download` for servers that refuse
+/// it, remembering which one worked.
 pub struct HttpRange {
-    url: String,
+    urls: [String; 2],
+    current: AtomicUsize,
     auth: String,
 }
 
@@ -628,13 +644,27 @@ fn blocking_client() -> &'static reqwest::blocking::Client {
 }
 
 impl HttpRange {
+    /// Sends a GET, moving on to the fallback URL if the server doesn't
+    /// offer the first one.
+    fn send(&self, range: Option<&str>) -> Result<reqwest::blocking::Response, String> {
+        loop {
+            let i = self.current.load(Ordering::Relaxed);
+            let mut req = blocking_client().get(&self.urls[i]).header("Authorization", &self.auth);
+            if let Some(range) = range {
+                req = req.header("Range", range);
+            }
+            let resp = req.send().map_err(|e| format!("couldn't reach the server: {e}"))?;
+            let refused = matches!(resp.status().as_u16(), 403 | 404 | 405);
+            if refused && i + 1 < self.urls.len() {
+                self.current.store(i + 1, Ordering::Relaxed);
+                continue;
+            }
+            return Ok(resp);
+        }
+    }
+
     fn get(&self, range: String) -> Result<reqwest::blocking::Response, String> {
-        let resp = blocking_client()
-            .get(&self.url)
-            .header("Authorization", &self.auth)
-            .header("Range", range)
-            .send()
-            .map_err(|e| format!("couldn't reach the server: {e}"))?;
+        let resp = self.send(Some(&range))?;
         if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(format!("server didn't return a byte range (HTTP {})", resp.status()));
         }
@@ -643,11 +673,7 @@ impl HttpRange {
 
     /// Downloads the whole file, for formats that can't be streamed.
     pub fn download_to(&self, path: &std::path::Path) -> Result<(), String> {
-        let mut resp = blocking_client()
-            .get(&self.url)
-            .header("Authorization", &self.auth)
-            .send()
-            .map_err(|e| format!("couldn't reach the server: {e}"))?;
+        let mut resp = self.send(None)?;
         if !resp.status().is_success() {
             return Err(format!("download failed: HTTP {}", resp.status()));
         }
