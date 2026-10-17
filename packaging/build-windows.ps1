@@ -59,25 +59,25 @@ Copy-Item (Join-Path $VcpkgBin '*.dll') $Stage
 # app would fail to start with STATUS_DLL_NOT_FOUND. Ship it app-locally,
 # from Visual Studio's redist folder. The UCRT (api-ms-win-crt-*) is part of
 # Windows 10+.
+# Only these two: the debug (*d.dll) and .NET (*_clr0400) variants that sit
+# next to them may not be redistributed.
+$VcNames = @('vcruntime140.dll', 'vcruntime140_1.dll')
+$VcDirs = @()
 $Vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-$VcRuntime = $null
 if (Test-Path $Vswhere) {
     $Vs = & $Vswhere -latest -products * -property installationPath
     if ($Vs) {
-        $VcRuntime = Get-ChildItem -Path (Join-Path $Vs 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT') `
-            -Filter 'vcruntime140*.dll' -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending
+        $VcDirs += Get-Item (Join-Path $Vs 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT') -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | ForEach-Object FullName
     }
 }
-if (-not $VcRuntime) {
-    $VcRuntime = Get-ChildItem -Path "$env:SystemRoot\System32" -Filter 'vcruntime140*.dll'
+$VcDirs += "$env:SystemRoot\System32"
+foreach ($VcName in $VcNames) {
+    $Found = $VcDirs | ForEach-Object { Join-Path $_ $VcName } | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $Found) { throw "$VcName not found (install the Visual Studio C++ build tools)" }
+    Copy-Item $Found $Stage
+    Write-Host "==> Bundled $Found"
 }
-if (-not ($VcRuntime | Where-Object Name -eq 'vcruntime140.dll')) {
-    throw 'vcruntime140.dll not found (install the Visual Studio C++ build tools)'
-}
-# One copy per file name, from the newest redist folder.
-$VcRuntime | Group-Object Name | ForEach-Object { Copy-Item $_.Group[0].FullName $Stage }
-Write-Host "==> Bundled $(($VcRuntime | Group-Object Name).Name -join ', ')"
 Copy-Item (Join-Path $Repo 'LICENSE') (Join-Path $Stage 'LICENSE.txt')
 @"
 Nebula Reader $Version for Windows (portable)
