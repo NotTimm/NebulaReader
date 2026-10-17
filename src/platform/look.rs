@@ -15,6 +15,9 @@
 //!   header bar already looks like a GNOME one).
 //! - **COSMIC**: the live system theme, unchanged.
 //!
+//! macOS gets the Adwaita shapes with the system's light/dark mode and
+//! accent colour, and always the native title bar.
+//!
 //! The host's colours are read once at startup ([`init`]) and cached, so
 //! switching looks in Settings never blocks on D-Bus or the registry.
 
@@ -57,9 +60,10 @@ impl Look {
     }
 
     /// Whether the window should use the system's own title bar instead
-    /// of libcosmic's header bar with window buttons.
+    /// of libcosmic's header bar with window buttons. Always on macOS,
+    /// where window buttons belong on the left of a real title bar.
     pub fn native_titlebar(self) -> bool {
-        matches!(self, Look::Breeze | Look::Fluent)
+        cfg!(target_os = "macos") || matches!(self, Look::Breeze | Look::Fluent)
     }
 }
 
@@ -230,7 +234,8 @@ fn read_host_colors(desktop: Desktop) -> HostColors {
         }
         Desktop::Windows => windows::read(),
         Desktop::Gnome | Desktop::Other => portal::read(),
-        Desktop::Cosmic | Desktop::MacOs => HostColors::default(),
+        Desktop::MacOs => macos::read(),
+        Desktop::Cosmic => HostColors::default(),
     }
 }
 
@@ -364,6 +369,49 @@ mod windows {
     }
 }
 
+/// macOS: appearance and accent colour from the global user defaults.
+mod macos {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    pub fn read() -> HostColors {
+        let read = |key: &str| {
+            std::process::Command::new("defaults")
+                .args(["read", "-g", key])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        };
+        // The key only exists in dark mode (Auto included, while it's dark).
+        let dark = Some(read("AppleInterfaceStyle").is_some_and(|v| v == "Dark"));
+        let accent = accent(read("AppleAccentColor").and_then(|v| v.parse().ok()));
+        HostColors { dark, accent: Some(accent), ..HostColors::default() }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn read() -> HostColors {
+        HostColors::default()
+    }
+
+    /// `AppleAccentColor` is an index into the system palette; unset means
+    /// the default "multicolor", which is blue.
+    pub fn accent(index: Option<i32>) -> Srgb {
+        let hex = match index {
+            Some(-1) => 0x8c8c8c, // graphite
+            Some(0) => 0xe0383e,  // red
+            Some(1) => 0xf7821b,  // orange
+            Some(2) => 0xffc600,  // yellow
+            Some(3) => 0x62ba46,  // green
+            Some(5) => 0xa550a7,  // purple
+            Some(6) => 0xf74f9e,  // pink
+            _ => 0x007aff,        // blue
+        };
+        let [_, r, g, b] = u32::to_be_bytes(hex);
+        Srgb::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,10 +472,18 @@ ColorScheme=BreezeDark
     }
 
     #[test]
+    fn macos_accent_colors() {
+        assert_eq!(macos::accent(None), macos::accent(Some(4)));
+        assert_ne!(macos::accent(Some(0)), macos::accent(None));
+        assert!(macos::accent(Some(2)).red > 0.99);
+    }
+
+    #[test]
     fn titlebar_choice() {
         assert!(Look::Breeze.native_titlebar());
         assert!(Look::Fluent.native_titlebar());
-        assert!(!Look::Adwaita.native_titlebar());
-        assert!(!Look::Cosmic.native_titlebar());
+        let drawn_header = !cfg!(target_os = "macos");
+        assert_eq!(Look::Adwaita.native_titlebar(), !drawn_header);
+        assert_eq!(Look::Cosmic.native_titlebar(), !drawn_header);
     }
 }
