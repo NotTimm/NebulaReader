@@ -76,6 +76,10 @@ pub struct JfState {
     extensions: HashMap<String, String>,
     /// Library root key -> "Manga · deepdish", for section headings.
     pub library_names: HashMap<String, String>,
+    /// Account of the EPUB being downloaded, then of the one open (with its
+    /// cached path), for the reader's title bar.
+    book_pending: Option<Account>,
+    book: Option<(PathBuf, Account)>,
 }
 
 /// The Jellyfin series open in the reader.
@@ -88,6 +92,12 @@ pub struct RemoteReading {
     next: usize,
     loading: bool,
     last_saved: Option<(String, usize)>,
+    /// Progress saves sent and not answered yet.
+    saving: usize,
+    /// When the server last accepted a progress save.
+    saved_at: Option<Instant>,
+    /// The latest thing that went wrong (cleared by the next success).
+    error: Option<String>,
 }
 
 // ── Background work ─────────────────────────────────────────────────────────
@@ -232,6 +242,7 @@ impl App {
         // EPUBs open in the book reader from a downloaded copy.
         let first_id = jellyfin::parse_key(&issues[0].0).map(|(_, id)| id.to_string()).unwrap_or_default();
         if issues.len() == 1 && self.jf.extensions.get(&first_id).is_some_and(|e| e == "epub") {
+            self.jf.book_pending = Some(account.clone());
             return cosmic::task::future(async move {
                 let r = tokio::task::spawn_blocking(move || download(&account, &first_id, "epub"))
                     .await
@@ -263,6 +274,9 @@ impl App {
             next: end,
             loading: false,
             last_saved: None,
+            saving: 0,
+            saved_at: None,
+            error: None,
         });
         load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), false)
     }
@@ -295,6 +309,7 @@ impl App {
             if r.last_saved.as_ref() != Some(&(issue.clone(), page)) {
                 r.last_saved = Some((issue.clone(), page));
                 if let Some((_, item_id)) = jellyfin::parse_key(&issue) {
+                    r.saving += 1;
                     tasks.push(save_task(r.account.clone(), item_id.to_string(), page, finished));
                 }
             }
@@ -506,20 +521,84 @@ impl App {
                             ch
                         }));
                     }
-                    Err(e) => log::warn!("jellyfin: loading more chapters: {e}"),
+                    Err(e) => {
+                        log::warn!("jellyfin: loading more chapters: {e}");
+                        r.error = Some(format!("Couldn't load the next chapters: {e}"));
+                    }
                 }
             }
             JfMsg::EpubDownloaded(result) => match result {
-                Ok(path) => return super::epub_open_task(path),
+                Ok(path) => {
+                    self.jf.book = self.jf.book_pending.take().map(|a| (path.clone(), a));
+                    return super::epub_open_task(path);
+                }
                 Err(e) => return Task::done(cosmic::Action::App(Message::LoadFailed(e))),
             },
             JfMsg::Saved(result) => {
-                if let Err(e) = result {
+                if let Err(e) = &result {
                     log::warn!("jellyfin: saving progress: {e}");
+                }
+                if let Some(r) = self.remote.as_mut() {
+                    r.saving = r.saving.saturating_sub(1);
+                    match result {
+                        Ok(()) => {
+                            r.saved_at = Some(Instant::now());
+                            r.error = None;
+                        }
+                        Err(e) => r.error = Some(format!("Couldn't save progress: {e}")),
+                    }
                 }
             }
         }
         Task::none()
+    }
+
+    /// Where the open comic or book comes from, for the reader's title bar:
+    /// a short label and a hover text with the details. `None` when it isn't
+    /// from Jellyfin.
+    pub(super) fn jellyfin_source(&self) -> Option<(String, String)> {
+        let open = self.open_path.as_ref()?;
+        let server = |a: &Account| format!("Jellyfin: {} ({})\nSigned in as {}", a.server_name, a.url, a.user_name);
+
+        if let Some((_, account)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
+            let tip = format!(
+                "{}\nThis book: downloaded to the cache on this computer\nYour place in books is kept on this computer only",
+                server(account)
+            );
+            return Some((account.server_name.clone(), tip));
+        }
+
+        let open = open.to_string_lossy();
+        let r = self.remote.as_ref().filter(|r| r.series_key == open)?;
+        let a = &r.account;
+        let progress = if r.saving > 0 {
+            "Progress: saving…".to_string()
+        } else if let Some(at) = r.saved_at {
+            let secs = at.elapsed().as_secs();
+            let ago = match secs {
+                0..=59 => "just now".to_string(),
+                60..=3599 => format!("{} min ago", secs / 60),
+                _ => format!("{} h ago", secs / 3600),
+            };
+            format!("Progress: saved to the server {ago}")
+        } else {
+            "Progress: saved to the server as you turn pages".to_string()
+        };
+        let chapter = match self.sources.get(self.current_page) {
+            Some(PageSource::Remote { .. }) => "This chapter: streamed from the server, not cached",
+            Some(_) => "This chapter: downloaded to the cache on this computer",
+            None => "This chapter: loading…",
+        };
+        let mut tip = format!("{}\n{progress}\n{chapter}", server(a));
+        let label = match &r.error {
+            Some(e) => {
+                tip = format!("⚠ {e}\n\n{tip}");
+                format!("{} ⚠", a.server_name)
+            }
+            None if r.saved_at.is_some() => format!("{} ✓", a.server_name),
+            None => a.server_name.clone(),
+        };
+        Some((label, tip))
     }
 
     /// Stores a fetched Jellyfin library: series, chapters, read state from

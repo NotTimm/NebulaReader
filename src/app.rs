@@ -562,6 +562,20 @@ fn shellexpand_home(path: &str) -> String {
 // ── App helpers ───────────────────────────────────────────────────────────────
 
 impl App {
+    /// Small text next to the home button saying where the open comic or
+    /// book comes from: "Local" (hover for the path) or the Jellyfin server
+    /// with its sync state (hover for details).
+    fn source_label(&self) -> Element<'_, Message> {
+        let (label, hint) = self.jellyfin_source().unwrap_or_else(|| {
+            let path = self.open_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+            ("Local".to_string(), path)
+        });
+        tip(
+            widget::container(widget::text::caption(label)).padding([0, 6]).height(Length::Fill).align_y(Alignment::Center),
+            hint,
+        )
+    }
+
     /// The look in use, with `Auto` resolved for this desktop.
     fn look(&self) -> Look {
         self.settings.look.resolve(Desktop::detect())
@@ -1060,14 +1074,20 @@ impl Application for App {
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
         match self.app_view {
-            AppView::Reader if self.back_to_series => vec![tip(
-                widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::GoToLibrary),
-                "Back to series (Esc)",
-            )],
-            AppView::Reader => vec![tip(
-                widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
-                "Back to library (Esc)",
-            )],
+            AppView::Reader if self.back_to_series => vec![
+                tip(
+                    widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::GoToLibrary),
+                    "Back to series (Esc)",
+                ),
+                self.source_label(),
+            ],
+            AppView::Reader => vec![
+                tip(
+                    widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
+                    "Back to library (Esc)",
+                ),
+                self.source_label(),
+            ],
             AppView::Series => vec![tip(
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
                 "Back to library",
