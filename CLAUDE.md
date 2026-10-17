@@ -63,10 +63,8 @@ the owner's laptop).
   through it). Maybe register Jellyfin session
   capabilities so the app shows in the dashboard (owner asked).
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
-  .dmg; the workflow job for it is parked in `packaging/pending/release.yml`
-  until the owner pastes it in. Untested on a real Mac: the code
-  type-checks for `aarch64-apple-darwin`, but the first CI run is the
-  first real build. Delete the parked copy once it's in place.
+  .dmg; the `macos` job in `release.yml` is live (first run 39006216181
+  was its first real build). Windows packages now bundle vcruntime140.dll.
 - Owner's laptop: don't run release builds there unless asked to test;
   `cargo check` is fine, CI builds the packages. `just rpm` builds an rpm.
 - Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
