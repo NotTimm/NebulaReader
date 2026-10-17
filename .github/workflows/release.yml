@@ -1,5 +1,6 @@
 # Builds every package: .deb (Ubuntu 24.04), .rpm (Fedora), AppImage,
-# .flatpak bundle, and for Windows a portable .zip and a setup .exe.
+# .flatpak bundle, for Windows a portable .zip and a setup .exe, and for
+# Apple Silicon Macs a .dmg.
 #
 # - Pull requests / manual runs: build them all and upload them as workflow
 #   artifacts (downloadable from the run's summary page).
@@ -310,10 +311,61 @@ jobs:
             dist/*-setup.exe
           if-no-files-found: error
 
+  macos:
+    name: Build macOS .dmg (Apple Silicon)
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: brew install libarchive pkgconf dylibbundler
+
+      - name: Point pkg-config at Homebrew's libarchive
+        run: echo "PKG_CONFIG_PATH=$(brew --prefix libarchive)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-arm64
+
+      - name: Run tests
+        run: cargo test --release --locked
+
+      - name: Build package
+        run: bash packaging/build-macos.sh
+
+      # Opens the app from the mounted image (as a user would) and checks it
+      # is still running a few seconds later. CI Macs are VMs without a real
+      # GPU, so a failure here is reported but doesn't fail the build.
+      - name: Smoke test
+        continue-on-error: true
+        run: |
+          dmg="$(ls dist/*.dmg)"
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          spctl --assess --type execute -vv "$mnt/Nebula Reader.app" || true
+          "$mnt/Nebula Reader.app/Contents/MacOS/nebula-reader" > app.log 2>&1 &
+          pid=$!
+          sleep 10
+          alive=0; kill -0 "$pid" 2>/dev/null && alive=1
+          kill "$pid" 2>/dev/null || true
+          sleep 1
+          hdiutil detach "$mnt" || true
+          cat app.log
+          [ "$alive" = 1 ] || { echo "::warning::the app exited within 10 seconds"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
-    needs: [version, deb, rpm, appimage, flatpak, windows]
+    needs: [version, deb, rpm, appimage, flatpak, windows, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -345,6 +397,7 @@ jobs:
             dist/*.flatpak
             dist/*.zip
             dist/*-setup.exe
+            dist/*.dmg
 
   winget:
     name: Submit to winget
