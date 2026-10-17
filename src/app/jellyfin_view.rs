@@ -29,6 +29,12 @@ const WINDOW_AHEAD: usize = 3;
 const TOP_UP_PAGES: usize = 40;
 /// Quick Connect codes expire on the server after a few minutes.
 const QUICK_CONNECT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// Progress goes to the server once you've stayed on a page this long (or
+/// right away on finishing a chapter, leaving the reader or quitting), like
+/// Jellyfin's own players, instead of on every page turn.
+const SAVE_AFTER: Duration = Duration::from_secs(10);
+/// How often to check the server is still reachable while reading.
+const PING_EVERY: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub enum JfMsg {
@@ -50,6 +56,11 @@ pub enum JfMsg {
     MoreLoaded(String, Result<(Vec<PageSource>, Vec<ChapterInfo>), String>),
     EpubDownloaded(Result<PathBuf, String>),
     Saved(Result<(), String>),
+    /// Wakes the reader up to send a due save or ping.
+    Timer,
+    Pinged(bool),
+    /// The window is closing: send any unsaved progress now.
+    Closing,
 }
 
 /// A Quick Connect sign-in waiting for the user to approve the code.
@@ -80,6 +91,39 @@ pub struct JfState {
     /// cached path), for the reader's title bar.
     book_pending: Option<Account>,
     book: Option<(PathBuf, Account)>,
+    /// Progress saving and reachability of the server being read from.
+    live: Live,
+}
+
+/// Where the reader is in a Jellyfin item, as it would be reported.
+#[derive(Clone)]
+struct Report {
+    account: Account,
+    item_id: String,
+    ticks: i64,
+    played: bool,
+}
+
+impl Report {
+    fn id(&self) -> (String, i64, bool) {
+        (self.item_id.clone(), self.ticks, self.played)
+    }
+}
+
+#[derive(Default)]
+struct Live {
+    /// The latest position and when it last changed.
+    pending: Option<(Report, Instant)>,
+    /// The last position sent, so an unchanged one isn't sent again.
+    sent: Option<(String, i64, bool)>,
+    /// Saves sent and not answered yet.
+    saving: usize,
+    saved_at: Option<Instant>,
+    /// The latest thing that went wrong (cleared by the next success).
+    error: Option<String>,
+    online: Option<bool>,
+    pinged_at: Option<Instant>,
+    pinging: bool,
 }
 
 /// The Jellyfin series open in the reader.
@@ -91,13 +135,6 @@ pub struct RemoteReading {
     /// Index of the next issue not yet loaded.
     next: usize,
     loading: bool,
-    last_saved: Option<(String, usize)>,
-    /// Progress saves sent and not answered yet.
-    saving: usize,
-    /// When the server last accepted a progress save.
-    saved_at: Option<Instant>,
-    /// The latest thing that went wrong (cleared by the next success).
-    error: Option<String>,
 }
 
 // ── Background work ─────────────────────────────────────────────────────────
@@ -196,10 +233,14 @@ fn load_task(account: Account, series_key: String, issues: Vec<(String, String)>
     })
 }
 
-fn save_task(account: Account, item_id: String, page: usize, played: bool) -> Task<Message> {
+fn save_task(r: Report) -> Task<Message> {
     cosmic::task::future(async move {
-        Message::Jf(JfMsg::Saved(jellyfin::save_progress(&account, &item_id, page, played).await))
+        Message::Jf(JfMsg::Saved(jellyfin::save_progress(&r.account, &r.item_id, r.ticks, r.played).await))
     })
+}
+
+fn ping_task(url: String) -> Task<Message> {
+    cosmic::task::future(async move { Message::Jf(JfMsg::Pinged(jellyfin::ping(&url).await)) })
 }
 
 fn poll_task(url: String, secret: String) -> Task<Message> {
@@ -243,6 +284,7 @@ impl App {
         let first_id = jellyfin::parse_key(&issues[0].0).map(|(_, id)| id.to_string()).unwrap_or_default();
         if issues.len() == 1 && self.jf.extensions.get(&first_id).is_some_and(|e| e == "epub") {
             self.jf.book_pending = Some(account.clone());
+            self.jf.live = Live::default();
             return cosmic::task::future(async move {
                 let r = tokio::task::spawn_blocking(move || download(&account, &first_id, "epub"))
                     .await
@@ -273,48 +315,109 @@ impl App {
             issues: issues.clone(),
             next: end,
             loading: false,
-            last_saved: None,
-            saving: 0,
-            saved_at: None,
-            error: None,
         });
+        self.jf.live = Live::default();
         load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), false)
     }
 
-    /// While reading a Jellyfin series: load more chapters before the
-    /// reader runs out, and save progress to the server on page changes.
-    pub(super) fn jellyfin_tick(&mut self) -> Task<Message> {
+    /// The position to report for what's open, if it's from Jellyfin.
+    fn current_report(&self) -> Option<Report> {
         if self.app_view != AppView::Reader || self.loading {
-            return Task::none();
+            return None;
         }
-        let open = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned());
-        let visible = self.current_chapter().map(|(_, ch, pg)| {
-            let pg = if self.layout == super::Layout::Dual { pg + 1 } else { pg };
-            let pg = pg.min(ch.page_count.saturating_sub(1));
-            (ch.path.to_string_lossy().into_owned(), pg, pg + 1 >= ch.page_count)
-        });
-        let near_end = self.current_page + TOP_UP_PAGES >= self.sources.len();
-        let extensions = self.jf.extensions.clone();
-        let Some(r) = self.remote.as_mut().filter(|r| open.as_deref() == Some(r.series_key.as_str())) else {
-            return Task::none();
-        };
+        let open = self.open_path.as_ref()?;
 
-        let mut tasks = Vec::new();
-        if near_end && !r.loading && r.next < r.issues.len() {
-            r.loading = true;
-            let end = (r.next + WINDOW_AHEAD).min(r.issues.len());
-            tasks.push(load_task(r.account.clone(), r.series_key.clone(), r.issues[r.next..end].to_vec(), extensions, true));
+        // A book: how far through it, as a fraction.
+        if let Some((path, account)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
+            let book = self.epub_book.as_ref()?;
+            let n = book.chapters.len().max(1);
+            let pos = self.book_scroll.rel_y.clamp(0.0, 1.0);
+            let last_page = self.is_paged()
+                && self.current_book_page().is_some_and(|(page, count, step)| page + step >= count);
+            let played = self.epub_chapter + 1 >= n && (pos >= 0.97 || last_page);
+            let fraction = ((self.epub_chapter as f64 + pos as f64) / n as f64).clamp(0.0, 1.0);
+            return Some(Report {
+                account: account.clone(),
+                item_id: path.file_stem()?.to_string_lossy().into_owned(),
+                ticks: (fraction * 10_000_000.0) as i64,
+                played,
+            });
         }
-        if let Some((issue, page, finished)) = visible {
-            if r.last_saved.as_ref() != Some(&(issue.clone(), page)) {
-                r.last_saved = Some((issue.clone(), page));
-                if let Some((_, item_id)) = jellyfin::parse_key(&issue) {
-                    r.saving += 1;
-                    tasks.push(save_task(r.account.clone(), item_id.to_string(), page, finished));
-                }
+
+        // A comic: the page in the chapter on screen.
+        let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
+        let (_, ch, pg) = self.current_chapter()?;
+        let pg = if self.layout == super::Layout::Dual { pg + 1 } else { pg };
+        let pg = pg.min(ch.page_count.saturating_sub(1));
+        let issue = ch.path.to_string_lossy();
+        let (_, item_id) = jellyfin::parse_key(&issue)?;
+        Some(Report {
+            account: r.account.clone(),
+            item_id: item_id.to_string(),
+            ticks: pg as i64 * 10_000,
+            played: pg + 1 >= ch.page_count,
+        })
+    }
+
+    /// Runs after every message (and on a timer while reading from
+    /// Jellyfin): loads more chapters before the reader runs out, sends
+    /// progress once it has settled, and checks the server is reachable.
+    pub(super) fn jellyfin_tick(&mut self) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let report = self.current_report();
+
+        if let Some(r) = self.remote.as_mut() {
+            let reading = self.app_view == AppView::Reader
+                && !self.loading
+                && self.open_path.as_ref().is_some_and(|p| p.to_string_lossy() == r.series_key);
+            let near_end = self.current_page + TOP_UP_PAGES >= self.sources.len();
+            if reading && near_end && !r.loading && r.next < r.issues.len() {
+                r.loading = true;
+                let end = (r.next + WINDOW_AHEAD).min(r.issues.len());
+                let issues = r.issues[r.next..end].to_vec();
+                tasks.push(load_task(r.account.clone(), r.series_key.clone(), issues, self.jf.extensions.clone(), true));
+            }
+        }
+
+        let live = &mut self.jf.live;
+        let now = Instant::now();
+        if let Some(rep) = &report {
+            if live.pending.as_ref().map(|(p, _)| p.id()) != Some(rep.id()) {
+                live.pending = Some((rep.clone(), now));
+            }
+        }
+        if let Some((rep, since)) = &live.pending {
+            // Not reading any more (left the reader, opened something else):
+            // send what's left right away.
+            let due = report.is_none() || rep.played || since.elapsed() >= SAVE_AFTER;
+            if due && live.sent.as_ref() != Some(&rep.id()) {
+                live.sent = Some(rep.id());
+                live.saving += 1;
+                tasks.push(save_task(rep.clone()));
+            }
+        }
+        if report.is_none() {
+            live.pending = None;
+        }
+
+        if let Some(rep) = &report {
+            if !live.pinging && live.pinged_at.is_none_or(|t| t.elapsed() >= PING_EVERY) {
+                live.pinging = true;
+                live.pinged_at = Some(now);
+                tasks.push(ping_task(rep.account.url.clone()));
             }
         }
         Task::batch(tasks)
+    }
+
+    /// A timer while something from Jellyfin is open, so a settled page is
+    /// saved and the server pinged even when nothing else happens.
+    pub(super) fn jellyfin_subscription(&self) -> cosmic::iced::Subscription<Message> {
+        if self.jellyfin_source().is_some() {
+            cosmic::iced::time::every(Duration::from_secs(5)).map(|_| Message::Jf(JfMsg::Timer))
+        } else {
+            cosmic::iced::Subscription::none()
+        }
     }
 
     /// Mirrors read/unread marks from the series page to Jellyfin.
@@ -523,29 +626,51 @@ impl App {
                     }
                     Err(e) => {
                         log::warn!("jellyfin: loading more chapters: {e}");
-                        r.error = Some(format!("Couldn't load the next chapters: {e}"));
+                        self.jf.live.error = Some(format!("Couldn't load the next chapters: {e}"));
                     }
                 }
             }
             JfMsg::EpubDownloaded(result) => match result {
                 Ok(path) => {
                     self.jf.book = self.jf.book_pending.take().map(|a| (path.clone(), a));
+                    self.jf.live = Live::default();
                     return super::epub_open_task(path);
                 }
                 Err(e) => return Task::done(cosmic::Action::App(Message::LoadFailed(e))),
             },
             JfMsg::Saved(result) => {
-                if let Err(e) = &result {
-                    log::warn!("jellyfin: saving progress: {e}");
-                }
-                if let Some(r) = self.remote.as_mut() {
-                    r.saving = r.saving.saturating_sub(1);
-                    match result {
-                        Ok(()) => {
-                            r.saved_at = Some(Instant::now());
-                            r.error = None;
+                let live = &mut self.jf.live;
+                live.saving = live.saving.saturating_sub(1);
+                match result {
+                    Ok(()) => {
+                        live.saved_at = Some(Instant::now());
+                        live.error = None;
+                        live.online = Some(true);
+                    }
+                    Err(e) => {
+                        log::warn!("jellyfin: saving progress: {e}");
+                        if !e.starts_with("HTTP") {
+                            live.online = Some(false);
                         }
-                        Err(e) => r.error = Some(format!("Couldn't save progress: {e}")),
+                        live.error = Some(format!("Couldn't save progress: {e}"));
+                    }
+                }
+            }
+            JfMsg::Timer => {}
+            JfMsg::Pinged(ok) => {
+                let live = &mut self.jf.live;
+                live.pinging = false;
+                // Back online after a failed save: send the position again.
+                if ok && live.error.is_some() && live.online == Some(false) {
+                    live.sent = None;
+                }
+                live.online = Some(ok);
+            }
+            JfMsg::Closing => {
+                let live = &mut self.jf.live;
+                if let Some((rep, _)) = live.pending.take() {
+                    if live.sent.as_ref() != Some(&rep.id()) {
+                        jellyfin::save_progress_now(&rep.account, &rep.item_id, rep.ticks, rep.played);
                     }
                 }
             }
@@ -554,26 +679,31 @@ impl App {
     }
 
     /// Where the open comic or book comes from, for the reader's title bar:
-    /// a short label and a hover text with the details. `None` when it isn't
-    /// from Jellyfin.
-    pub(super) fn jellyfin_source(&self) -> Option<(String, String)> {
+    /// the server's name, whether it's reachable (`None` until checked) and
+    /// a hover text with the details. `None` when it isn't from Jellyfin.
+    pub(super) fn jellyfin_source(&self) -> Option<(String, Option<bool>, String)> {
         let open = self.open_path.as_ref()?;
-        let server = |a: &Account| format!("Jellyfin: {} ({})\nSigned in as {}", a.server_name, a.url, a.user_name);
+        let live = &self.jf.live;
+        let (account, item) = if let Some((_, a)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
+            (a, "This book: downloaded to the cache on this computer")
+        } else {
+            let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
+            let item = match self.sources.get(self.current_page) {
+                Some(PageSource::Remote { .. }) => "This chapter: streamed from the server, not cached",
+                Some(_) => "This chapter: downloaded to the cache on this computer",
+                None => "This chapter: loading…",
+            };
+            (&r.account, item)
+        };
 
-        if let Some((_, account)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
-            let tip = format!(
-                "{}\nThis book: downloaded to the cache on this computer\nYour place in books is kept on this computer only",
-                server(account)
-            );
-            return Some((account.server_name.clone(), tip));
-        }
-
-        let open = open.to_string_lossy();
-        let r = self.remote.as_ref().filter(|r| r.series_key == open)?;
-        let a = &r.account;
-        let progress = if r.saving > 0 {
+        let connection = match live.online {
+            Some(true) => "Online",
+            Some(false) => "Offline: the server isn't answering",
+            None => "Checking the connection…",
+        };
+        let progress = if live.saving > 0 {
             "Progress: saving…".to_string()
-        } else if let Some(at) = r.saved_at {
+        } else if let Some(at) = live.saved_at {
             let secs = at.elapsed().as_secs();
             let ago = match secs {
                 0..=59 => "just now".to_string(),
@@ -582,23 +712,18 @@ impl App {
             };
             format!("Progress: saved to the server {ago}")
         } else {
-            "Progress: saved to the server as you turn pages".to_string()
+            "Progress: saved to the server after a few seconds on a page".to_string()
         };
-        let chapter = match self.sources.get(self.current_page) {
-            Some(PageSource::Remote { .. }) => "This chapter: streamed from the server, not cached",
-            Some(_) => "This chapter: downloaded to the cache on this computer",
-            None => "This chapter: loading…",
-        };
-        let mut tip = format!("{}\n{progress}\n{chapter}", server(a));
-        let label = match &r.error {
-            Some(e) => {
-                tip = format!("⚠ {e}\n\n{tip}");
-                format!("{} ⚠", a.server_name)
-            }
-            None if r.saved_at.is_some() => format!("{} ✓", a.server_name),
-            None => a.server_name.clone(),
-        };
-        Some((label, tip))
+        let mut tip = format!(
+            "Jellyfin: {} ({})\nSigned in as {}\n{connection}\n{progress}\n{item}",
+            account.server_name, account.url, account.user_name
+        );
+        let mut label = account.server_name.clone();
+        if let Some(e) = &live.error {
+            tip = format!("⚠ {e}\n\n{tip}");
+            label.push_str(" ⚠");
+        }
+        Some((label, live.online, tip))
     }
 
     /// Stores a fetched Jellyfin library: series, chapters, read state from

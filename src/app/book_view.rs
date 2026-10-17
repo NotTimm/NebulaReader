@@ -726,13 +726,13 @@ impl App {
         Task::none()
     }
 
-    fn is_paged(&self) -> bool {
+    pub(super) fn is_paged(&self) -> bool {
         self.settings.book.layout != BookLayout::Scroll
     }
 
     /// (first page on screen, pages in chapter, pages per turn), once the
     /// current chapter has been laid out.
-    fn current_book_page(&self) -> Option<(usize, usize, usize)> {
+    pub(super) fn current_book_page(&self) -> Option<(usize, usize, usize)> {
         let p = self.book_pages.lock().ok()?;
         (p.chapter == self.epub_chapter && p.count() > 0)
             .then(|| (p.page_at(self.book_scroll.rel_y), p.count(), p.step()))

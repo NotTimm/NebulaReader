@@ -440,20 +440,61 @@ pub async fn cover(account: &Account, item_id: &str, max_height: u32) -> Result<
 
 /// Saves reading progress to Jellyfin: the page (as Jellyfin's web reader
 /// stores it) and whether the item is finished.
-pub async fn save_progress(account: &Account, item_id: &str, page: usize, played: bool) -> Result<(), String> {
-    let body = serde_json::json!({
-        "PlaybackPositionTicks": if played { 0 } else { page as i64 * 10_000 },
+/// Whether the server answers. `/System/Ping` needs no sign-in and isn't
+/// logged as activity, so it's cheap to call while reading.
+pub async fn ping(url: &str) -> bool {
+    client()
+        .get(format!("{url}/System/Ping"))
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success())
+}
+
+/// Body for a progress update. `ticks` is Jellyfin's
+/// `PlaybackPositionTicks`: the page × 10 000 for comics (as Jellyfin's web
+/// comic reader stores it), the fraction read × 10 000 000 for books (as its
+/// web book reader does).
+fn progress_body(ticks: i64, played: bool) -> serde_json::Value {
+    serde_json::json!({
+        "PlaybackPositionTicks": if played { 0 } else { ticks },
         "Played": played,
         "LastPlayedDate": now_rfc3339(),
-    });
+    })
+}
+
+pub async fn save_progress(account: &Account, item_id: &str, ticks: i64, played: bool) -> Result<(), String> {
     let resp = client()
         .post(format!("{}/UserItems/{item_id}/UserData", account.url))
         .header("Authorization", account.auth())
-        .json(&body)
+        .json(&progress_body(ticks, played))
         .send()
         .await
         .map_err(|e| e.to_string())?;
     if resp.status().is_success() { Ok(()) } else { Err(format!("HTTP {}", resp.status())) }
+}
+
+/// The same, blocking for at most a few seconds: for the last save while
+/// the app is closing, when there's no time to wait for a task.
+pub fn save_progress_now(account: &Account, item_id: &str, ticks: i64, played: bool) {
+    let (url, auth) = (format!("{}/UserItems/{item_id}/UserData", account.url), account.auth());
+    let body = progress_body(ticks, played);
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Its own thread: reqwest's blocking client can't run on the async
+    // runtime's threads.
+    std::thread::spawn(move || {
+        let r = blocking_client()
+            .post(url)
+            .header("Authorization", auth)
+            .timeout(std::time::Duration::from_secs(3))
+            .json(&body)
+            .send();
+        let _ = tx.send(r.map(|r| r.status().is_success()));
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(4)) {
+        Ok(Ok(true)) => {}
+        other => log::warn!("jellyfin: last progress save on exit didn't go through: {other:?}"),
+    }
 }
 
 /// UTC "now" as RFC 3339, without pulling in a date crate.

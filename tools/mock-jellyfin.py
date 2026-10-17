@@ -131,6 +131,13 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/Items/([^/]+)/Images/Primary", p)
         if m:
             return self.send_empty(404)  # no covers: the app falls back to page 1
+        if p == "/System/Ping":
+            body = b'"Jellyfin Server"'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         m = re.fullmatch(r"/Items/([^/]+)/(?:Download|File)", p)
         if m and m.group(1) in ITEMS:
             return self.download(ITEMS[m.group(1)]["path"])

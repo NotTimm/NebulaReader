@@ -566,12 +566,17 @@ impl App {
     /// book comes from: "Local" (hover for the path) or the Jellyfin server
     /// with its sync state (hover for details).
     fn source_label(&self) -> Element<'_, Message> {
-        let (label, hint) = self.jellyfin_source().unwrap_or_else(|| {
+        let (label, online, hint) = self.jellyfin_source().unwrap_or_else(|| {
             let path = self.open_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            ("Local".to_string(), path)
+            ("Local".to_string(), None, path)
         });
+        let mut content = widget::row::with_capacity(2).spacing(4).align_y(Alignment::Center).push(widget::text::caption(label));
+        if let Some(online) = online {
+            let color = if online { Color::from_rgb8(0x3f, 0xb9, 0x50) } else { Color::from_rgb8(0xe0, 0x4a, 0x4a) };
+            content = content.push(widget::text::caption("●").class(cosmic::theme::Text::Color(color)));
+        }
         tip(
-            widget::container(widget::text::caption(label)).padding([0, 6]).height(Length::Fill).align_y(Alignment::Center),
+            widget::container(content).padding([0, 6]).height(Length::Fill).align_y(Alignment::Center),
             hint,
         )
     }
@@ -1227,8 +1232,12 @@ impl Application for App {
         els
     }
 
+    fn on_close_requested(&self, _id: window::Id) -> Option<Self::Message> {
+        Some(Message::Jf(JfMsg::Closing))
+    }
+
     fn subscription(&self) -> Subscription<Self::Message> {
-        event::listen_with(|event, status, _| match event {
+        let events = event::listen_with(|event, status, _| match event {
             event::Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => match status {
                 event::Status::Ignored => Some(Message::Key(key)),
                 event::Status::Captured => None,
@@ -1257,7 +1266,8 @@ impl Application for App {
                 Some(Message::FilesDropped(paths))
             }
             _ => None,
-        })
+        });
+        Subscription::batch([events, self.jellyfin_subscription()])
     }
 
     #[allow(clippy::too_many_lines)]
