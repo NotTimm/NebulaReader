@@ -53,6 +53,31 @@ New-Item -ItemType Directory -Path $Stage | Out-Null
 
 Copy-Item $Exe $Stage
 Copy-Item (Join-Path $VcpkgBin '*.dll') $Stage
+
+# The exe and the vcpkg DLLs import VCRUNTIME140.dll, which a clean Windows
+# doesn't have (only the separate VC++ Redistributable installs it), so the
+# app would fail to start with STATUS_DLL_NOT_FOUND. Ship it app-locally,
+# from Visual Studio's redist folder. The UCRT (api-ms-win-crt-*) is part of
+# Windows 10+.
+$Vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$VcRuntime = $null
+if (Test-Path $Vswhere) {
+    $Vs = & $Vswhere -latest -products * -property installationPath
+    if ($Vs) {
+        $VcRuntime = Get-ChildItem -Path (Join-Path $Vs 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT') `
+            -Filter 'vcruntime140*.dll' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending
+    }
+}
+if (-not $VcRuntime) {
+    $VcRuntime = Get-ChildItem -Path "$env:SystemRoot\System32" -Filter 'vcruntime140*.dll'
+}
+if (-not ($VcRuntime | Where-Object Name -eq 'vcruntime140.dll')) {
+    throw 'vcruntime140.dll not found (install the Visual Studio C++ build tools)'
+}
+# One copy per file name, from the newest redist folder.
+$VcRuntime | Group-Object Name | ForEach-Object { Copy-Item $_.Group[0].FullName $Stage }
+Write-Host "==> Bundled $(($VcRuntime | Group-Object Name).Name -join ', ')"
 Copy-Item (Join-Path $Repo 'LICENSE') (Join-Path $Stage 'LICENSE.txt')
 @"
 Nebula Reader $Version for Windows (portable)
