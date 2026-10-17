@@ -30,7 +30,7 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
 - Linux build deps: `libarchive`, `libxkbcommon`, `wayland`, `openssl` dev
   packages plus `pkg-config`. Windows: libarchive from vcpkg (see README).
 - Packaging scripts are in `packaging/`; `.github/workflows/release.yml` builds
-  the .deb, .rpm, AppImage, .flatpak and Windows .zip, and a manual run with
+  the .deb, .rpm, AppImage, .flatpak, Windows .zip/setup and macOS .dmg, and a manual run with
   `publish` ticked creates the GitHub Release `v<Cargo.toml version>`.
 - The owner's editor is Neovim; use `nvim`, not `nano`, in instructions.
 - Jellyfin: `src/jellyfin.rs` (API client, accounts in `jellyfin.json`),
@@ -58,6 +58,11 @@ the owner's laptop).
   until then, which is expected). Then: screenshots (owner), README refresh,
   Flathub when the owner says go. Maybe register Jellyfin session
   capabilities so the app shows in the dashboard (owner asked).
+- macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
+  .dmg; the workflow job for it is parked in `packaging/pending/release.yml`
+  until the owner pastes it in. Untested on a real Mac: the code
+  type-checks for `aarch64-apple-darwin`, but the first CI run is the
+  first real build. Delete the parked copy once it's in place.
 - Owner's laptop: don't run release builds there unless asked to test;
   `cargo check` is fine, CI builds the packages. `just rpm` builds an rpm.
 - Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
