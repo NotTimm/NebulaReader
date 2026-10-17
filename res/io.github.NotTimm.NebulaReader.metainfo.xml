@@ -27,12 +27,38 @@
   <url type="homepage">https://github.com/NotTimm/nebula-reader</url>
   <url type="bugtracker">https://github.com/NotTimm/nebula-reader/issues</url>
 
-  <developer id="io.github.NotTimm">
+  <developer id="io.github.nottimm">
     <name>Tim Singel</name>
   </developer>
 
   <content_rating type="oars-1.1" />
 
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/library.png</image>
+      <caption>Your comics, manga and books as one library</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
+      <caption>Books turn pages like an e-reader, one or two at a time</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book-settings.png</image>
+      <caption>Choose the typeface, size, spacing and theme</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader.png</image>
+      <caption>Read comics one page or two at a time</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader-zoom.png</image>
+      <caption>Zoom in on any panel</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/settings.png</image>
+      <caption>Takes on the look of your desktop</caption>
+    </screenshot>
+  </screenshots>
   <releases>
     <release version="0.1.0" date="2026-10-16" type="stable">
       <description>
@@ -46,7 +72,7 @@
         </ul>
       </description>
     </release>
-    <release version="0.1.0-beta.4" date="2026-10-16">
+    <release version="0.1.0~beta.4" date="2026-10-16">
       <description>
         <p>Jellyfin, and books that turn pages.</p>
         <ul>
@@ -59,7 +85,7 @@
         </ul>
       </description>
     </release>
-    <release version="0.1.0-beta.3" date="2026-10-16">
+    <release version="0.1.0~beta.3" date="2026-10-16">
       <description>
         <p>A new icon, and a Windows installer.</p>
         <ul>
@@ -68,7 +94,7 @@
         </ul>
       </description>
     </release>
-    <release version="0.1.0-beta.2" date="2026-10-16">
+    <release version="0.1.0~beta.2" date="2026-10-16">
       <description>
         <p>Runs on Windows, and takes on the look of the desktop it runs on.</p>
         <ul>
@@ -78,7 +104,7 @@
         </ul>
       </description>
     </release>
-    <release version="0.1.0-beta.1" date="2026-08-18">
+    <release version="0.1.0~beta.1" date="2026-08-18">
       <description>
         <p>First beta release.</p>
       </description>

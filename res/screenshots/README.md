@@ -5,10 +5,16 @@ Store screenshots referenced from the metainfo (captions are in
 
 | File | Shows |
 |------|-------|
-| `library.png` | Library grid with the Continue Reading shelf (default shot) |
-| `series.png` | A matched series page: description, publisher, issue list with progress |
-| `reader.png` | The comic reader on a strong page, not zoomed |
-| `book.png` | The EPUB reader mid-chapter, body text visible |
+| `library.png` | Library with the Continue Reading shelf and All/Local/Jellyfin tabs (default shot) |
+| `book.png` | The EPUB reader in two-page layout at a chapter opening |
+| `book-settings.png` | The book's Reading panel (typeface, size, layout, theme) |
+| `reader.png` | The comic reader in two-page spread |
+| `reader-zoom.png` | The comic reader zoomed into a page |
+| `settings.png` | The Settings drawer (library folder path blurred) |
+
+All are 1024×664 window captures on COSMIC, dark theme. `capture.sh` still
+names its four shots `library`, `series`, `reader` and `book`; save extra
+ones by hand and add them to the metainfo and `docs/listing.md`.
 
 ## Capturing
 

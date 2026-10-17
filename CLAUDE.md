@@ -28,7 +28,8 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   `Cargo.toml`). Runs on COSMIC, KDE, GNOME and Windows; per-OS code lives in
   `src/platform/`, per-desktop theming in `src/platform/look.rs`.
 - Linux build deps: `libarchive`, `libxkbcommon`, `wayland`, `openssl` dev
-  packages plus `pkg-config`. Windows: libarchive from vcpkg (see README).
+  packages plus `pkg-config`. Windows: libarchive from vcpkg (see docs/DEVELOPING.md, which holds the
+  build/packaging/release docs; README.md is the user-facing page).
 - Packaging scripts are in `packaging/`; `.github/workflows/release.yml` builds
   the .deb, .rpm, AppImage, .flatpak, Windows .zip/setup and macOS .dmg, and a manual run with
   `publish` ticked creates the GitHub Release `v<Cargo.toml version>`.
@@ -48,15 +49,18 @@ the owner's laptop).
 - Done: per-desktop looks and button roundness; Windows build, icons and
   Inno installer; release workflow for all formats; winget submission
   (microsoft/winget-pkgs#454352, awaiting review); manga-tui name cleanup;
-  Jellyfin reading (owner confirms it works on the real server); books
+  Jellyfin reading (owner confirms it works on the real server; pages
+  stream from `/Items/{id}/File`, since `/Download` logs an activity entry
+  per request); books
   paginate like a Kindle (`src/app/paged.rs`, single/two pages, scroll as
   an option) with click-to-zoom images; hover hints on reader buttons;
   All/Local/Jellyfin library switch; v0.1.0-beta.4 released.
 - Next: 0.1.0 (first stable, as Nebula Reader) is released. winget PR
   microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.0) awaits review;
   once merged, the workflow's `winget` job submits later releases (it fails
-  until then, which is expected). Then: screenshots (owner), README refresh,
-  Flathub when the owner says go. Maybe register Jellyfin session
+  until then, which is expected). Screenshots are in `res/screenshots/` and
+  the metainfo; README refreshed. Next: Flathub (owner is being walked
+  through it). Maybe register Jellyfin session
   capabilities so the app shows in the dashboard (owner asked).
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
   .dmg; the workflow job for it is parked in `packaging/pending/release.yml`
@@ -67,5 +71,5 @@ the owner's laptop).
   `cargo check` is fine, CI builds the packages. `just rpm` builds an rpm.
 - Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
   (`conversion::icon` builds a RawImage that winit ignores); a patch for the
-  fork is pending. Flathub submission (app ID, screenshots). Code signing.
+  fork is pending. Flathub submission. Code signing.
   Scan-group names like `Jaimini's~box~` aren't stripped yet.

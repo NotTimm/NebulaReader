@@ -115,31 +115,41 @@ sentence case, no trailing period:
 
 | File | Caption |
 |------|---------|
-| `library.png` | Your collection as a library of series |
-| `series.png` | Series pages with issue lists and progress |
+| `library.png` | Your comics, manga and books as one library |
+| `book.png` | Books turn pages like an e-reader, one or two at a time |
+| `book-settings.png` | Choose the typeface, size, spacing and theme |
 | `reader.png` | Read comics one page or two at a time |
-| `book.png` | Comfortable reading for EPUB books |
+| `reader-zoom.png` | Zoom in on any panel |
+| `settings.png` | Takes on the look of your desktop |
 
 ```xml
 <screenshots>
   <screenshot type="default">
     <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/library.png</image>
-    <caption>Your collection as a library of series</caption>
+    <caption>Your comics, manga and books as one library</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/series.png</image>
-    <caption>Series pages with issue lists and progress</caption>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
+    <caption>Books turn pages like an e-reader, one or two at a time</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book-settings.png</image>
+    <caption>Choose the typeface, size, spacing and theme</caption>
   </screenshot>
   <screenshot>
     <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader.png</image>
     <caption>Read comics one page or two at a time</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
-    <caption>Comfortable reading for EPUB books</caption>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader-zoom.png</image>
+    <caption>Zoom in on any panel</caption>
+  </screenshot>
+  <screenshot>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/settings.png</image>
+    <caption>Takes on the look of your desktop</caption>
   </screenshot>
 </screenshots>
 ```
 
-Flathub wants stable image URLs; once a release is tagged, point these at the
-tag (`.../cosmic-reader/v0.1.0/res/screenshots/...`) instead of `master`.
+Flathub wants stable image URLs; once a release that includes them is tagged (0.1.1 or later), point these at the
+tag (`.../nebula-reader/v0.1.1/res/screenshots/...`) instead of `master`.
