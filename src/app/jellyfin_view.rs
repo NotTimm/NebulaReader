@@ -800,7 +800,13 @@ impl App {
 
     /// Settings: signed-in servers and adding one.
     pub(super) fn build_jellyfin_section(&self) -> Element<'_, Message> {
-        let mut section = widget::settings::section().title("🪼 Jellyfin");
+        let mut section = widget::settings::section().header(
+            widget::row::with_capacity(2)
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .push(widget::icon(super::library_view::jellyfin_icon()).size(16))
+                .push(widget::text::heading("Jellyfin")),
+        );
 
         for account in &self.jellyfin.accounts {
             let key = account.key();

@@ -619,11 +619,15 @@ fn ui_icon(svg: &'static [u8]) -> widget::icon::Handle {
     handle
 }
 
+/// The Jellyfin logo, in the theme's text colour.
+pub(super) fn jellyfin_icon() -> widget::icon::Handle {
+    ui_icon(JELLYFIN_ICON)
+}
+
 fn source_icon(src: LibrarySource) -> widget::icon::Handle {
     match src {
         LibrarySource::All => ui_icon(ALL_ICON),
         LibrarySource::Local => ui_icon(LOCAL_ICON),
-        // The Jellyfin logo keeps its own colours.
-        LibrarySource::Jellyfin => widget::icon::from_svg_bytes(JELLYFIN_ICON),
+        LibrarySource::Jellyfin => jellyfin_icon(),
     }
 }
