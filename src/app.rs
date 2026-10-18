@@ -1771,9 +1771,15 @@ impl App {
 
         col = col.push(widget::scrollable::scrollable(list).height(Length::Fill));
 
+        // Its own background: in theater mode libcosmic's content frame is
+        // off, and without this the window shows through the panel.
         widget::container(col)
             .width(Length::Fixed(300.0))
             .height(Length::Fill)
+            .style(|theme: &cosmic::Theme| widget::container::Style {
+                background: Some(Background::Color(theme.cosmic().bg_color().into())),
+                ..Default::default()
+            })
             .into()
     }
 
