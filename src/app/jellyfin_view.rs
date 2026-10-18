@@ -869,10 +869,13 @@ impl App {
                 }
             }
         }
-        // Drop series that are gone from the server.
+        // Drop series that are gone from the server, and whole libraries
+        // that were deleted or hidden there.
         for (root, keys) in &by_root {
             library::prune_root(db, root, keys);
         }
+        let roots: HashSet<&str> = by_root.keys().map(String::as_str).collect();
+        library::prune_jellyfin_roots(db, &format!("{}{account_key}/", jellyfin::KEY_PREFIX), &roots);
         let names: Vec<String> =
             series.iter().filter(|s| library::get_series(db, &s.key).is_some_and(|e| e.meta_fetched_at == 0)).map(|s| s.key.clone()).collect();
         for key in names {

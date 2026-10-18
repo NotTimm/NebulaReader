@@ -925,6 +925,50 @@ pub fn prune_root(conn: &Connection, root: &str, found: &[String]) -> usize {
     removed
 }
 
+/// Series this library folder holds, so a scan that suddenly finds nothing
+/// can be told apart from a drive that isn't there.
+pub fn series_count_under_root(conn: &Connection, root: &str) -> usize {
+    conn.query_row("SELECT COUNT(*) FROM series WHERE library_root = ?1", params![root], |r| r.get::<_, i64>(0))
+        .map(|n| n as usize)
+        .unwrap_or(0)
+}
+
+/// Removes the series of one Jellyfin account whose library isn't among
+/// `roots` any more (the library was deleted or hidden on the server).
+pub fn prune_jellyfin_roots(conn: &Connection, account_prefix: &str, roots: &std::collections::HashSet<&str>) {
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT path, library_root FROM series WHERE substr(library_root, 1, length(?1)) = ?1")
+        .and_then(|mut st| {
+            st.query_map(params![account_prefix], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.flatten().collect())
+        })
+        .unwrap_or_default();
+    for (path, root) in rows {
+        if !roots.contains(root.as_str()) {
+            delete_series(conn, &path);
+        }
+    }
+}
+
+/// Forgets files opened outside any library folder that have since been
+/// deleted. A file whose folder is gone too (an unplugged drive) is kept,
+/// since it may come back.
+pub fn prune_missing_loose_files(conn: &Connection) -> usize {
+    let paths: Vec<String> = conn
+        .prepare("SELECT path FROM series WHERE library_root = '' AND path NOT LIKE 'jellyfin://%'")
+        .and_then(|mut st| st.query_map([], |r| r.get(0)).map(|it| it.flatten().collect()))
+        .unwrap_or_default();
+    let mut removed = 0;
+    for p in paths {
+        let path = std::path::Path::new(&p);
+        let folder_there = path.parent().is_some_and(|d| d.is_dir());
+        if !path.exists() && folder_there {
+            delete_series(conn, &p);
+            removed += 1;
+        }
+    }
+    removed
+}
+
 pub fn delete_series(conn: &Connection, path: &str) {
     let _ = conn.execute("DELETE FROM issues WHERE series_path = ?1", params![path]);
     let _ = conn.execute("DELETE FROM series WHERE path = ?1", params![path]);

@@ -968,6 +968,12 @@ impl Application for App {
 
     fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let db = library::open_db().ok();
+        if let Some(db) = &db {
+            let removed = library::prune_missing_loose_files(db);
+            if removed > 0 {
+                log::info!("forgot {removed} opened files that were deleted");
+            }
+        }
         let settings = Settings::load();
         let library_dirs: Vec<PathBuf> = db
             .as_ref()
@@ -2562,6 +2568,16 @@ impl App {
                     self.missing_roots.insert(root);
                     return self.reload_library();
                 };
+                // A drive mounted on a folder that stays behind when it's
+                // unplugged (/mnt/usb) looks empty rather than missing.
+                // Never treat "suddenly empty" as "everything was deleted":
+                // hide the library instead, as for a missing folder.
+                let known = self.db.as_ref().map_or(0, |db| library::series_count_under_root(db, &root.to_string_lossy()));
+                if found.is_empty() && known > 0 {
+                    log::warn!("{} is empty now; keeping its {known} series hidden until it's back", root.display());
+                    self.missing_roots.insert(root);
+                    return self.reload_library();
+                }
                 self.missing_roots.remove(&root);
                 let mut tasks = Vec::new();
                 if let Some(db) = &self.db {
