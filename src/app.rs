@@ -1285,6 +1285,11 @@ impl Application for App {
     #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         let task = self.handle_message(message);
+        // libcosmic pads the content area with the window colour, which
+        // shows as a strip beside the black in theater mode; drop that frame
+        // while reading a comic in theater mode.
+        self.core.window.content_container =
+            !(self.app_view == AppView::Reader && self.theater_mode && self.epub_book.is_none());
         Task::batch([task, self.sync_window_icon(), self.jellyfin_tick()])
     }
 
@@ -1634,7 +1639,8 @@ impl App {
     /// this container and is never affected by the opacity setting.
     fn backdrop<'a>(&self, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
         let black = self.theater_mode || self.settings.background == BgStyle::Black;
-        let alpha = self.settings.background_opacity.clamp(0.0, 1.0);
+        // Theater mode is always fully black.
+        let alpha = if self.theater_mode { 1.0 } else { self.settings.background_opacity.clamp(0.0, 1.0) };
 
         widget::container(content)
             .width(Length::Fill)
