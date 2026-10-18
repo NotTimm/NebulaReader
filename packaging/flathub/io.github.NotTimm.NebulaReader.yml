@@ -1,7 +1,7 @@
-# Flathub manifest: identical to ../io.github.NotTimm.NebulaReader.yml except it
-# builds from a release tag instead of the local checkout. This file and a
-# cargo-sources.json generated for that tag are what go in the
-# flathub/io.github.NotTimm.NebulaReader repo; see README.md next to this file.
+# Manifest that builds a release tag (the CI copy, ../io.github.NotTimm.NebulaReader.yml,
+# builds the local checkout). Written with AI help, so under Flathub's
+# generative AI policy it can't be the manifest submitted to Flathub; see
+# README.md next to this file.
 app-id: io.github.NotTimm.NebulaReader
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'
@@ -50,7 +50,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/NotTimm/NebulaReader.git
-        tag: v0.1.1
-        # The tag's commit (Flathub requires it): git rev-parse v0.1.1^{commit}
-        commit: f6d55258c2dec34abf1921124c28032205e042f7
+        tag: v0.1.2
+        # The tag's commit: git rev-parse v0.1.2^{commit}
+        commit: 42ba42d1a11f2be9d86c24a58c8f60f049884122
       - cargo-sources.json
