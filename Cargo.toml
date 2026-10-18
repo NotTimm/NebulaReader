@@ -28,7 +28,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 quick-xml = "0.37"
 regex = "1"
 
-# Fork of pop-os/libcosmic with four patches on top of pop-os/libcosmic:
+# Fork of pop-os/libcosmic with these patches on top of pop-os/libcosmic:
 # 1. Forwards winit's trackpad pinch gesture (WindowEvent::PinchGesture)
 #    through iced as mouse::Event::WheelZoomed, which upstream iced drops
 #    entirely.
@@ -46,11 +46,12 @@ regex = "1"
 #    but the view starts at the top of the new image (comic page turns).
 # 6. Header bar items are vertically centred on whole pixels, so small icons
 #    in the header stay sharp.
+# 7. In image::Viewer, holding Shift zooms the wheel in quarter-size steps.
 # Re-sync by rebasing NotTimm/libcosmic's commits onto a newer
 # pop-os/libcosmic and updating `rev` below.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "4100c34698967897cb041e57d1c197a22aeaee18"
+rev = "dbf5131d35781607c3887abde83b6ffb3fed0742"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -58,12 +59,12 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "4100c34698967897cb041e57d1c197a22aeaee18", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "dbf5131d35781607c3887abde83b6ffb3fed0742", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "4100c34698967897cb041e57d1c197a22aeaee18", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "dbf5131d35781607c3887abde83b6ffb3fed0742", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).

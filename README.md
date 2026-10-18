@@ -78,8 +78,8 @@ the way so you can read.
 - CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.
 - Single or two-page spreads, theater mode, full screen, and Fit Page,
   which sizes the window to the page.
-- Zoom with Ctrl + scroll or a trackpad/touchscreen pinch, and pan by
-  dragging.
+- Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
+  on a trackpad, or a pinch, and pan by dragging.
 - Fast CBR: archives are unpacked in one pass and cached, so page turns
   stay instant.
 - An info panel with the issue's `ComicInfo.xml` and what was matched

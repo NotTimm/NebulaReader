@@ -153,7 +153,9 @@ pub enum Message {
     Key(Key),
     ModifiersChanged(keyboard::Modifiers),
     ZoomBootstrap,
-    ZoomBootstrapWheel,
+    /// A wheel tick outside the zoom viewer; true for a physical mouse
+    /// wheel (line steps), false for a trackpad (pixels).
+    ZoomBootstrapWheel(bool),
     ZoomChanged(f32),
     Touch(touch::Event),
     // Drag and drop
@@ -1264,7 +1266,7 @@ impl Application for App {
                         widget::button::icon(icon::from_name("zoom-in-symbolic"))
                             .selected(self.zoom_active)
                             .on_press(Message::ToggleZoom),
-                        if self.zoom_active { "Stop zooming (M)" } else { "Zoom and pan (M, or Ctrl + scroll)" },
+                        if self.zoom_active { "Stop zooming (M)" } else { "Zoom and pan (M, or scroll; Shift + scroll for fine steps)" },
                     ));
                     els.push(tip(
                         widget::button::icon(icon::from_name("edit-copy-symbolic")).on_press(Message::CopyPage),
@@ -1292,14 +1294,17 @@ impl Application for App {
             event::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 Some(Message::ModifiersChanged(m))
             }
-            // Ctrl+scroll and trackpad pinch: while zoom mode is already
-            // active, `widget::image::viewer` owns and captures these
-            // itself. While inactive, the first tick just bootstraps into
-            // zoom mode (see `App::enter_zoom`); the viewer then takes over
-            // for the rest of the gesture. Plain scroll (no Ctrl) is
-            // filtered in `update` so it never bootstraps zoom.
-            event::Event::Mouse(mouse::Event::WheelScrolled { .. }) => match status {
-                event::Status::Ignored => Some(Message::ZoomBootstrapWheel),
+            // Mouse wheel, Ctrl+scroll and trackpad pinch: while zoom mode
+            // is already active, `widget::image::viewer` owns and captures
+            // these itself. While inactive, the first tick just bootstraps
+            // into zoom mode (see `App::enter_zoom`); the viewer then takes
+            // over for the rest of the gesture. A trackpad's plain two-finger
+            // scroll (no Ctrl) is filtered in `update` so it never
+            // bootstraps zoom.
+            event::Event::Mouse(mouse::Event::WheelScrolled { delta }) => match status {
+                event::Status::Ignored => {
+                    Some(Message::ZoomBootstrapWheel(matches!(delta, mouse::ScrollDelta::Lines { .. })))
+                }
                 event::Status::Captured => None,
             },
             event::Event::Mouse(mouse::Event::WheelZoomed { .. }) => match status {
@@ -1579,7 +1584,7 @@ impl App {
                     .push(icon::from_name("image-x-generic-symbolic").size(64))
                     .push(widget::text::title3("Open a comic or book to start reading"))
                     .push(widget::text(
-                        "← → page  ·  C chapters  ·  L layout  ·  M zoom  ·  pinch or Ctrl+scroll to zoom  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy",
+                        "← → page  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy",
                     ).size(12))
                     .push(widget::text("You can also drag and drop a file or folder here.").size(12))
                     .push(widget::button::suggested("Open Comic or Book").on_press(Message::OpenFile))
@@ -2815,9 +2820,9 @@ impl App {
             Message::ModifiersChanged(m) => {
                 self.modifiers = m;
             }
-            Message::ZoomBootstrapWheel => {
+            Message::ZoomBootstrapWheel(physical) => {
                 if self.app_view == AppView::Reader
-                    && self.modifiers.control()
+                    && (physical || self.modifiers.control())
                     && !self.sources.is_empty()
                 {
                     self.enter_zoom();
