@@ -40,12 +40,18 @@ the way so you can read.
   **ComicVine** for Western comics: canonical titles, descriptions,
   publishers, issue titles and cover dates. Wrong match? Search again with
   your own words.
+- Who made it and when: series show their writers and artists and the
+  years they ran, issues their release dates, books their author. These
+  come from the files themselves (`ComicInfo.xml`, EPUB), Jellyfin,
+  AniList and ComicVine.
 - Read, unread or "page 12 of 30" for every issue, a Continue Reading
   shelf, and search across the library.
 - Drag a file or folder onto the window to open it.
+- Libraries on a USB drive are kept while the drive is unplugged and come
+  back when it's plugged in again.
 
 <p align="center">
-  <img src="res/screenshots/series.png" width="820" alt="The Jujutsu Kaisen series page: cover, description, and chapters with release dates, read and in-progress">
+  <img src="res/screenshots/series.png" width="820" alt="The Chainsaw Man series page: cover, years, creators, AniList genres and description, and a chapter list with read chapters">
 </p>
 
 ### 📖 Books that read like a book
@@ -72,21 +78,24 @@ the way so you can read.
 ### 🖼️ Comics and manga, your way
 
 <p align="center">
-  <img src="res/screenshots/reader.png" width="820" alt="A Chainsaw Man page in theater mode, streamed from a Jellyfin server">
+  <img src="res/screenshots/reader.png" width="820" alt="Look Back open in theater mode, streamed from a Jellyfin server, with the server name and its online dot in the title bar">
 </p>
 
 - CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.
-- Single or two-page spreads, theater mode, full screen, and Fit Page,
-  which sizes the window to the page.
+- Single or two pages at a time (a two-page spread shows on its own),
+  theater mode, and Fit Page, which sizes the window to the page.
+- Full screen hides everything but the page; move the pointer to the top
+  to bring the header bar back.
 - Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
-  on a trackpad, or a pinch, and pan by dragging.
+  on a trackpad, or a pinch, and pan by dragging. The zoom stays as you
+  turn pages, and each new page starts at its top.
 - Fast CBR: archives are unpacked in one pass and cached, so page turns
   stay instant.
 - An info panel with the issue's `ComicInfo.xml` and what was matched
   online.
 
 <p align="center">
-  <img src="res/screenshots/reader-zoom.png" width="640" alt="A comic page zoomed in to one panel">
+  <img src="res/screenshots/reader-zoom.png" width="640" alt="A comic page zoomed in on two panels">
 </p>
 
 ### 🪼 Jellyfin built in
@@ -95,12 +104,14 @@ Sign in to your Jellyfin server with **Quick Connect** (no password
 typing) and its book libraries sit right next to your local folders, with
 an **All / Local / Jellyfin** switch at the top. Comic pages stream as you
 read instead of downloading whole chapters, and progress syncs both ways
-with Jellyfin's own web reader. [How it works](#jellyfin)
+with Jellyfin's own web reader. The title bar shows which server a comic
+comes from and whether it's online, and what you're reading shows on the
+server's dashboard. [How it works](#jellyfin)
 
 ### 🎨 At home on your desktop
 
 <p align="center">
-  <img src="res/screenshots/settings.png" width="640" alt="The Settings drawer: style, background, theater mode, metadata lookup and library folders">
+  <img src="res/screenshots/settings.png" width="440" alt="The Settings drawer: style, colors and theme import, background, theater mode, two-page spread and metadata lookup">
 </p>
 
 Nebula takes on the look of the desktop it runs on, including your
@@ -111,7 +122,7 @@ when you change them:
 |---------|-------|--------------|-----------|
 | COSMIC | COSMIC | the live COSMIC theme | libcosmic's header bar |
 | KDE Plasma | Breeze | your colour scheme (`kdeglobals`), accent included | KWin's |
-| Windows 10/11 | Windows 11 (Fluent) | light/dark mode and accent colour | Windows' |
+| Windows 10/11 | Windows 11 (Fluent) | light/dark mode and the accent shades Windows' own apps use | Windows' |
 | GNOME, Budgie, ... | Adwaita | light/dark and accent (settings portal) | libcosmic's header bar |
 | macOS | Adwaita shapes | light/dark mode and accent colour | macOS's |
 
@@ -216,7 +227,10 @@ How it works:
 - Progress uses the same fields as Jellyfin's web reader (the page in
   `PlaybackPositionTicks`, `Played` when a chapter is finished), so it
   carries over between machines and the Jellyfin web app. Marking chapters
-  read or unread in Nebula updates Jellyfin too.
+  read or unread in Nebula updates Jellyfin too. Progress is saved once you
+  stay on a page for a few seconds, not on every page turn.
+- While a chapter is open, the server's dashboard lists it under active
+  sessions, like a video playing in another Jellyfin app.
 - Libraries re-sync on startup and from the refresh button next to the
   account in settings. The server's progress wins only when it's newer
   than this machine's.

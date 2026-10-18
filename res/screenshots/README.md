@@ -5,17 +5,18 @@ Store screenshots referenced from the metainfo (captions are in
 
 | File | Shows |
 |------|-------|
-| `library.png` | Library with the Continue Reading shelf and All/Local/Jellyfin tabs (default shot) |
-| `series.png` | A series matched on AniList: description, genres, chapter list with progress |
+| `library.png` | The library on a Jellyfin server: Continue Reading and the All/Local/Jellyfin pill (default shot) |
+| `series.png` | A series matched on AniList: years, creators, genres, description, chapters |
 | `book.png` | The EPUB reader in two-page layout at a chapter opening |
 | `book-settings.png` | The book's Reading panel (typeface, size, layout, theme) |
-| `reader.png` | The comic reader in two-page spread |
+| `reader.png` | The comic reader in theater mode, streaming from Jellyfin |
 | `reader-zoom.png` | The comic reader zoomed into a page |
-| `settings.png` | The Settings drawer (library folder path blurred) |
+| `settings.png` | The Settings drawer, cropped to the drawer |
 
-All are 1024×664 window captures on COSMIC, dark theme. `capture.sh` still
-names its four shots `library`, `series`, `reader` and `book`; save extra
-ones by hand and add them to the metainfo and `docs/listing.md`.
+All but `settings.png` are 1020–1024 × 664 window captures on COSMIC, dark
+theme, taken for 0.1.3. `capture.sh` still names its four shots `library`,
+`series`, `reader` and `book`; save extra ones by hand and add them to the
+metainfo and `docs/listing.md`.
 
 ## Capturing
 
