@@ -170,7 +170,10 @@ impl App {
             col = col.push(error_banner(err));
         }
 
-        if self.scans_pending > 0 || self.meta_running {
+        // Shown from the first lookup to the last, including the pauses
+        // between them.
+        let meta_left = self.meta_left();
+        if self.scans_pending > 0 || meta_left > 0 {
             let mut status = widget::Row::new().spacing(8).align_y(Alignment::Center);
             if self.scans_pending > 0 {
                 status = status.push(widget::text::caption(format!(
@@ -178,10 +181,11 @@ impl App {
                     self.scans_pending
                 )));
             }
-            if self.meta_running {
+            if meta_left > 0 {
+                let total = self.meta_done + meta_left;
+                let percent = self.meta_done * 100 / total;
                 status = status.push(widget::text::caption(format!(
-                    "Looking up metadata… ({} queued)",
-                    self.meta_queue.len() + 1
+                    "Looking up metadata… {percent}% ({meta_left} of {total} left)"
                 )));
             }
             col = col.push(status);

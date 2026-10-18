@@ -272,6 +272,9 @@ pub struct App {
     // online metadata queue (one series at a time, rate-limit friendly)
     meta_queue: VecDeque<String>,
     meta_running: bool,
+    /// Series finished in the current run of lookups, for the progress
+    /// line; back to 0 once the queue is empty.
+    meta_done: usize,
     meta_current: Option<String>,
     meta_attempted: HashSet<String>,
     cv_key_input: String,
@@ -892,8 +895,12 @@ impl App {
         }
         let Some(db) = &self.db else { return Task::none() };
         while let Some(key) = self.meta_queue.pop_front() {
-            let Some(entry) = library::get_series(db, &key) else { continue };
+            let Some(entry) = library::get_series(db, &key) else {
+                self.meta_done += 1;
+                continue;
+            };
             if entry.is_epub {
+                self.meta_done += 1;
                 continue;
             }
             let issues = library::issues_for(db, &key);
@@ -901,6 +908,7 @@ impl App {
             if query.search.trim().is_empty() {
                 // Nothing to search with (yet) — let a later scan retry.
                 self.meta_attempted.remove(&key);
+                self.meta_done += 1;
                 continue;
             }
             self.meta_running = true;
@@ -910,7 +918,13 @@ impl App {
                 Message::MetaMatched(key, result)
             });
         }
+        self.meta_done = 0;
         Task::none()
+    }
+
+    /// Lookups still to do in this run, including the one in flight.
+    fn meta_left(&self) -> usize {
+        self.meta_queue.len() + usize::from(self.meta_running)
     }
 
     /// Queue cover generation for chapters that don't have covers yet.
@@ -1089,6 +1103,7 @@ impl Application for App {
             series_search_input: String::new(),
             meta_queue: VecDeque::new(),
             meta_running: false,
+            meta_done: 0,
             meta_current: None,
             meta_attempted: HashSet::new(),
             cv_key_input: String::new(),
@@ -2489,6 +2504,7 @@ impl App {
             }
             Message::MetaMatched(key, result) => {
                 self.meta_running = false;
+                self.meta_done += 1;
                 self.meta_current = None;
                 let mut used_comicvine = false;
                 if let Some(db) = &self.db {
