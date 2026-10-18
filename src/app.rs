@@ -94,6 +94,9 @@ pub enum Message {
     CloseError,
     // View toggles
     ToggleFullscreen,
+    /// The pointer's height in the window, tracked only in full screen to
+    /// reveal the hidden header bar at the top edge.
+    PointerY(f32),
     ToggleTheater,
     ToggleLayout,
     ToggleZoom,
@@ -190,6 +193,8 @@ pub struct App {
     loading: bool,
     error: Option<String>,
     fullscreen: bool,
+    /// The header bar is revealed in full screen (pointer at the top edge).
+    fullscreen_header: bool,
     theater_mode: bool,
     layout: Layout,
     zoom_active: bool,
@@ -981,6 +986,7 @@ impl Application for App {
             loading: flags.is_some(),
             error: None,
             fullscreen: false,
+            fullscreen_header: false,
             theater_mode: settings.theater_mode,
             layout: if settings.dual_page { Layout::Dual } else { Layout::Single },
             zoom_active: false,
@@ -1297,7 +1303,16 @@ impl Application for App {
             }
             _ => None,
         });
-        Subscription::batch([events, self.jellyfin_subscription()])
+        // In full screen, follow the pointer to reveal the hidden header.
+        let pointer = if self.fullscreen && self.app_view == AppView::Reader {
+            event::listen_with(|event, _, _| match event {
+                event::Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::PointerY(position.y)),
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([events, self.jellyfin_subscription(), pointer])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1308,6 +1323,16 @@ impl Application for App {
         // while reading a comic in theater mode.
         self.core.window.content_container =
             !(self.app_view == AppView::Reader && self.theater_mode && self.epub_book.is_none());
+        // Reading in full screen hides the header bar so the page fills the
+        // screen; it comes back while the pointer is at the top edge or a
+        // drawer is open.
+        if !self.fullscreen || self.app_view != AppView::Reader {
+            self.fullscreen_header = false;
+        }
+        self.core.window.show_headerbar = !self.fullscreen
+            || self.app_view != AppView::Reader
+            || self.fullscreen_header
+            || self.core.window.show_context;
         Task::batch([task, self.sync_window_icon(), self.jellyfin_tick()])
     }
 
@@ -2670,6 +2695,15 @@ impl App {
                     self.nav_dir = -1;
                     self.persist_progress();
                     return self.refresh_window();
+                }
+            }
+            Message::PointerY(y) => {
+                // Reveal at the very top; hide once the pointer leaves the
+                // bar (it's about 48 px tall).
+                if y <= 4.0 {
+                    self.fullscreen_header = true;
+                } else if y > 72.0 {
+                    self.fullscreen_header = false;
                 }
             }
             Message::ToggleFullscreen => {
