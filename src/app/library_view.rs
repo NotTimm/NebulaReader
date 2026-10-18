@@ -148,9 +148,19 @@ impl App {
 
     /// Whether the library has both local and Jellyfin series, which is
     /// when the All / Local / Jellyfin dropdown shows.
+    /// Whether the library has both local and Jellyfin series to show, so
+    /// the All / Local / Jellyfin dropdown is worth having.
     pub(super) fn has_local_and_remote(&self) -> bool {
-        let mut entries = self.library_entries.iter();
+        let mut entries = self.library_entries.iter().filter(|e| self.is_visible(e));
         entries.clone().any(is_remote) && entries.any(|e| !is_remote(e))
+    }
+
+    /// Whether a Jellyfin series belongs to an account that's still signed
+    /// in. Series left behind by a removed account can't be opened.
+    fn has_account(&self, e: &SeriesEntry) -> bool {
+        let key = if crate::jellyfin::is_key(&e.path) { &e.path } else { &e.library_root };
+        crate::jellyfin::parse_key(key)
+            .is_some_and(|(account, _)| self.jellyfin.accounts.iter().any(|a| a.key() == account))
     }
 
     pub(super) fn view_library(&self) -> Element<'_, Message> {
@@ -316,6 +326,9 @@ impl App {
     fn is_visible(&self, e: &SeriesEntry) -> bool {
         if self.hidden_paths.contains(&e.path) {
             return false;
+        }
+        if is_remote(e) {
+            return self.has_account(e);
         }
         !self.missing_roots.iter().any(|r| {
             let r = r.to_string_lossy();
