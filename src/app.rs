@@ -1318,6 +1318,18 @@ impl Application for App {
             AppView::Reader => self.view_reader(),
         };
 
+        // While the settings or details drawer is open, a click anywhere
+        // outside it closes it (and doesn't also reach what's underneath).
+        let content: Element<'_, Message> = if self.core.window.show_context {
+            cosmic::iced::widget::stack![
+                content,
+                mouse_area(widget::Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::CloseContext),
+            ]
+            .into()
+        } else {
+            content
+        };
+
         widget::dnd_destination(content, vec![Cow::Borrowed("text/uri-list")])
             .on_finish(|mime, data, _action, _x, _y| Message::DndDataReceived(mime, data))
             .on_data_received(Message::DndDataReceived)
