@@ -1684,7 +1684,18 @@ impl App {
         if let Some(err) = self.error.as_deref() {
             col = col.push(error_banner(err));
         }
-        col.push(main_row).into()
+        // In theater mode libcosmic's content frame is off (see `update`),
+        // so nothing else paints behind the reader; without this, anything
+        // not on the backdrop (the error banner, the gap below it) would
+        // show the window through.
+        widget::container(col.push(main_row))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|theme: &cosmic::Theme| widget::container::Style {
+                background: Some(Background::Color(theme.cosmic().bg_color().into())),
+                ..Default::default()
+            })
+            .into()
     }
 
     fn build_chapter_select(&self) -> Element<'_, Message> {
