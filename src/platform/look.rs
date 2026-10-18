@@ -398,8 +398,14 @@ mod windows {
             .and_then(|k| k.get_u32("AppsUseLightTheme"))
             .ok()
             .map(|light| light == 0);
+        // The shade Windows 11's own apps use for this mode.
+        let shade = CURRENT_USER
+            .open(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent")
+            .and_then(|k| k.get_value("AccentPalette"))
+            .ok()
+            .and_then(|v| accent_shade(&v, dark.unwrap_or(false)));
         // Stored as 0xAABBGGRR.
-        let accent = CURRENT_USER
+        let accent = shade.or_else(|| CURRENT_USER
             .open(r"Software\Microsoft\Windows\DWM")
             .and_then(|k| k.get_u32("AccentColor"))
             .ok()
@@ -409,8 +415,18 @@ mod windows {
                     ((abgr >> 8) & 0xff) as f32 / 255.0,
                     ((abgr >> 16) & 0xff) as f32 / 255.0,
                 )
-            });
+            }));
         HostColors { dark, accent, ..HostColors::default() }
+    }
+
+    /// Picks from `AccentPalette`: eight RGBA entries from lightest to
+    /// darkest, the accent itself fourth. WinUI's controls use Light 2 in
+    /// dark mode and Dark 1 in light mode.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn accent_shade(palette: &[u8], dark: bool) -> Option<Srgb> {
+        let i = if dark { 1 } else { 4 };
+        let px = palette.get(i * 4..i * 4 + 3)?;
+        Some(Srgb::new(px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0))
     }
 
     #[cfg(not(windows))]
@@ -526,6 +542,18 @@ ColorScheme=BreezeDark
         assert_eq!(macos::accent(None), macos::accent(Some(4)));
         assert_ne!(macos::accent(Some(0)), macos::accent(None));
         assert!(macos::accent(Some(2)).red > 0.99);
+    }
+
+    #[test]
+    fn windows_accent_shades() {
+        // The default blue accent's palette.
+        let palette = [
+            0x99, 0xeb, 0xff, 0, 0x4c, 0xc2, 0xff, 0, 0x00, 0x91, 0xf8, 0, 0x00, 0x78, 0xd4, 0,
+            0x00, 0x67, 0xc0, 0, 0x00, 0x3e, 0x92, 0, 0x00, 0x1a, 0x68, 0, 0xf7, 0x63, 0x0c, 0,
+        ];
+        assert_eq!(windows::accent_shade(&palette, true), Some(rgb(0x4cc2ff)));
+        assert_eq!(windows::accent_shade(&palette, false), Some(rgb(0x0067c0)));
+        assert_eq!(windows::accent_shade(&palette[..6], true), None);
     }
 
     #[test]
