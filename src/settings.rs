@@ -57,6 +57,11 @@ pub enum LibrarySource {
     Jellyfin,
 }
 
+impl LibrarySource {
+    pub const ALL: [LibrarySource; 3] = [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin];
+    pub const LABELS: [&'static str; 3] = ["All libraries", "Local", "Jellyfin"];
+}
+
 /// How a book's chapter is laid out on screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BookLayout {

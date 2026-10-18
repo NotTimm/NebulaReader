@@ -120,7 +120,7 @@ pub enum Message {
     ChapterCoverReady { chapter_idx: usize, result: Result<(u32, u32, Vec<u8>), String> },
     // Library
     LibrarySearchChanged(String),
-    LibrarySource(widget::segmented_button::Entity),
+    LibrarySource(usize),
     RootDiscovered(PathBuf, Option<Vec<scan::Discovered>>),
     SeriesScanned(Result<scan::ScanResult, String>),
     IssueCoverReady { key: String, idx: usize },
@@ -222,7 +222,6 @@ pub struct App {
     library_entries: Vec<SeriesEntry>,
     library_search: String,
     /// The All / Local / Jellyfin switch above the library.
-    source_tabs: widget::segmented_button::SingleSelectModel,
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
     library_path_input: String,
@@ -646,11 +645,6 @@ impl App {
         if pair { 2 } else { 1 }
     }
 
-    /// The last page on screen.
-    fn last_shown_page(&self) -> usize {
-        self.current_page + self.pages_shown_at(self.current_page) - 1
-    }
-
     /// Where the view before `current_page` starts: two pages back when
     /// they make a pair, one when that page is a spread (or stands alone).
     fn prev_view_start(&self) -> usize {
@@ -947,7 +941,6 @@ impl Application for App {
     fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let db = library::open_db().ok();
         let settings = Settings::load();
-        let library_source = settings.library_source;
         let library_dirs: Vec<PathBuf> = db
             .as_ref()
             .map(|db| library::list_library_dirs(db).into_iter().map(PathBuf::from).collect())
@@ -995,18 +988,6 @@ impl Application for App {
             db,
             library_entries: Vec::new(),
             library_search: String::new(),
-            source_tabs: {
-                let mut tabs = widget::segmented_button::SingleSelectModel::builder()
-                    .insert(|b| b.text("All").data(LibrarySource::All))
-                    .insert(|b| b.text("Local").data(LibrarySource::Local))
-                    .insert(|b| b.text("Jellyfin").data(LibrarySource::Jellyfin))
-                    .build();
-                let id = tabs.iter().find(|id| tabs.data::<LibrarySource>(*id) == Some(&library_source));
-                if let Some(id) = id {
-                    tabs.activate(id);
-                }
-                tabs
-            },
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -1121,6 +1102,14 @@ impl Application for App {
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
                 "Back to library",
             )],
+            // All / Local / Jellyfin, once the library has some of each.
+            AppView::Library if self.has_local_and_remote() => {
+                let current = LibrarySource::ALL.iter().position(|s| *s == self.settings.library_source);
+                vec![tip(
+                    widget::dropdown(&LibrarySource::LABELS[..], current, Message::LibrarySource),
+                    "Which libraries to show",
+                )]
+            }
             AppView::Library => vec![],
         }
     }
@@ -2619,9 +2608,8 @@ impl App {
                 self.library_search = q;
                 return self.reload_library();
             }
-            Message::LibrarySource(id) => {
-                self.source_tabs.activate(id);
-                if let Some(src) = self.source_tabs.active_data::<LibrarySource>() {
+            Message::LibrarySource(i) => {
+                if let Some(src) = LibrarySource::ALL.get(i) {
                     self.settings.library_source = *src;
                     self.settings.save();
                 }

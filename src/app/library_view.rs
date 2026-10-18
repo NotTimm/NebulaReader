@@ -91,6 +91,13 @@ fn continue_label(e: &SeriesEntry) -> String {
 }
 
 impl App {
+    /// Whether the library has both local and Jellyfin series, which is
+    /// when the All / Local / Jellyfin dropdown shows.
+    pub(super) fn has_local_and_remote(&self) -> bool {
+        let mut entries = self.library_entries.iter();
+        entries.clone().any(is_remote) && entries.any(|e| !is_remote(e))
+    }
+
     pub(super) fn view_library(&self) -> Element<'_, Message> {
         let mut col = widget::Column::new().spacing(20).padding([16, 20]);
 
@@ -118,19 +125,8 @@ impl App {
         let visible: Vec<&SeriesEntry> =
             self.library_entries.iter().filter(|e| self.is_visible(e)).collect();
 
-        // All / Local / Jellyfin, once there's some of each.
-        let is_remote = |e: &SeriesEntry| crate::jellyfin::is_key(&e.library_root) || crate::jellyfin::is_key(&e.path);
-        let has_both = visible.iter().any(|e| is_remote(e)) && visible.iter().any(|e| !is_remote(e));
-        let visible: Vec<&SeriesEntry> = if has_both {
-            col = col.push(
-                widget::container(
-                    widget::segmented_control::horizontal(&self.source_tabs)
-                        .on_activate(Message::LibrarySource)
-                        .width(Length::Fixed(320.0)),
-                )
-                .width(Length::Fill)
-                .center_x(Length::Fill),
-            );
+        // Narrowed by the All / Local / Jellyfin dropdown in the header.
+        let visible: Vec<&SeriesEntry> = if self.has_local_and_remote() {
             match self.settings.library_source {
                 LibrarySource::All => visible,
                 LibrarySource::Local => visible.into_iter().filter(|e| !is_remote(e)).collect(),
@@ -552,4 +548,8 @@ pub(super) fn next_issue(issues: &[IssueEntry]) -> Option<&IssueEntry> {
         }
     }
     issues.iter().find(|i| !i.completed)
+}
+
+fn is_remote(e: &SeriesEntry) -> bool {
+    crate::jellyfin::is_key(&e.library_root) || crate::jellyfin::is_key(&e.path)
 }
