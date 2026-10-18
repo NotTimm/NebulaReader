@@ -83,7 +83,7 @@ The first version is submitted by hand from Windows:
 
 ```
 winget install Microsoft.WingetCreate
-wingetcreate new https://github.com/NotTimm/nebula-reader/releases/download/v<version>/NebulaReader-<version>-windows-x64-setup.exe
+wingetcreate new https://github.com/NotTimm/NebulaReader/releases/download/v<version>/NebulaReader-<version>-windows-x64-setup.exe
 ```
 
 ### Icons

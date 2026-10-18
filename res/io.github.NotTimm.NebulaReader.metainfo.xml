@@ -29,8 +29,8 @@
     <id>com.system76.CosmicApplication</id>
   </provides>
 
-  <url type="homepage">https://github.com/NotTimm/nebula-reader</url>
-  <url type="bugtracker">https://github.com/NotTimm/nebula-reader/issues</url>
+  <url type="homepage">https://github.com/NotTimm/NebulaReader</url>
+  <url type="bugtracker">https://github.com/NotTimm/NebulaReader/issues</url>
 
   <developer id="io.github.nottimm">
     <name>Tim Singel</name>
@@ -40,35 +40,40 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/library.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/library.png</image>
       <caption>Your comics, manga and books as one library</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/series.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/series.png</image>
       <caption>Series pages with descriptions, chapters and progress</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/book.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/book.png</image>
       <caption>Books turn pages like an e-reader, one or two at a time</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/book-settings.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/book-settings.png</image>
       <caption>Choose the typeface, size, spacing and theme</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/reader.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/reader.png</image>
       <caption>Read comics one page or two at a time</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/reader-zoom.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/reader-zoom.png</image>
       <caption>Zoom in on any panel</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/settings.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/settings.png</image>
       <caption>Takes on the look of your desktop</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.2" date="2026-10-18" type="stable">
+      <description>
+        <p>Store listing update: Nebula Reader now appears under "Made for COSMIC" in the COSMIC Store, and the project moved to github.com/NotTimm/NebulaReader.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-10-18" type="stable">
       <description>
         <ul>

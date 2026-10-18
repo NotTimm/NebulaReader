@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/NotTimm/nebula-reader/releases/latest"><img src="https://img.shields.io/github/v/release/NotTimm/nebula-reader?label=download&color=e8857f" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/NotTimm/nebula-reader?color=7a7fd6" alt="GPL-3.0 license"></a>
+  <a href="https://github.com/NotTimm/NebulaReader/releases/latest"><img src="https://img.shields.io/github/v/release/NotTimm/NebulaReader?label=download&color=e8857f" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/NotTimm/NebulaReader?color=7a7fd6" alt="GPL-3.0 license"></a>
   <img src="https://img.shields.io/badge/platforms-Linux%20%C2%B7%20Windows%20%C2%B7%20macOS-555" alt="Linux, Windows and macOS">
 </p>
 
@@ -119,7 +119,7 @@ Prefer another look? **Settings → Appearance → Style**.
 ## Download
 
 Grab a package from the
-[latest release](https://github.com/NotTimm/nebula-reader/releases/latest):
+[latest release](https://github.com/NotTimm/NebulaReader/releases/latest):
 
 | Your system | Download | Install |
 |-------------|----------|---------|
@@ -258,7 +258,7 @@ Windows builds, packaging, releases and the libcosmic fork are covered in
 ## Contributing
 
 Bug reports and ideas are welcome in
-[issues](https://github.com/NotTimm/nebula-reader/issues). Nebula is built
+[issues](https://github.com/NotTimm/NebulaReader/issues). Nebula is built
 with Rust and [libcosmic](https://github.com/pop-os/libcosmic).
 
 ## License

@@ -18,7 +18,7 @@ These need a decision or an asset from you:
    ```xml
    <screenshots>
      <screenshot type="default">
-       <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.0-beta.2/res/screenshots/library.png</image>
+       <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.0-beta.2/res/screenshots/library.png</image>
        <caption>The library</caption>
      </screenshot>
    </screenshots>

@@ -1,7 +1,9 @@
 # Notes for Claude
 
 The app is **Nebula Reader** ("Nebula" in launchers and the title bar),
-app ID `io.github.NotTimm.NebulaReader`, binary `nebula-reader`. It was
+app ID `io.github.NotTimm.NebulaReader`, binary `nebula-reader`, repo
+`NotTimm/NebulaReader` (renamed from `nebula-reader` for Flathub's app ID
+check; old URLs redirect). It was
 Cosmic Comic up to 0.1.0-beta.4; data folders are moved over on first
 start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the old `NotTimm.CosmicComic` PR #454352 was closed unmerged.
 

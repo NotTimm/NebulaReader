@@ -84,7 +84,7 @@ Recommends: libxkbcommon-x11-0
 Replaces: cosmic-comic
 Breaks: cosmic-comic
 Maintainer: Tim Singel <gamer.tdogtim@gmail.com>
-Homepage: https://github.com/NotTimm/nebula-reader
+Homepage: https://github.com/NotTimm/NebulaReader
 Description: Comic book and ebook reader for the COSMIC desktop
  A native COSMIC desktop reader for comic book archives (.cbz/.cbr),
  manga and comic series folders, and .epub books. Includes a scanned

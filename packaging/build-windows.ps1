@@ -88,7 +88,7 @@ Your library and settings are stored in %APPDATA%\NebulaReader and the
 cache in %LOCALAPPDATA%\NebulaReader\Cache, so you can replace this folder
 with a newer version without losing anything.
 
-https://github.com/NotTimm/nebula-reader
+https://github.com/NotTimm/NebulaReader
 "@ | Set-Content -Encoding utf8 (Join-Path $Stage 'README.txt')
 
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
