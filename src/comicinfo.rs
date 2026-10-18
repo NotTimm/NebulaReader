@@ -14,6 +14,13 @@ pub struct ComicInfo {
     pub publisher: Option<String>,
     pub writer: Option<String>,
     pub genre: Option<String>,
+    pub month: Option<u32>,
+    pub day: Option<u32>,
+    pub penciller: Option<String>,
+    pub inker: Option<String>,
+    pub colorist: Option<String>,
+    pub letterer: Option<String>,
+    pub cover_artist: Option<String>,
 }
 
 impl ComicInfo {
@@ -26,6 +33,32 @@ impl ComicInfo {
             && self.publisher.is_none()
             && self.writer.is_none()
             && self.genre.is_none()
+            && self.penciller.is_none()
+    }
+
+    /// "2021-03-14", "2021-03" or "2021"; empty when there's no year.
+    pub fn release_date(&self) -> String {
+        match (self.year.filter(|y| *y > 1800), self.month.filter(|m| (1..=12).contains(m)), self.day) {
+            (Some(y), Some(m), Some(d)) if (1..=31).contains(&d) => format!("{y:04}-{m:02}-{d:02}"),
+            (Some(y), Some(m), _) => format!("{y:04}-{m:02}"),
+            (Some(y), None, _) => format!("{y:04}"),
+            _ => String::new(),
+        }
+    }
+
+    /// Who made it, as (role, names) pairs in the usual credits order.
+    pub fn credits(&self) -> Vec<(String, String)> {
+        [
+            ("Writer", &self.writer),
+            ("Artist", &self.penciller),
+            ("Inker", &self.inker),
+            ("Colorist", &self.colorist),
+            ("Letterer", &self.letterer),
+            ("Cover", &self.cover_artist),
+        ]
+        .into_iter()
+        .filter_map(|(role, names)| Some((role.to_string(), names.clone()?)))
+        .collect()
     }
 }
 
@@ -39,6 +72,13 @@ pub fn parse(xml: &str) -> ComicInfo {
         publisher: tag(xml, "Publisher"),
         writer: tag(xml, "Writer"),
         genre: tag(xml, "Genre"),
+        month: tag(xml, "Month").and_then(|s| s.parse().ok()),
+        day: tag(xml, "Day").and_then(|s| s.parse().ok()),
+        penciller: tag(xml, "Penciller"),
+        inker: tag(xml, "Inker"),
+        colorist: tag(xml, "Colorist"),
+        letterer: tag(xml, "Letterer"),
+        cover_artist: tag(xml, "CoverArtist"),
     }
 }
 

@@ -9,7 +9,7 @@
 //! - `Root/Civil War 001.cbr, …002.cbr`      loose issues, grouped by name
 //! - `Root/Book.epub`, `Root/One-shot.cbz`   standalone items
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::comic;
@@ -230,7 +230,15 @@ pub fn issue_paths(d: &Discovered) -> Vec<PathBuf> {
 
 /// Turns issue paths into DB rows (numbers parsed, page counts filled in
 /// for anything not already known).
-pub fn issue_rows(paths: &[PathBuf], known: &HashMap<String, usize>, count: bool) -> Vec<IssueRow> {
+/// Issue rows for `paths`. Page counts are taken from `known` (or counted
+/// when `count`); the ComicInfo.xml date and creators are read for issues
+/// that are new or listed in `missing_details`.
+pub fn issue_rows(
+    paths: &[PathBuf],
+    known: &HashMap<String, usize>,
+    missing_details: &HashSet<String>,
+    count: bool,
+) -> Vec<IssueRow> {
     paths
         .iter()
         .map(|p| {
@@ -246,12 +254,20 @@ pub fn issue_rows(paths: &[PathBuf], known: &HashMap<String, usize>, count: bool
                 .map(|s| s.to_string_lossy().into_owned())
                 .filter(|_| !p.is_dir())
                 .unwrap_or(name.clone());
+            let details = (count && (!known.contains_key(&path) || missing_details.contains(&path))).then(|| {
+                let info = comic::find_comic_info(p).map(|x| crate::comicinfo::parse(&x)).unwrap_or_default();
+                library::IssueDetails {
+                    release_date: info.release_date(),
+                    creators: library::format_credits(info.credits()),
+                }
+            });
             IssueRow {
                 path,
                 name: display,
                 number: parsed.number.unwrap_or_default(),
                 subtitle: parsed.subtitle.unwrap_or_default(),
                 page_count,
+                details,
             }
         })
         .collect()
@@ -260,7 +276,11 @@ pub fn issue_rows(paths: &[PathBuf], known: &HashMap<String, usize>, count: bool
 /// Scans one series: issues, page counts (only for new issues), title from
 /// ComicInfo.xml or the cleaned name, and a cover thumbnail if missing.
 /// Runs on a blocking thread.
-pub fn scan_series(d: &Discovered, known: HashMap<String, usize>) -> Result<ScanResult, String> {
+pub fn scan_series(
+    d: &Discovered,
+    known: HashMap<String, usize>,
+    missing_details: HashSet<String>,
+) -> Result<ScanResult, String> {
     let is_epub = d.kind == SeriesKind::File && epub::is_epub_name(&d.key);
 
     if is_epub {
@@ -273,10 +293,12 @@ pub fn scan_series(d: &Discovered, known: HashMap<String, usize>) -> Result<Scan
                 }
             }
         }
+        let creators = library::format_credits(meta.author.iter().map(|a| ("Author", a)));
         return Ok(ScanResult {
             series: ScannedSeries {
                 path: d.key.clone(),
                 title: meta.title,
+                creators: creators.clone(),
                 year: None,
                 volume: None,
                 kind: SeriesKind::File,
@@ -289,6 +311,7 @@ pub fn scan_series(d: &Discovered, known: HashMap<String, usize>) -> Result<Scan
                 number: String::new(),
                 subtitle: String::new(),
                 page_count: Some(meta.chapter_count),
+                details: Some(library::IssueDetails { release_date: meta.date.unwrap_or_default(), creators }),
             }],
         });
     }
@@ -300,7 +323,7 @@ pub fn scan_series(d: &Discovered, known: HashMap<String, usize>) -> Result<Scan
         return Err(format!("no issues found in {}", d.key));
     }
     let is_new = known.is_empty();
-    let issues = issue_rows(&paths, &known, true);
+    let issues = issue_rows(&paths, &known, &missing_details, true);
 
     let mut clean = naming::clean_series_name(&d.raw_name);
     if d.kind == SeriesKind::File {
@@ -339,11 +362,22 @@ pub fn scan_series(d: &Discovered, known: HashMap<String, usize>) -> Result<Scan
         }
     }
 
+    // The series' creators: whoever the issues' ComicInfo.xml credit, in
+    // order (only fills in a series that has none).
+    let creators = library::format_credits(
+        issues
+            .iter()
+            .filter_map(|i| i.details.as_ref())
+            .flat_map(|d| d.creators.lines())
+            .filter_map(|line| line.split_once(": "))
+            .filter(|(role, _)| matches!(*role, "Writer" | "Artist")),
+    );
     let total = issues.iter().map(|i| i.page_count.unwrap_or(0)).sum::<usize>();
     Ok(ScanResult {
         series: ScannedSeries {
             path: d.key.clone(),
             title: clean.display,
+            creators,
             year: clean.year,
             volume: clean.volume,
             kind: d.kind,
@@ -388,9 +422,9 @@ mod tests {
         let Ok(root) = std::env::var("NEBULA_SCAN_TEST") else { return };
         for d in discover(Path::new(&root)) {
             let paths = issue_paths(&d);
-            let rows = issue_rows(&paths, &HashMap::new(), false);
+            let rows = issue_rows(&paths, &HashMap::new(), &HashSet::new(), false);
             // The title a real scan would store (folder fallback etc.).
-            let title = scan_series(&d, HashMap::new()).map(|r| r.series.title).unwrap_or_else(|e| e);
+            let title = scan_series(&d, HashMap::new(), HashSet::new()).map(|r| r.series.title).unwrap_or_else(|e| e);
             println!("{:?} {:?}  ->  {:?} [{} issues]", d.kind, d.raw_name, title, rows.len());
             for r in rows.iter().take(4) {
                 println!("      #{:<5} {:?}  sub={:?}", r.number, r.name, r.subtitle);

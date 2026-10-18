@@ -242,6 +242,7 @@ pub fn spans_text(spans: &[Inline]) -> String {
 pub struct EpubMeta {
     pub title: String,
     pub author: Option<String>,
+    pub date: Option<String>,
     pub cover: Option<Vec<u8>>,
     pub chapter_count: usize,
 }
@@ -268,6 +269,7 @@ pub fn read_meta(path: &Path) -> Result<EpubMeta, String> {
             opf.title
         },
         author: opf.author,
+        date: opf.date,
         cover,
         chapter_count: opf.spine.len(),
     })
@@ -309,6 +311,8 @@ struct ManifestItem {
 struct Opf {
     title: String,
     author: Option<String>,
+    /// dc:date, usually the publication date ("2019", "2019-02-12", …).
+    date: Option<String>,
     manifest: HashMap<String, ManifestItem>,
     spine: Vec<String>,
     cover_id: Option<String>,
@@ -333,6 +337,7 @@ fn parse_opf(xml: &str) -> Opf {
     let mut opf = Opf {
         title: String::new(),
         author: None,
+        date: None,
         manifest: HashMap::new(),
         spine: Vec::new(),
         cover_id: None,
@@ -340,12 +345,14 @@ fn parse_opf(xml: &str) -> Opf {
     };
     let mut in_title = false;
     let mut in_creator = false;
+    let mut in_date = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match local_name(&e.name()).as_str() {
                 "title" => in_title = opf.title.is_empty(),
                 "creator" => in_creator = opf.author.is_none(),
+                "date" => in_date = opf.date.is_none(),
                 "spine" => opf.ncx_id = attr(&e, "toc"),
                 _ => {}
             },
@@ -356,11 +363,15 @@ fn parse_opf(xml: &str) -> Opf {
                     opf.title = text.to_string();
                 } else if in_creator {
                     opf.author = Some(text.to_string());
+                } else if in_date && !text.is_empty() {
+                    // Keep just the date part of "2019-02-12T00:00:00Z".
+                    opf.date = Some(text.split('T').next().unwrap_or(text).to_string());
                 }
             }
             Ok(Event::End(e)) => match local_name(&e.name()).as_str() {
                 "title" => in_title = false,
                 "creator" => in_creator = false,
+                "date" => in_date = false,
                 _ => {}
             },
             Ok(Event::Empty(e)) => {

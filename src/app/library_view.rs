@@ -56,7 +56,10 @@ fn placeholder_cover<'a>(w: f32, h: f32, icon_name: &'static str) -> Element<'a,
 /// Short status line for a shelf card.
 fn card_subtitle(e: &SeriesEntry) -> String {
     if e.is_epub {
-        return if e.has_progress() { format!("Book · ch. {}", e.last_read_chapter + 1) } else { "Book".into() };
+        // The author, like a bookshop label; "Book" when unknown.
+        let author = e.creators.lines().next().and_then(|l| l.split_once(": ")).map(|(_, names)| names);
+        let what = author.unwrap_or("Book");
+        return if e.has_progress() { format!("{what} · ch. {}", e.last_read_chapter + 1) } else { what.to_string() };
     }
     if e.issue_count > 1 {
         if e.is_finished() {
@@ -394,8 +397,10 @@ impl App {
         if !series.publisher.is_empty() {
             facts.push(series.publisher.clone());
         }
-        if let Some(y) = series.year {
-            facts.push(y.to_string());
+        match (series.year, series.end_year) {
+            (Some(y), Some(e)) if e > y => facts.push(format!("{y}–{e}")),
+            (Some(y), _) => facts.push(y.to_string()),
+            _ => {}
         }
         if let Some(v) = series.volume {
             facts.push(format!("Vol. {v}"));
@@ -411,6 +416,9 @@ impl App {
             .width(Length::Fill)
             .push(widget::text::title2(series.name().to_string()))
             .push(widget::text::body(facts.join("  ·  ")));
+        for line in series.creators.lines() {
+            details = details.push(widget::text::body(line.to_string()));
+        }
 
         if !series.display_title.is_empty() && series.display_title != series.title {
             details = details.push(widget::text::caption(format!("On disk as “{}”", series.title)));
@@ -516,8 +524,8 @@ impl App {
         };
 
         let mut meta: Vec<String> = Vec::new();
-        if !issue.cover_date.is_empty() {
-            meta.push(issue.cover_date.clone());
+        if !issue.date().is_empty() {
+            meta.push(crate::library::pretty_date(issue.date()));
         }
         if issue.page_count > 0 {
             meta.push(format!("{} pages", issue.page_count));

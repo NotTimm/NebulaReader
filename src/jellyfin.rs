@@ -375,6 +375,21 @@ pub struct Item {
     pub overview: Option<String>,
     pub image_tags: HashMap<String, String>,
     pub user_data: Option<UserData>,
+    /// Release date ("2021-03-14T00:00:00.0000000Z").
+    pub premiere_date: Option<String>,
+    pub people: Vec<Person>,
+}
+
+/// Someone credited on an item.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct Person {
+    pub name: String,
+    /// Free text, often empty for books.
+    pub role: Option<String>,
+    /// "Author", "Writer", "Penciller", "Artist", "Editor", …
+    #[serde(rename = "Type")]
+    pub kind: Option<String>,
 }
 
 impl Item {
@@ -417,7 +432,7 @@ pub async fn book_libraries(account: &Account) -> Result<Vec<Item>, String> {
 /// Direct children of a library or folder, with the user's read state.
 pub async fn children(account: &Account, parent_id: &str) -> Result<Vec<Item>, String> {
     let url = format!(
-        "{}/Items?ParentId={parent_id}&SortBy=SortName&SortOrder=Ascending&Fields=ChildCount,Path,Overview&EnableUserData=true",
+        "{}/Items?ParentId={parent_id}&SortBy=SortName&SortOrder=Ascending&Fields=ChildCount,Path,Overview,PremiereDate,People&EnableUserData=true",
         account.url
     );
     let page: ItemsPage = get_json(&url, &account.auth()).await?;
@@ -673,6 +688,10 @@ pub struct RemoteIssue {
     pub page: usize,
     /// Unix seconds; 0 when never opened.
     pub last_read: i64,
+    /// "2021-03-14", empty when the server doesn't know.
+    pub release_date: String,
+    /// One "Role: Name, Name" per line.
+    pub creators: String,
 }
 
 fn remote_issue(account: &Account, item: &Item) -> RemoteIssue {
@@ -685,6 +704,16 @@ fn remote_issue(account: &Account, item: &Item) -> RemoteIssue {
         played: ud.played,
         page: item.resume_page(),
         last_read: ud.last_played_date.as_deref().and_then(parse_date).unwrap_or(0),
+        release_date: item
+            .premiere_date
+            .as_deref()
+            .and_then(|d| d.split('T').next())
+            .unwrap_or_default()
+            .to_string(),
+        creators: crate::library::format_credits(item.people.iter().map(|p| {
+            let role = p.role.clone().filter(|r| !r.is_empty()).or_else(|| p.kind.clone()).unwrap_or_default();
+            (role, p.name.clone())
+        })),
     }
 }
 

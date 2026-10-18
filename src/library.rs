@@ -72,6 +72,10 @@ pub struct SeriesEntry {
     /// Fraction of the in-progress issue, for the progress bar.
     pub current_issue_fraction: f32,
     pub current_issue_label: String,
+    /// Who made it, one "Role: Name, Name" per line.
+    pub creators: String,
+    /// Last year of publication, for finished series ("2018–2020").
+    pub end_year: Option<u32>,
 }
 
 impl SeriesEntry {
@@ -122,6 +126,11 @@ pub struct IssueEntry {
     pub title: String,
     pub cover_date: String,
     pub url: String,
+    /// Release date from the file or the server ("2021-03-14", "2021-03",
+    /// "2021"); `cover_date` (online) wins when both exist.
+    pub release_date: String,
+    /// Who made it, one "Role: Name, Name" per line.
+    pub creators: String,
     pub page_count: usize,
     pub last_page: usize,
     pub completed: bool,
@@ -137,6 +146,12 @@ impl IssueEntry {
             return self.name.clone();
         }
         if manga_style { format!("Ch. {}", self.number) } else { format!("#{}", self.number) }
+    }
+
+    /// The best release date known: online cover date, else the file's or
+    /// server's.
+    pub fn date(&self) -> &str {
+        if self.cover_date.is_empty() { &self.release_date } else { &self.cover_date }
     }
 
     pub fn heading(&self) -> String {
@@ -173,6 +188,40 @@ pub struct IssueRow {
     pub subtitle: String,
     /// `None` when it hasn't been counted (cheap scans skip known issues).
     pub page_count: Option<usize>,
+    /// Date and creators from the file or server; `None` when not looked
+    /// at this time (what's stored is kept).
+    pub details: Option<IssueDetails>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct IssueDetails {
+    pub release_date: String,
+    pub creators: String,
+}
+
+/// Formats credits as one "Role: Name, Name" line per role, in first-seen
+/// order, skipping duplicates.
+pub fn format_credits<R: AsRef<str>, N: AsRef<str>>(credits: impl IntoIterator<Item = (R, N)>) -> String {
+    let mut roles: Vec<(String, Vec<String>)> = Vec::new();
+    for (role, name) in credits {
+        let (role, name) = (role.as_ref().trim(), name.as_ref().trim());
+        if role.is_empty() || name.is_empty() {
+            continue;
+        }
+        let entry = match roles.iter_mut().position(|(r, _)| r == role) {
+            Some(i) => &mut roles[i].1,
+            None => {
+                roles.push((role.to_string(), Vec::new()));
+                &mut roles.last_mut().expect("just pushed").1
+            }
+        };
+        for n in name.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+            if !entry.iter().any(|e| e == n) {
+                entry.push(n.to_string());
+            }
+        }
+    }
+    roles.iter().map(|(r, n)| format!("{r}: {}", n.join(", "))).collect::<Vec<_>>().join("\n")
 }
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
@@ -296,7 +345,7 @@ pub fn open_db() -> Result<Connection, String> {
 
 /// Current expected schema version. Bump this and add a matching arm in
 /// [`run_migrations`] whenever the schema changes.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Brings an existing database up to [`SCHEMA_VERSION`] without touching
 /// user data. Uses SQLite's `user_version` pragma as the version marker, so
@@ -390,6 +439,17 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
         }
     }
 
+    // v5 -> v6: creators and release dates. `details_read` marks issues
+    // whose file has been checked for them, so the next scan reads the
+    // ComicInfo.xml of issues that were scanned before this existed.
+    if current < 6 {
+        let _ = conn.execute("ALTER TABLE series ADD COLUMN creators TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE series ADD COLUMN end_year INTEGER", []);
+        let _ = conn.execute("ALTER TABLE issues ADD COLUMN release_date TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE issues ADD COLUMN creators TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE issues ADD COLUMN details_read INTEGER NOT NULL DEFAULT 0", []);
+    }
+
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
         .map_err(|e| format!("set schema version: {e}"))?;
     Ok(())
@@ -450,6 +510,9 @@ pub fn upsert_series(
 pub struct ScannedSeries {
     pub path: String,
     pub title: String,
+    /// Creators from the file (ComicInfo.xml, EPUB); empty when unknown.
+    /// Only fills in a series that has none, so online credits stay.
+    pub creators: String,
     pub year: Option<u32>,
     pub volume: Option<u32>,
     pub kind: SeriesKind,
@@ -465,8 +528,8 @@ pub fn upsert_scanned_series(conn: &Connection, s: &ScannedSeries) -> Result<(),
     let is_series = s.kind != SeriesKind::File;
     conn.execute(
         "INSERT INTO series (path, title, total_pages, date_added, last_opened, is_series,
-                             kind, library_root, year, volume)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)
+                             kind, library_root, year, volume, creators)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(path) DO UPDATE SET
              title        = excluded.title,
              total_pages  = CASE WHEN ?3 > 0 THEN excluded.total_pages ELSE total_pages END,
@@ -474,7 +537,8 @@ pub fn upsert_scanned_series(conn: &Connection, s: &ScannedSeries) -> Result<(),
              kind         = excluded.kind,
              library_root = excluded.library_root,
              year         = COALESCE(year, excluded.year),
-             volume       = COALESCE(volume, excluded.volume)",
+             volume       = COALESCE(volume, excluded.volume),
+             creators     = CASE WHEN creators = '' THEN excluded.creators ELSE creators END",
         params![
             s.path,
             s.title,
@@ -485,6 +549,7 @@ pub fn upsert_scanned_series(conn: &Connection, s: &ScannedSeries) -> Result<(),
             s.library_root,
             s.year,
             s.volume,
+            s.creators,
         ],
     )
     .map_err(|e| format!("upsert_scanned_series: {e}"))?;
@@ -498,14 +563,18 @@ pub fn sync_issues(conn: &Connection, series_path: &str, issues: &[IssueRow]) ->
     {
         let mut upsert = tx
             .prepare(
-                "INSERT INTO issues (series_path, path, idx, name, number, subtitle, page_count)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 0))
+                "INSERT INTO issues (series_path, path, idx, name, number, subtitle, page_count,
+                                     release_date, creators, details_read)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 0), COALESCE(?8, ''), COALESCE(?9, ''), ?10)
                  ON CONFLICT(series_path, path) DO UPDATE SET
-                     idx        = excluded.idx,
-                     name       = excluded.name,
-                     number     = excluded.number,
-                     subtitle   = excluded.subtitle,
-                     page_count = CASE WHEN ?7 IS NOT NULL THEN ?7 ELSE page_count END",
+                     idx          = excluded.idx,
+                     name         = excluded.name,
+                     number       = excluded.number,
+                     subtitle     = excluded.subtitle,
+                     page_count   = CASE WHEN ?7 IS NOT NULL THEN ?7 ELSE page_count END,
+                     release_date = CASE WHEN ?10 THEN COALESCE(?8, '') ELSE release_date END,
+                     creators     = CASE WHEN ?10 THEN COALESCE(?9, '') ELSE creators END,
+                     details_read = MAX(details_read, ?10)",
             )
             .map_err(|e| format!("prepare: {e}"))?;
         for (i, row) in issues.iter().enumerate() {
@@ -518,6 +587,9 @@ pub fn sync_issues(conn: &Connection, series_path: &str, issues: &[IssueRow]) ->
                     row.number,
                     row.subtitle,
                     row.page_count.map(|c| c as i64),
+                    row.details.as_ref().map(|d| d.release_date.as_str()),
+                    row.details.as_ref().map(|d| d.creators.as_str()),
+                    row.details.is_some() as i64,
                 ])
                 .map_err(|e| format!("upsert issue: {e}"))?;
         }
@@ -542,6 +614,13 @@ pub fn sync_issues(conn: &Connection, series_path: &str, issues: &[IssueRow]) ->
     Ok(())
 }
 
+/// Issues whose file hasn't been checked for a date and creators yet.
+pub fn issues_missing_details(conn: &Connection, series_path: &str) -> std::collections::HashSet<String> {
+    conn.prepare("SELECT path FROM issues WHERE series_path = ?1 AND details_read = 0")
+        .and_then(|mut st| st.query_map(params![series_path], |r| r.get(0)).map(|it| it.flatten().collect()))
+        .unwrap_or_default()
+}
+
 /// Known page counts per issue path, so rescans only count new issues.
 pub fn known_page_counts(conn: &Connection, series_path: &str) -> HashMap<String, usize> {
     let mut out = HashMap::new();
@@ -559,7 +638,7 @@ pub fn known_page_counts(conn: &Connection, series_path: &str) -> HashMap<String
 
 pub fn issues_for(conn: &Connection, series_path: &str) -> Vec<IssueEntry> {
     let sql = "SELECT id, series_path, path, idx, name, number, subtitle, title, cover_date, url,
-                      page_count, last_page, completed, last_read_at, position
+                      page_count, last_page, completed, last_read_at, position, release_date, creators
                FROM issues WHERE series_path = ?1 ORDER BY idx";
     let Ok(mut st) = conn.prepare(sql) else { return vec![] };
     st.query_map(params![series_path], |r| {
@@ -579,6 +658,8 @@ pub fn issues_for(conn: &Connection, series_path: &str) -> Vec<IssueEntry> {
             completed: r.get::<_, i64>(12)? != 0,
             last_read_at: r.get(13)?,
             position: r.get::<_, f64>(14)? as f32,
+            release_date: r.get(15)?,
+            creators: r.get(16)?,
         })
     })
     .map(|it| it.flatten().collect())
@@ -752,6 +833,8 @@ pub fn apply_match(
              chapter_count   = ?6,
              publisher       = ?7,
              year            = COALESCE(?8, year),
+             end_year        = COALESCE(?13, end_year),
+             creators        = CASE WHEN ?14 != '' THEN ?14 ELSE creators END,
              source          = ?9,
              source_id       = ?10,
              source_url      = ?11,
@@ -771,6 +854,8 @@ pub fn apply_match(
             m.source_id,
             m.url,
             now_unix(),
+            m.end_year,
+            format_credits(m.creators.iter().map(|(r, n)| (r, n))),
         ],
     )
     .map_err(|e| format!("apply_match: {e}"))?;
@@ -905,7 +990,8 @@ const SERIES_COLS: &str = "s.id, s.path, s.title, s.display_title, s.description
                  THEN CAST(i.last_page AS REAL) / (i.page_count - 1) ELSE 0 END
        FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path),
     (SELECT CASE WHEN i.number != '' THEN i.number ELSE i.name END
-       FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path)";
+       FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path),
+    s.creators, s.end_year";
 
 /// Single files that are also an issue of a folder/group series are hidden
 /// from the shelf — that series already represents them.
@@ -981,6 +1067,8 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SeriesEntry> {
         issues_read: row.get::<_, i64>(25)? as usize,
         current_issue_fraction: row.get::<_, Option<f64>>(26)?.unwrap_or(0.0) as f32,
         current_issue_label: row.get::<_, Option<String>>(27)?.unwrap_or_default(),
+        creators: row.get(28)?,
+        end_year: row.get::<_, Option<i64>>(29)?.map(|v| v as u32),
         path,
         is_epub,
     })
@@ -1000,4 +1088,41 @@ pub fn set_meta_error(conn: &Connection, series_path: &str, err: &str) {
         "UPDATE series SET meta_status = ?2 WHERE path = ?1",
         params![series_path, format!("error: {err}")],
     );
+}
+
+/// "2021-03-14" -> "Mar 14, 2021", "2021-03" -> "Mar 2021", "2021" -> "2021".
+pub fn pretty_date(date: &str) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let mut parts = date.trim().split('-');
+    let (Some(y), m, d) = (parts.next().filter(|y| y.len() == 4), parts.next(), parts.next()) else {
+        return date.to_string();
+    };
+    let month = m.and_then(|m| m.parse::<usize>().ok()).and_then(|m| MONTHS.get(m.wrapping_sub(1)));
+    let day = d.and_then(|d| d.parse::<u32>().ok()).filter(|d| (1..=31).contains(d));
+    match (month, day) {
+        (Some(m), Some(d)) => format!("{m} {d}, {y}"),
+        (Some(m), None) => format!("{m} {y}"),
+        _ => y.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::{format_credits, pretty_date};
+
+    #[test]
+    fn formats_credits_by_role() {
+        let c = format_credits([("Writer", "Garth Ennis"), ("Artist", "Jacen Burrows"), ("Writer", "Garth Ennis, Si Spurrier")]);
+        assert_eq!(c, "Writer: Garth Ennis, Si Spurrier\nArtist: Jacen Burrows");
+        assert_eq!(format_credits(Vec::<(&str, &str)>::new()), "");
+    }
+
+    #[test]
+    fn prettifies_dates() {
+        assert_eq!(pretty_date("2021-03-14"), "Mar 14, 2021");
+        assert_eq!(pretty_date("2021-03"), "Mar 2021");
+        assert_eq!(pretty_date("2021"), "2021");
+        assert_eq!(pretty_date("2021-00-00"), "2021");
+        assert_eq!(pretty_date("someday"), "someday");
+    }
 }

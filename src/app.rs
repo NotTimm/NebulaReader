@@ -350,10 +350,14 @@ fn discover_task(root: PathBuf) -> Task<Message> {
     })
 }
 
-fn scan_series_task(d: scan::Discovered, known: HashMap<String, usize>) -> Task<Message> {
+fn scan_series_task(
+    d: scan::Discovered,
+    known: HashMap<String, usize>,
+    missing_details: std::collections::HashSet<String>,
+) -> Task<Message> {
     cosmic::task::future(async move {
         let _permit = scan_semaphore().acquire().await;
-        let result = tokio::task::spawn_blocking(move || scan::scan_series(&d, known)).await;
+        let result = tokio::task::spawn_blocking(move || scan::scan_series(&d, known, missing_details)).await;
         Message::SeriesScanned(result.unwrap_or_else(|e| Err(format!("scan panicked: {e}"))))
     })
 }
@@ -417,6 +421,7 @@ fn issue_rows_from_chapters(chapters: &[ChapterInfo]) -> Vec<IssueRow> {
                 number: parsed.number.unwrap_or_default(),
                 subtitle: parsed.subtitle.unwrap_or_default(),
                 page_count: Some(ch.page_count),
+                details: None,
             }
         })
         .collect()
@@ -1976,8 +1981,11 @@ impl App {
             col = col.push(widget::text::title4(heading));
             col = col.push(widget::text::body(format!("Page {} of {}", pg + 1, ch.page_count)));
             if let Some(i) = issue {
-                if !i.cover_date.is_empty() {
-                    col = col.push(widget::text::caption(format!("Cover date: {}", i.cover_date)));
+                if !i.date().is_empty() {
+                    col = col.push(widget::text::caption(format!("Released {}", library::pretty_date(i.date()))));
+                }
+                for line in i.creators.lines() {
+                    col = col.push(widget::text::caption(line.to_string()));
                 }
                 if self.chapters.len() > 1 {
                     col = col.push(widget::text::caption(format!(
@@ -2035,6 +2043,11 @@ impl App {
                 ("Year", info.year.map(|y| y.to_string())),
                 ("Publisher", info.publisher.clone()),
                 ("Writer", info.writer.clone()),
+                ("Artist", info.penciller.clone()),
+                ("Inker", info.inker.clone()),
+                ("Colorist", info.colorist.clone()),
+                ("Letterer", info.letterer.clone()),
+                ("Cover", info.cover_artist.clone()),
                 ("Genre", info.genre.clone()),
             ] {
                 if let Some(v) = value {
@@ -2325,6 +2338,7 @@ impl App {
                                     number: String::new(),
                                     subtitle: String::new(),
                                     page_count: Some(chapter_count),
+                                    details: None,
                                 }],
                             );
                             let _ = library::touch_opened(db, &path_str);
@@ -2558,8 +2572,9 @@ impl App {
                     }
                     for d in found {
                         let known = library::known_page_counts(db, &d.key);
+                        let missing = library::issues_missing_details(db, &d.key);
                         self.scans_pending += 1;
-                        tasks.push(scan_series_task(d, known));
+                        tasks.push(scan_series_task(d, known, missing));
                     }
                 }
                 tasks.push(self.reload_library());

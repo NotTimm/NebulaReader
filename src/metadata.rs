@@ -45,6 +45,10 @@ pub struct SeriesMatch {
     pub chapter_count: Option<u32>,
     pub score: f32,
     pub issues: Vec<IssueMeta>,
+    /// (role, name), e.g. ("Story & Art", "Tatsuki Fujimoto").
+    pub creators: Vec<(String, String)>,
+    /// Last year of publication, when the series has ended.
+    pub end_year: Option<u32>,
 }
 
 /// Below this, a candidate is considered a different series entirely.
@@ -84,6 +88,31 @@ struct AniListMedia {
     site_url: Option<String>,
     #[serde(rename = "startDate")]
     start_date: Option<AniListDate>,
+    #[serde(rename = "endDate")]
+    end_date: Option<AniListDate>,
+    staff: Option<AniListStaff>,
+}
+
+#[derive(Deserialize)]
+struct AniListStaff {
+    #[serde(default)]
+    edges: Vec<AniListStaffEdge>,
+}
+
+#[derive(Deserialize)]
+struct AniListStaffEdge {
+    role: Option<String>,
+    node: AniListStaffNode,
+}
+
+#[derive(Deserialize)]
+struct AniListStaffNode {
+    name: AniListName,
+}
+
+#[derive(Deserialize)]
+struct AniListName {
+    full: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +140,10 @@ async fn anilist_candidates(search: &str) -> Result<Vec<AniListMedia>, String> {
               genres
               siteUrl
               startDate { year }
+              endDate { year }
+              staff(perPage: 8, sort: [RELEVANCE, ID]) {
+                edges { role node { name { full } } }
+              }
             }
           }
         }
@@ -191,6 +224,20 @@ fn anilist_match(m: AniListMedia, score: f32) -> SeriesMatch {
         chapter_count: m.chapters,
         score,
         issues: Vec::new(),
+        // The original creators: "Story & Art", "Story", "Art", "Original
+        // Creator". Localisation credits look like "Translator (English)".
+        creators: m
+            .staff
+            .map(|s| s.edges)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|e| {
+                let role = e.role?;
+                let keep = !role.contains('(') && !role.to_ascii_lowercase().contains("assist");
+                Some((role, e.node.name.full?)).filter(|_| keep)
+            })
+            .collect(),
+        end_year: m.end_date.and_then(|d| d.year),
     }
 }
 
@@ -286,6 +333,14 @@ pub async fn match_series(q: SeriesQuery) -> Result<Option<SeriesMatch>, String>
                     let beats_anilist = best.as_ref().map_or(true, |b| s > b.score);
                     if s >= ACCEPT_SCORE && beats_anilist {
                         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+                        let creators = match comicvine::volume_creators(v.id).await {
+                            Ok(names) => names.into_iter().map(|n| ("Creators".to_string(), n)).collect(),
+                            Err(e) => {
+                                log::warn!("ComicVine creators for {}: {e}", v.id);
+                                Vec::new()
+                            }
+                        };
+                        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
                         let issues = match comicvine::volume_issues(v.id).await {
                             Ok(list) => list
                                 .into_iter()
@@ -320,6 +375,8 @@ pub async fn match_series(q: SeriesQuery) -> Result<Option<SeriesMatch>, String>
                             chapter_count: v.count_of_issues,
                             score: s,
                             issues,
+                            creators,
+                            end_year: None,
                         });
                     }
                 }

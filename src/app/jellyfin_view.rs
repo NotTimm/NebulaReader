@@ -824,6 +824,14 @@ impl App {
                     kind: if s.is_folder { SeriesKind::Dir } else { SeriesKind::File },
                     library_root: s.library_root.clone(),
                     total_pages: None,
+                    // The main credits across its chapters.
+                    creators: library::format_credits(
+                        s.issues
+                            .iter()
+                            .flat_map(|i| i.creators.lines())
+                            .filter_map(|line| line.split_once(": "))
+                            .filter(|(role, _)| matches!(*role, "Author" | "Writer" | "Artist" | "Penciller")),
+                    ),
                 },
             );
             let rows: Vec<IssueRow> = s
@@ -837,6 +845,10 @@ impl App {
                         number: parsed.number.unwrap_or_default(),
                         subtitle: parsed.subtitle.unwrap_or_default(),
                         page_count: None,
+                        details: Some(library::IssueDetails {
+                            release_date: i.release_date.clone(),
+                            creators: i.creators.clone(),
+                        }),
                     }
                 })
                 .collect();

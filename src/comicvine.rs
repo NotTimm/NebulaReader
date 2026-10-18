@@ -19,6 +19,26 @@ struct Response<T> {
     results: Vec<T>,
 }
 
+/// A single resource (`/volume/4050-…/`) answers with an object, not a list.
+#[derive(Deserialize)]
+struct One<T> {
+    error: String,
+    results: T,
+}
+
+#[derive(Deserialize, Default)]
+struct VolumePeople {
+    #[serde(default)]
+    people: Vec<Person>,
+}
+
+#[derive(Deserialize)]
+struct Person {
+    name: Option<String>,
+    /// Issues they're credited on, as a string ("12").
+    count: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Volume {
     pub id: u64,
@@ -154,6 +174,32 @@ pub async fn search_volumes(query: &str) -> Result<Vec<Volume>, String> {
     )
     .await?;
     Ok(resp.results)
+}
+
+/// The people credited most often across a volume: its main creators.
+pub async fn volume_creators(volume_id: u64) -> Result<Vec<String>, String> {
+    let key = api_key().ok_or("no ComicVine API key")?;
+    let url = format!("https://comicvine.gamespot.com/api/volume/4050-{volume_id}/");
+    let resp: One<VolumePeople> = client()?
+        .get(url)
+        .query(&[("api_key", key.as_str()), ("format", "json"), ("field_list", "people")])
+        .send()
+        .await
+        .map_err(|e| format!("network error: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("ComicVine parse error: {e}"))?;
+    if resp.error != "OK" {
+        return Err(format!("ComicVine error: {}", resp.error));
+    }
+    let mut people: Vec<(u32, String)> = resp
+        .results
+        .people
+        .into_iter()
+        .filter_map(|p| Some((p.count.and_then(|c| c.parse().ok()).unwrap_or(0), p.name?)))
+        .collect();
+    people.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(people.into_iter().take(4).map(|(_, name)| name).collect())
 }
 
 /// Every issue in a volume (paginated, capped at 500 — longer runs are
