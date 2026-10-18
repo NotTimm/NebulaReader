@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="res/screenshots/library.png" width="820" alt="The library: a Continue Reading shelf of comics, manga and a book, with All, Local and Jellyfin tabs">
+  <img src="res/screenshots/library.png" width="820" alt="The library showing a Jellyfin server: a Continue Reading shelf and a manga library, with the All, Local and Jellyfin switch at the top left">
 </p>
 
 Point Nebula at the folders your collection already lives in, or sign in
@@ -45,7 +45,7 @@ the way so you can read.
 - Drag a file or folder onto the window to open it.
 
 <p align="center">
-  <img src="res/screenshots/series.png" width="820" alt="The Chainsaw Man series page: cover, AniList description and genres, and a chapter list with read and in-progress chapters">
+  <img src="res/screenshots/series.png" width="820" alt="The Jujutsu Kaisen series page: cover, description, and chapters with release dates, read and in-progress">
 </p>
 
 ### 📖 Books that read like a book
@@ -66,13 +66,13 @@ the way so you can read.
   through the book you are.
 
 <p align="center">
-  <img src="res/screenshots/book-settings.png" width="640" alt="The Reading panel: text size, typeface, line spacing, justify, layout, line width and theme">
+  <img src="res/screenshots/book-settings.png" width="640" alt="The Reading panel open beside a book: text size, typeface, line spacing, justify, layout, line width and theme">
 </p>
 
 ### 🖼️ Comics and manga, your way
 
 <p align="center">
-  <img src="res/screenshots/reader.png" width="820" alt="A comic open as a two-page spread">
+  <img src="res/screenshots/reader.png" width="820" alt="A Chainsaw Man page in theater mode, streamed from a Jellyfin server">
 </p>
 
 - CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.

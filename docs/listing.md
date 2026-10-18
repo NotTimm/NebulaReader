@@ -127,11 +127,11 @@ sentence case, no trailing period:
 <screenshots>
   <screenshot type="default">
     <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/library.png</image>
-    <caption>Your comics, manga and books as one library</caption>
+    <caption>Your comics, manga, books and Jellyfin server in one library</caption>
   </screenshot>
   <screenshot>
     <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/series.png</image>
-    <caption>Series pages with descriptions, chapters and progress</caption>
+    <caption>Series pages with descriptions, release dates and progress</caption>
   </screenshot>
   <screenshot>
     <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/book.png</image>
@@ -143,7 +143,7 @@ sentence case, no trailing period:
   </screenshot>
   <screenshot>
     <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/reader.png</image>
-    <caption>Read comics one page or two at a time</caption>
+    <caption>Read comics and manga in theater mode, one page or two</caption>
   </screenshot>
   <screenshot>
     <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/reader-zoom.png</image>
