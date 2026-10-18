@@ -15,16 +15,15 @@ finish-args:
   - --socket=fallback-x11
   - --share=ipc
   - --device=dri
-  # Network access is used only for optional metadata/cover lookups
-  # (AniList, ComicVine).
+  # Network access: optional metadata/cover lookups (AniList, ComicVine)
+  # and reading from the user's own Jellyfin servers.
   - --share=network
   # Comics live in the user's own files; the portal handles anything else.
   - --filesystem=home:ro
   - --filesystem=xdg-documents:ro
   - --filesystem=xdg-download:ro
-  # Follow the desktop's look: COSMIC's theme config and settings daemon,
-  # and KDE's colour scheme (see src/platform/look.rs).
-  - --filesystem=xdg-config/cosmic:ro
+  # Follow the desktop's look: COSMIC's settings daemon
+  # and KDE's colour scheme
   - --filesystem=xdg-config/kdeglobals:ro
   - --talk-name=com.system76.CosmicSettingsDaemon
 
@@ -51,8 +50,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/NotTimm/nebula-reader.git
-        tag: v0.1.0-beta.2
-        # Set to the tag's commit when submitting (Flathub requires it):
-        #   git rev-parse v0.1.0-beta.2^{commit}
-        commit: TAG_COMMIT_SHA
+        tag: v0.1.1
+        # The tag's commit (Flathub requires it): git rev-parse v0.1.1^{commit}
+        commit: f6d55258c2dec34abf1921124c28032205e042f7
       - cargo-sources.json
