@@ -126,31 +126,31 @@ sentence case, no trailing period:
 ```xml
 <screenshots>
   <screenshot type="default">
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/library.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/library.png</image>
     <caption>Your comics, manga and books as one library</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/series.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/series.png</image>
     <caption>Series pages with descriptions, chapters and progress</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/book.png</image>
     <caption>Books turn pages like an e-reader, one or two at a time</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book-settings.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/book-settings.png</image>
     <caption>Choose the typeface, size, spacing and theme</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/reader.png</image>
     <caption>Read comics one page or two at a time</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader-zoom.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/reader-zoom.png</image>
     <caption>Zoom in on any panel</caption>
   </screenshot>
   <screenshot>
-    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/settings.png</image>
+    <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/settings.png</image>
     <caption>Takes on the look of your desktop</caption>
   </screenshot>
 </screenshots>

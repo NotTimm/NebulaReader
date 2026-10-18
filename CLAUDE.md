@@ -55,13 +55,14 @@ the owner's laptop).
   paginate like a Kindle (`src/app/paged.rs`, single/two pages, scroll as
   an option) with click-to-zoom images; hover hints on reader buttons;
   All/Local/Jellyfin library switch; v0.1.0-beta.4 released.
-- Next: 0.1.0 (first stable, as Nebula Reader) is released. winget PR
-  microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.0) awaits review;
-  once merged, the workflow's `winget` job submits later releases (it fails
-  until then, which is expected). Screenshots are in `res/screenshots/` and
-  the metainfo; README refreshed. Next: Flathub (owner is being walked
-  through it). Maybe register Jellyfin session
-  capabilities so the app shows in the dashboard (owner asked).
+- Next: 0.1.1 released to fix winget validation (0.1.0's exe needed
+  VCRUNTIME140.dll, and winget's test runs with --skip-dependencies, so a
+  VCRedist dependency doesn't help; the DLL now ships app-locally). PR
+  microsoft/winget-pkgs#454452 is moved to 0.1.1; once merged, the
+  workflow's `winget` job submits later releases. Then Flathub (owner is
+  being walked through it; `packaging/flathub/`). Jellyfin: title-bar
+  source label with online dot, progress saved after 10 s on a page;
+  syncing a book's position *from* the server isn't done yet.
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
   .dmg; the `macos` job in `release.yml` is live (first run 39006216181
   was its first real build). Windows packages now bundle vcruntime140.dll.

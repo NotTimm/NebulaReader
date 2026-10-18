@@ -35,35 +35,47 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/library.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/library.png</image>
       <caption>Your comics, manga and books as one library</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/series.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/series.png</image>
       <caption>Series pages with descriptions, chapters and progress</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/book.png</image>
       <caption>Books turn pages like an e-reader, one or two at a time</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/book-settings.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/book-settings.png</image>
       <caption>Choose the typeface, size, spacing and theme</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/reader.png</image>
       <caption>Read comics one page or two at a time</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/reader-zoom.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/reader-zoom.png</image>
       <caption>Zoom in on any panel</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/master/res/screenshots/settings.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/nebula-reader/v0.1.1/res/screenshots/settings.png</image>
       <caption>Takes on the look of your desktop</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.1" date="2026-10-18" type="stable">
+      <description>
+        <ul>
+          <li>Windows: the app now starts on PCs without the Visual C++ runtime installed</li>
+          <li>Jellyfin: the reader's title bar shows the server, whether it's online, and whether your progress has saved</li>
+          <li>Jellyfin: progress is saved once you settle on a page instead of on every page turn, and book positions sync too</li>
+          <li>Jellyfin: reading no longer fills the server's activity log with download entries</li>
+          <li>Local comics and books show their file path when you hover over "Local" in the title bar</li>
+          <li>First macOS build for Apple Silicon</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-16" type="stable">
       <description>
         <p>The first stable release, under a new name: Cosmic Comic is now Nebula Reader.</p>
