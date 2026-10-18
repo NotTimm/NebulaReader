@@ -3553,6 +3553,7 @@ dependencies = [
  "quick-xml 0.37.5",
  "regex",
  "reqwest",
+ "ron",
  "rusqlite",
  "serde",
  "serde_json",

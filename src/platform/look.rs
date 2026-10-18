@@ -18,10 +18,15 @@
 //! macOS gets the Adwaita shapes with the system's light/dark mode and
 //! accent colour, and always the native title bar.
 //!
-//! The host's colours are read once at startup ([`init`]) and cached, so
-//! switching looks in Settings never blocks on D-Bus or the registry.
+//! The host's colours are read at startup ([`init`]) and cached, so
+//! switching looks in Settings never blocks on D-Bus or the registry. While
+//! the app runs, [`reread`] picks up changes (dark mode switched on, a new
+//! accent colour) off the UI thread.
+//!
+//! A colour theme picked in Settings (`crate::themes`) replaces the host's
+//! colours; the look still decides shapes and the title bar.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, RwLock};
 
 use cosmic::cosmic_theme::palette::{Srgb, Srgba};
 use cosmic::cosmic_theme::{CornerRadii, Roundness, ThemeBuilder};
@@ -107,27 +112,63 @@ pub struct HostColors {
     pub text: Option<Srgb>,
 }
 
-static HOST: OnceLock<HostColors> = OnceLock::new();
+static HOST: RwLock<Option<HostColors>> = RwLock::new(None);
 
 /// Reads the host desktop's colours. Call once, before the app starts
 /// (it may briefly block on the settings portal or registry).
 pub fn init(desktop: Desktop) {
-    let _ = HOST.set(read_host_colors(desktop));
+    *HOST.write().unwrap_or_else(|e| e.into_inner()) = Some(read_host_colors(desktop));
 }
 
-fn host() -> &'static HostColors {
-    HOST.get_or_init(HostColors::default)
+/// Reads the host's colours again; true when they changed since the last
+/// read. Blocks briefly, so call it off the UI thread.
+pub fn reread(desktop: Desktop) -> bool {
+    let fresh = read_host_colors(desktop);
+    let mut host = HOST.write().unwrap_or_else(|e| e.into_inner());
+    if host.as_ref() == Some(&fresh) {
+        return false;
+    }
+    *host = Some(fresh);
+    true
 }
 
-/// Builds the libcosmic theme for an already-resolved look.
-pub fn theme(look: Look, corners: Corners) -> cosmic::Theme {
-    let host = host();
+fn host() -> HostColors {
+    HOST.read().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
+}
+
+/// Reads a KDE colour scheme (`.colors` file or `kdeglobals`).
+pub fn parse_kde_colors(text: &str) -> HostColors {
+    kde::parse(text)
+}
+
+/// Builds the libcosmic theme for an already-resolved look, with the
+/// colours of a picked theme or, without one, the host's.
+pub fn theme(look: Look, corners: Corners, colors: Option<&crate::themes::Colors>) -> cosmic::Theme {
+    use crate::themes::Colors;
+
     let preset = match look {
-        Look::Auto | Look::Cosmic => return cosmic::theme::system_preference(),
-        Look::Breeze => Preset::BREEZE,
-        Look::Fluent => Preset::FLUENT,
-        Look::Adwaita => Preset::ADWAITA,
+        Look::Auto | Look::Cosmic => None,
+        Look::Breeze => Some(Preset::BREEZE),
+        Look::Fluent => Some(Preset::FLUENT),
+        Look::Adwaita => Some(Preset::ADWAITA),
     };
+    // COSMIC's shapes come from COSMIC Settings, like its colours.
+    let radii = match &preset {
+        Some(p) => corners.radii().unwrap_or(p.radii),
+        None => cosmic::theme::system_preference().cosmic().corner_radii,
+    };
+    let host = match colors {
+        Some(Colors::Cosmic(builder)) => {
+            let built = builder.as_ref().clone().corner_radii(radii).build();
+            return cosmic::Theme::custom(Arc::new(built));
+        }
+        Some(Colors::Kde(c)) => c.clone(),
+        None => match preset {
+            None => return cosmic::theme::system_preference(),
+            Some(_) => host(),
+        },
+    };
+    let preset = preset.unwrap_or(Preset::COSMIC);
     let dark = host
         .dark
         .or_else(|| host.window.map(|c| luminance(c) < 0.5))
@@ -136,7 +177,7 @@ pub fn theme(look: Look, corners: Corners) -> cosmic::Theme {
 
     let builder = if dark { ThemeBuilder::dark() } else { ThemeBuilder::light() };
     let built = builder
-        .corner_radii(corners.radii().unwrap_or(preset.radii))
+        .corner_radii(radii)
         .accent(host.accent.unwrap_or_else(|| rgb(preset.accent)))
         .bg_color(opaque(host.window.unwrap_or_else(|| rgb(colors.window))))
         .primary_container_bg(opaque(host.view.unwrap_or_else(|| rgb(colors.view))))
@@ -175,6 +216,15 @@ const fn radii(r: [f32; 5]) -> CornerRadii {
 }
 
 impl Preset {
+    /// Only for a KDE colour scheme picked under the COSMIC style; the
+    /// scheme supplies the colours, these just fill gaps.
+    const COSMIC: Preset = Preset {
+        radii: radii([4.0, 8.0, 8.0, 16.0, 160.0]),
+        accent: 0x94ebeb,
+        default_dark: true,
+        light: Shades { window: 0xe8e8e8, view: 0xf6f6f6, text: 0x1b1b1b },
+        dark: Shades { window: 0x1b1b1b, view: 0x272727, text: 0xe6e6e6 },
+    };
     /// Plasma 6 Breeze / Breeze Dark.
     const BREEZE: Preset = Preset {
         radii: radii([2.0, 3.0, 5.0, 8.0, 3.0]),

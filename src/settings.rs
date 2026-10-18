@@ -157,6 +157,8 @@ pub struct Settings {
     pub look: crate::platform::look::Look,
     /// Button/corner shape override for the non-COSMIC styles.
     pub corners: crate::platform::look::Corners,
+    /// Colour theme (`crate::themes::Entry::id`); `None` follows the system.
+    pub theme: Option<String>,
     /// The library's All / Local / Jellyfin switch.
     pub library_source: LibrarySource,
     /// Ask GitHub for a newer release when the app starts.
@@ -174,6 +176,7 @@ impl Default for Settings {
             book: BookSettings::default(),
             look: crate::platform::look::Look::Auto,
             corners: crate::platform::look::Corners::Auto,
+            theme: None,
             library_source: LibrarySource::All,
             check_for_updates: true,
         }

@@ -104,7 +104,8 @@ with Jellyfin's own web reader. [How it works](#jellyfin)
 </p>
 
 Nebula takes on the look of the desktop it runs on, including your
-accent colour, light or dark mode and button shapes:
+accent colour, light or dark mode and button shapes, and follows along
+when you change them:
 
 | Desktop | Style | Colours from | Title bar |
 |---------|-------|--------------|-----------|
@@ -115,6 +116,25 @@ accent colour, light or dark mode and button shapes:
 | macOS | Adwaita shapes | light/dark mode and accent colour | macOS's |
 
 Prefer another look? **Settings → Appearance → Style**.
+
+#### Themes
+
+**Settings → Appearance → Colors** switches from your system's colours to
+a theme. Built in: COSMIC Dark and Light, Catppuccin Mocha and Latte,
+Nord, Dracula, Gruvbox Dark and Solarized Light.
+
+Bring your own in a format you may already have:
+
+- **COSMIC themes** (`.ron`): export one from COSMIC Settings
+  (Appearance → Export) or download one from
+  [cosmic-themes.org](https://cosmic-themes.org).
+- **KDE colour schemes** (`.colors`): from System Settings → Colors or the
+  KDE Store.
+
+Use **Import Theme…**, or drop files into the themes folder (**Open Themes
+Folder**). The built-in themes are COSMIC `.ron` files in
+[`res/themes/`](res/themes), handy to copy and edit. A theme changes
+colours only; the Style setting still picks shapes and the title bar.
 
 ## Download
 
@@ -225,6 +245,7 @@ Linux:
 |------|----------|
 | `~/.local/share/nebula-reader/library.db` | Library, reading progress, metadata |
 | `~/.config/nebula-reader/settings.json` | Preferences |
+| `~/.config/nebula-reader/themes/` | Your imported themes |
 | `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
 | `~/.cache/nebula-reader/` | Cover thumbnails, extracted archives; safe to delete |
 

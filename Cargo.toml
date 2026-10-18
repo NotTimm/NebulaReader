@@ -23,6 +23,8 @@ flate2 = "1"
 arboard = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# COSMIC theme files; the same ron libcosmic uses.
+ron = "0.12"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 quick-xml = "0.37"

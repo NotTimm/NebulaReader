@@ -26,6 +26,7 @@ use crate::scan;
 use crate::platform::look::{self, Corners, Look};
 use crate::platform::Desktop;
 use crate::settings::{Background as BgStyle, LibrarySource, Settings};
+use crate::themes;
 
 mod book_view;
 mod paged;
@@ -143,6 +144,16 @@ pub enum Message {
     SetBackground(usize),
     SetLook(usize),
     SetCorners(usize),
+    /// Index into the Colors dropdown: 0 follows the system, then
+    /// `App::themes`.
+    SetTheme(usize),
+    ImportTheme,
+    ThemeFileSelected(Url),
+    OpenThemesFolder,
+    /// Time to look for a changed system dark mode or accent colour.
+    CheckSystemColors,
+    /// Whether that check found a change.
+    SystemColorsChecked(bool),
     /// A window opened; (re)apply the window icon to it.
     WindowOpened,
     SetFetchMetadata(bool),
@@ -197,6 +208,11 @@ pub struct App {
     fullscreen: bool,
     /// The header bar is revealed in full screen (pointer at the top edge).
     fullscreen_header: bool,
+    /// Colour themes on offer, and the picked one's colours.
+    themes: Vec<themes::Entry>,
+    theme_labels: Vec<String>,
+    theme_colors: Option<themes::Colors>,
+    theme_error: Option<String>,
     theater_mode: bool,
     layout: Layout,
     zoom_active: bool,
@@ -606,6 +622,35 @@ impl App {
         self.settings.look.resolve(Desktop::detect())
     }
 
+    /// Rebuilds the theme from the style, corners and colour theme.
+    fn apply_theme(&self) -> Task<Message> {
+        cosmic::command::set_theme(look::theme(self.look(), self.settings.corners, self.theme_colors.as_ref()))
+    }
+
+    /// Re-lists the colour themes (built-in plus the themes folder).
+    fn refresh_themes(&mut self) {
+        self.themes = themes::list();
+        self.theme_labels = std::iter::once("Match system".to_string())
+            .chain(self.themes.iter().map(|t| t.name.clone()))
+            .collect();
+    }
+
+    /// Switches to a colour theme (`None`: follow the system).
+    fn select_theme(&mut self, id: Option<String>) -> Task<Message> {
+        let colors = match id.as_deref().map(themes::load).transpose() {
+            Ok(colors) => colors,
+            Err(e) => {
+                self.theme_error = Some(e);
+                return Task::none();
+            }
+        };
+        self.theme_error = None;
+        self.theme_colors = colors;
+        self.settings.theme = id;
+        self.settings.save();
+        self.apply_theme()
+    }
+
     /// Queues decodes for pages around the current one, biased toward
     /// whichever direction the reader is actually flipping — reading is
     /// overwhelmingly sequential, so weighting the preload window that way
@@ -1000,6 +1045,10 @@ impl Application for App {
             error: None,
             fullscreen: false,
             fullscreen_header: false,
+            themes: Vec::new(),
+            theme_labels: Vec::new(),
+            theme_colors: settings.theme.as_deref().and_then(|id| themes::load(id).ok()),
+            theme_error: None,
             theater_mode: settings.theater_mode,
             layout: if settings.dual_page { Layout::Dual } else { Layout::Single },
             zoom_active: false,
@@ -1094,6 +1143,7 @@ impl Application for App {
             tasks.push(app.enqueue_meta(key));
         }
 
+        app.refresh_themes();
         (app, Task::batch(tasks))
     }
 
@@ -1328,7 +1378,14 @@ impl Application for App {
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), pointer])
+        // Outside COSMIC (which pushes its theme to us), look for a changed
+        // dark mode or accent colour now and then.
+        let system_colors = if self.settings.theme.is_none() && self.look() != Look::Cosmic {
+            cosmic::iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::CheckSystemColors)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([events, self.jellyfin_subscription(), pointer, system_colors])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1774,6 +1831,32 @@ impl App {
             .add_maybe((self.look().native_titlebar() != self.native_titlebar).then(|| {
                 widget::text::caption("The title bar changes the next time Nebula starts.")
             }))
+            .add(widget::settings::item(
+                "Colors",
+                widget::dropdown(
+                    &self.theme_labels[..],
+                    Some(match &s.theme {
+                        None => 0,
+                        Some(id) => self.themes.iter().position(|t| &t.id == id).map_or(0, |i| i + 1),
+                    }),
+                    Message::SetTheme,
+                ),
+            ))
+            .add(
+                widget::column::with_capacity(3)
+                    .spacing(8)
+                    .push(widget::text::caption(
+                        "Add your own: COSMIC themes (.ron, exported from COSMIC Settings or from \
+                         cosmic-themes.org) and KDE color schemes (.colors).",
+                    ))
+                    .push(
+                        widget::row::with_capacity(2)
+                            .spacing(8)
+                            .push(widget::button::standard("Import Theme…").on_press(Message::ImportTheme))
+                            .push(widget::button::standard("Open Themes Folder").on_press(Message::OpenThemesFolder)),
+                    )
+                    .push_maybe(self.theme_error.as_deref().map(|e| widget::text::caption(format!("Couldn't use that theme: {e}")))),
+            )
             // COSMIC Settings already sets roundness for the COSMIC style.
             .add_maybe((self.look() != Look::Cosmic).then(|| {
                 widget::settings::item(
@@ -2657,6 +2740,8 @@ impl App {
                     self.core.window.show_context && self.context_page == ContextPage::Settings;
                 self.context_page = ContextPage::Settings;
                 self.set_show_context(!showing_settings);
+                // Pick up theme files dropped into the folder meanwhile.
+                self.refresh_themes();
             }
             Message::CloseContext => {
                 self.set_show_context(false);
@@ -2675,7 +2760,7 @@ impl App {
                 if let Some(corners) = Corners::ALL.get(idx).copied() {
                     self.settings.corners = corners;
                     self.settings.save();
-                    return cosmic::command::set_theme(look::theme(self.look(), corners));
+                    return self.apply_theme();
                 }
             }
             Message::WindowOpened => {
@@ -2686,7 +2771,60 @@ impl App {
                 if let Some(look) = Look::ALL.get(idx).copied() {
                     self.settings.look = look;
                     self.settings.save();
-                    return cosmic::command::set_theme(look::theme(self.look(), self.settings.corners));
+                    return self.apply_theme();
+                }
+            }
+            Message::SetTheme(idx) => {
+                let id = idx.checked_sub(1).and_then(|i| self.themes.get(i)).map(|t| t.id.clone());
+                return self.select_theme(id);
+            }
+            Message::ImportTheme => {
+                return cosmic::task::future(async move {
+                    let mut filter = FileFilter::new("COSMIC themes and KDE colour schemes");
+                    for ext in ["ron", "colors"] {
+                        #[cfg(target_os = "linux")]
+                        {
+                            filter = filter.glob(&format!("*.{ext}"));
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            filter = filter.extension(ext);
+                        }
+                    }
+                    let dialog = file_chooser::open::Dialog::new().title("Import Theme").filter(filter);
+                    match dialog.open_file().await {
+                        Ok(r) => Message::ThemeFileSelected(r.url().to_owned()),
+                        Err(file_chooser::Error::Cancelled) => Message::Cancelled,
+                        Err(e) => Message::LoadFailed(e.to_string()),
+                    }
+                });
+            }
+            Message::ThemeFileSelected(url) => {
+                let imported = url.to_file_path().map_err(|()| "not a local file".to_string()).and_then(|p| themes::import(&p));
+                match imported {
+                    Ok(id) => {
+                        self.refresh_themes();
+                        return self.select_theme(Some(id));
+                    }
+                    Err(e) => self.theme_error = Some(e),
+                }
+            }
+            Message::OpenThemesFolder => {
+                let dir = themes::dir();
+                let _ = std::fs::create_dir_all(&dir);
+                crate::platform::open_url(&dir.to_string_lossy());
+            }
+            Message::CheckSystemColors => {
+                return cosmic::task::future(async {
+                    let changed = tokio::task::spawn_blocking(|| look::reread(Desktop::detect()))
+                        .await
+                        .unwrap_or(false);
+                    Message::SystemColorsChecked(changed)
+                });
+            }
+            Message::SystemColorsChecked(changed) => {
+                if changed && self.settings.theme.is_none() {
+                    return self.apply_theme();
                 }
             }
             Message::SetCheckForUpdates(enabled) => {

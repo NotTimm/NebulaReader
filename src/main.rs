@@ -14,6 +14,7 @@ mod platform;
 mod remote_zip;
 mod scan;
 mod settings;
+mod themes;
 mod updates;
 
 use cosmic::app::Settings;
@@ -31,9 +32,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     platform::look::init(desktop);
     log::info!("desktop {desktop:?}, look {look:?}");
 
+    // A picked colour theme; if its file is gone or broken, the system's.
+    let colors = saved.theme.as_deref().and_then(|id| {
+        themes::load(id).map_err(|e| log::warn!("theme {id}: {e}")).ok()
+    });
+
     let settings = Settings::default()
         .size(Size::new(1024.0, 768.0))
-        .theme(platform::look::theme(look, saved.corners))
+        .theme(platform::look::theme(look, saved.corners, colors.as_ref()))
         // Breeze and Fluent use the system's own title bar.
         .client_decorations(!look.native_titlebar())
         // A native frame doesn't round or shadow libcosmic's content.
