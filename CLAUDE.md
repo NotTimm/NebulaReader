@@ -88,7 +88,12 @@ the owner's laptop).
   the metainfo; the repo was renamed to NebulaReader for Flathub's app ID
   check. Jellyfin: title-bar
   source label with online dot, progress saved after 10 s on a page;
-  syncing a book's position *from* the server isn't done yet.
+  syncing a book's position *from* the server isn't done yet. 0.1.3:
+  colour themes (`src/themes.rs`: COSMIC `.ron` and KDE `.colors`, built-ins
+  in `res/themes/`), live system colours, creators and release dates,
+  wheel zoom without Ctrl, libcosmic synced with upstream, new screenshots.
+  The winget job fails until #454452 is merged (the package doesn't exist
+  in winget yet).
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
   .dmg; the `macos` job in `release.yml` is live (first run 39006216181
   was its first real build). Windows packages now bundle vcruntime140.dll.

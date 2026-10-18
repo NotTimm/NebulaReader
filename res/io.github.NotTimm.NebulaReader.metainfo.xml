@@ -40,35 +40,50 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/library.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/library.png</image>
       <caption>Your comics, manga, books and Jellyfin server in one library</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/series.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/series.png</image>
       <caption>Series pages with descriptions, release dates and progress</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/book.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/book.png</image>
       <caption>Books turn pages like an e-reader, one or two at a time</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/book-settings.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/book-settings.png</image>
       <caption>Choose the typeface, size, spacing and theme</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/reader.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/reader.png</image>
       <caption>Read comics and manga in theater mode, one page or two</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/reader-zoom.png</image>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/reader-zoom.png</image>
       <caption>Zoom in on any panel</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.2/res/screenshots/settings.png</image>
-      <caption>Takes on the look of your desktop</caption>
+      <image>https://raw.githubusercontent.com/NotTimm/NebulaReader/v0.1.3/res/screenshots/settings.png</image>
+      <caption>Takes on your desktop's look, or a theme of your own</caption>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.3" date="2026-10-18" type="stable">
+      <description>
+        <ul>
+          <li>Colour themes: built-in themes, plus your own COSMIC theme (.ron) and KDE colour scheme (.colors) files</li>
+          <li>Follows your system's dark mode and accent colour while running, on every desktop; on Windows with the same accent shades as Windows' own apps</li>
+          <li>Series show their creators and years, issues their release dates, and books their author</li>
+          <li>The mouse wheel zooms comic pages directly; hold Shift for finer steps</li>
+          <li>Two-page spreads show on their own, and each zoomed page starts at its top</li>
+          <li>Full screen hides the header bar until the pointer reaches the top</li>
+          <li>Jellyfin: what you're reading shows on the server's dashboard</li>
+          <li>Libraries on unplugged drives are kept, never deleted</li>
+          <li>An About section with an update check</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.2" date="2026-10-18" type="stable">
       <description>
         <p>Store listing update: Nebula Reader now appears under "Made for COSMIC" in the COSMIC Store, and the project moved to github.com/NotTimm/NebulaReader.</p>
