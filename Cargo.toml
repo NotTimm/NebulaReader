@@ -42,11 +42,13 @@ regex = "1"
 # 4. In image::Viewer, fixes the pan clamp so dragging/scrolling can't push
 #    a zoomed page past its own edge into blank space (was most visible
 #    top-to-bottom, since pages are portrait).
+# 5. Adds image::Viewer::page(key): when the key changes the zoom is kept
+#    but the view starts at the top of the new image (comic page turns).
 # Re-sync by rebasing NotTimm/libcosmic's commits onto a newer
 # pop-os/libcosmic and updating `rev` below.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "d5c937c8a9707487c084465717ab21876187a4d5"
+rev = "cd35bc6dad6215e7ee13803e7d133c422906dccd"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -54,12 +56,12 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d5c937c8a9707487c084465717ab21876187a4d5", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "cd35bc6dad6215e7ee13803e7d133c422906dccd", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d5c937c8a9707487c084465717ab21876187a4d5", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "cd35bc6dad6215e7ee13803e7d133c422906dccd", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).

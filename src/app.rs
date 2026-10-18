@@ -1405,6 +1405,9 @@ impl App {
                             .min_scale(MIN_ZOOM)
                             .max_scale(MAX_ZOOM)
                             .on_zoom(Message::ZoomChanged)
+                            // Keep the zoom across page turns but start
+                            // each new page at its top.
+                            .page(self.current_page as u64)
                             .width(Length::Fill)
                             .height(Length::Fill)
                             .into()
