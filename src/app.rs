@@ -630,8 +630,32 @@ impl App {
         Task::batch(tasks)
     }
 
-    fn page_step(&self) -> usize {
-        if self.layout == Layout::Dual { 2 } else { 1 }
+    /// Whether a decoded page is a two-page spread: scanned as one image
+    /// wider than it is tall. Pages not decoded yet count as normal ones.
+    fn is_spread(&self, idx: usize) -> bool {
+        self.cache.get(&idx).is_some_and(|(_, p)| p.width as f32 > p.height as f32 * 1.05)
+    }
+
+    /// Pages on screen from `idx` on: two in two-page mode, except that a
+    /// spread is shown alone, and so is the page just before one.
+    fn pages_shown_at(&self, idx: usize) -> usize {
+        let pair = self.layout == Layout::Dual
+            && idx + 1 < self.sources.len()
+            && !self.is_spread(idx)
+            && !self.is_spread(idx + 1);
+        if pair { 2 } else { 1 }
+    }
+
+    /// The last page on screen.
+    fn last_shown_page(&self) -> usize {
+        self.current_page + self.pages_shown_at(self.current_page) - 1
+    }
+
+    /// Where the view before `current_page` starts: two pages back when
+    /// they make a pair, one when that page is a spread (or stands alone).
+    fn prev_view_start(&self) -> usize {
+        let p = self.current_page;
+        if p >= 2 && self.pages_shown_at(p - 2) == 2 { p - 2 } else { p.saturating_sub(1) }
     }
 
     /// Enters zoom/pan mode (at 100%) if not already active. The actual
@@ -871,7 +895,7 @@ impl App {
         }
         if let Some((ch_idx, ch, pg)) = self.current_chapter() {
             // In two-page mode the right-hand page is on screen too.
-            let visible = if self.layout == Layout::Dual { pg + 1 } else { pg };
+            let visible = pg + self.pages_shown_at(self.current_page) - 1;
             let visible = visible.min(ch.page_count.saturating_sub(1));
             let _ = library::save_issue_progress(
                 db,
@@ -1359,7 +1383,7 @@ impl App {
                 "t" | "T" => self.theater_mode = !self.theater_mode,
                 "l" | "L" => {
                     self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
-                    if self.layout == Layout::Dual && self.current_page % 2 != 0 {
+                    if self.layout == Layout::Dual && self.current_page % 2 != 0 && !self.is_spread(self.current_page - 1) {
                         self.current_page = self.current_page.saturating_sub(1);
                     }
                     return self.refresh_window();
@@ -1429,8 +1453,10 @@ impl App {
                                     .content_fit(ContentFit::Contain),
                             );
                         }
+                        // A spread (or the page before one) is shown alone,
+                        // centred.
                         let right = self.current_page + 1;
-                        if right < self.sources.len() {
+                        if self.pages_shown_at(self.current_page) == 2 {
                             if let Some(h) = self.handle(right) {
                                 row = row.push(
                                     widget::image(h.clone())
@@ -2509,7 +2535,7 @@ impl App {
                 if self.epub_book.is_some() {
                     return self.update_book(BookMsg::NextChapter);
                 }
-                let step = self.page_step();
+                let step = self.pages_shown_at(self.current_page);
                 let new = (self.current_page + step).min(self.sources.len().saturating_sub(1));
                 if new != self.current_page {
                     self.current_page = new;
@@ -2522,8 +2548,7 @@ impl App {
                 if self.epub_book.is_some() {
                     return self.update_book(BookMsg::PrevChapter);
                 }
-                let step = self.page_step();
-                let new = self.current_page.saturating_sub(step);
+                let new = self.prev_view_start();
                 if new != self.current_page {
                     self.current_page = new;
                     self.nav_dir = -1;
@@ -2547,7 +2572,7 @@ impl App {
                 self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
                 self.settings.dual_page = self.layout == Layout::Dual;
                 self.settings.save();
-                if self.layout == Layout::Dual && self.current_page % 2 != 0 {
+                if self.layout == Layout::Dual && self.current_page % 2 != 0 && !self.is_spread(self.current_page - 1) {
                     self.current_page = self.current_page.saturating_sub(1);
                 }
                 return self.refresh_window();

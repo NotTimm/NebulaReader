@@ -347,7 +347,7 @@ impl App {
         // A comic: the page in the chapter on screen.
         let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
         let (_, ch, pg) = self.current_chapter()?;
-        let pg = if self.layout == super::Layout::Dual { pg + 1 } else { pg };
+        let pg = pg + self.pages_shown_at(self.current_page) - 1;
         let pg = pg.min(ch.page_count.saturating_sub(1));
         let issue = ch.path.to_string_lossy();
         let (_, item_id) = jellyfin::parse_key(&issue)?;
