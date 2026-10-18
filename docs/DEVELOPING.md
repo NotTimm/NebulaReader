@@ -129,11 +129,37 @@ when the version has a `-suffix`) with every package attached. Re-running it upd
 same release. `.github/workflows/ci.yml` runs `cargo test --release` on
 pushes to `master` and on pull requests.
 
-## Trackpad/touchscreen pinch-to-zoom fork
+## The libcosmic fork
 
-Upstream `iced` (vendored inside `pop-os/libcosmic`) silently drops winit's
-`PinchGesture` event, so real trackpad/touchscreen pinch was impossible.
-`Cargo.toml` points at `github.com/NotTimm/libcosmic`, a small personal fork
-with the ~50 lines needed to forward it and gate mouse-wheel zoom behind
-`Ctrl`. See the comment above the `libcosmic` dependency for how to re-sync
-that fork against a newer upstream commit.
+`Cargo.toml` points at `github.com/NotTimm/libcosmic`, a small fork of
+`pop-os/libcosmic`. The patches it carries (pinch forwarding, the
+zoom viewer changes, the header bar fix) are listed in the comment above
+the `libcosmic` dependency.
+
+Upstream keeps `iced` and `cosmic-icons` as git submodules. The fork
+copies them into the repo instead, since our patches change iced.
+
+**Keep it in sync.** Run `tools/libcosmic-drift.sh` before each release
+and now and then in between. It reports how many upstream commits the fork
+is missing, lists upstream fixes since the last sync, and checks that
+`Cargo.toml` pins the fork's latest commit.
+
+To sync, in a clone of the fork with `upstream` pointing at
+`pop-os/libcosmic`:
+
+1. Note the iced and cosmic-icons revisions upstream pins:
+   `git ls-tree upstream/master iced cosmic-icons`.
+2. Save our iced patch: download the iced revision the fork was last synced
+   to (`git ls-tree $(git merge-base master upstream/master) iced`) and
+   `diff -ruN -x .cargo -x Cargo.lock` it against the fork's `iced/`.
+3. In a separate worktree, `git merge --no-commit upstream/master`.
+   Resolve the conflicts by deleting upstream's `iced` and `cosmic-icons`
+   gitlinks and its `.github/workflows`, then replace `iced/` and
+   `cosmic-icons/` with the new revisions (drop `iced/.cargo` and
+   `iced/Cargo.lock`) and apply the saved patch in `iced/`.
+4. Check that `git diff upstream/master` outside `iced/` and
+   `cosmic-icons/` shows only our patches. Commit the merge, push it to a
+   branch, point `Cargo.toml` at it and run `cargo check` and `cargo test`.
+5. Fast-forward the fork's `master` to the merge and push. Never rebase or
+   force-push: released Nebula versions pin old fork commits, which must
+   stay fetchable. `nebula-0.1.2` tags the commit 0.1.2 was built from.

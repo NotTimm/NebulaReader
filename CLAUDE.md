@@ -27,7 +27,10 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
 ## Project
 
 - Rust + libcosmic (the owner's fork `NotTimm/libcosmic`, pinned by `rev` in
-  `Cargo.toml`). Runs on COSMIC, KDE, GNOME and Windows; per-OS code lives in
+  `Cargo.toml`). Goal: stay in sync with `pop-os/libcosmic`. Run
+  `tools/libcosmic-drift.sh` at the start of a session and before every
+  release; when upstream has moved, tell the owner what's new and sync
+  (merge, never rebase; steps in docs/DEVELOPING.md). Runs on COSMIC, KDE, GNOME and Windows; per-OS code lives in
   `src/platform/`, per-desktop theming in `src/platform/look.rs`.
 - Linux build deps: `libarchive`, `libxkbcommon`, `wayland`, `openssl` dev
   packages plus `pkg-config`. Windows: libarchive from vcpkg (see docs/DEVELOPING.md, which holds the
