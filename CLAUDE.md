@@ -42,6 +42,13 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   are `jellyfin://<serverId>-<userId>/<itemId>`; never call
   `library::sync_issues` on them from the reader, since it deletes chapters
   that aren't loaded. Test against `tools/mock-jellyfin.py`.
+- Jellyfin dashboard: while a server item is open the app reports a reading
+  session (`/Sessions/Playing`, check-ins, `/Playing/Stopped`). Never send a
+  position in these, and send the stop with `Failed: true`: books have no
+  run time, so Jellyfin otherwise marks them read and clears the position
+  (`UserDataManager.UpdatePlayState`). Progress goes through
+  `save_progress` only. `jellyfin-reading.json` in the config dir marks an
+  item left open; the next start ends that session and re-saves progress.
 
 ## Flathub: hands off
 

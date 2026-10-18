@@ -33,6 +33,9 @@ const QUICK_CONNECT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// right away on finishing a chapter, leaving the reader or quitting), like
 /// Jellyfin's own players, instead of on every page turn.
 const SAVE_AFTER: Duration = Duration::from_secs(10);
+/// How often to tell the server we're still reading (it ends a session
+/// after 5 minutes without word).
+const CHECK_IN_EVERY: Duration = Duration::from_secs(60);
 /// How often to check the server is still reachable while reading.
 const PING_EVERY: Duration = Duration::from_secs(30);
 
@@ -61,6 +64,8 @@ pub enum JfMsg {
     Pinged(bool),
     /// The window is closing: send any unsaved progress now.
     Closing,
+    /// A dashboard reading-session report came back.
+    SessionReported(Result<(), String>),
 }
 
 /// A Quick Connect sign-in waiting for the user to approve the code.
@@ -93,6 +98,9 @@ pub struct JfState {
     book: Option<(PathBuf, Account)>,
     /// Progress saving and reachability of the server being read from.
     live: Live,
+    /// The item shown as being read on the server's dashboard, and when we
+    /// last checked in about it.
+    reading: Option<(Account, String, Instant)>,
 }
 
 /// Where the reader is in a Jellyfin item, as it would be reported.
@@ -139,9 +147,18 @@ pub struct RemoteReading {
 
 // ── Background work ─────────────────────────────────────────────────────────
 
-fn fetch_task(account: Account) -> Task<Message> {
+/// Fetches an account's library. `left_open` is an item the last run didn't
+/// close: its reading session is ended and its last saved progress put back
+/// first, before the server's idle timeout could have marked it read.
+fn fetch_task(account: Account, left_open: Option<jellyfin::OpenItem>) -> Task<Message> {
     let key = account.key();
     cosmic::task::future(async move {
+        if let Some(open) = left_open {
+            let _ = jellyfin::report_reading_stopped(&account, &open.item_id).await;
+            if let Some((ticks, played)) = open.saved {
+                let _ = jellyfin::save_progress(&account, &open.item_id, ticks, played).await;
+            }
+        }
         let result = jellyfin::fetch_library(&account).await;
         Message::Jf(JfMsg::Fetched(key, result))
     })
@@ -239,6 +256,10 @@ fn save_task(r: Report) -> Task<Message> {
     })
 }
 
+fn session_task(report: impl std::future::Future<Output = Result<(), String>> + Send + 'static) -> Task<Message> {
+    cosmic::task::future(async move { Message::Jf(JfMsg::SessionReported(report.await)) })
+}
+
 fn ping_task(url: String) -> Task<Message> {
     cosmic::task::future(async move { Message::Jf(JfMsg::Pinged(jellyfin::ping(&url).await)) })
 }
@@ -255,9 +276,11 @@ impl App {
     /// Syncs every signed-in account (at startup and on demand).
     pub(super) fn sync_all_jellyfin(&mut self) -> Task<Message> {
         let accounts = self.jellyfin.accounts.clone();
+        let mut left_open = jellyfin::take_open();
         Task::batch(accounts.into_iter().map(|a| {
             self.jf.syncing.insert(a.key());
-            fetch_task(a)
+            let open = left_open.take_if(|o| o.account_key == a.key());
+            fetch_task(a, open)
         }))
     }
 
@@ -394,17 +417,58 @@ impl App {
                 live.sent = Some(rep.id());
                 live.saving += 1;
                 tasks.push(save_task(rep.clone()));
+                if self.jf.reading.as_ref().is_some_and(|(_, id, _)| *id == rep.item_id) {
+                    jellyfin::remember_open(Some(&jellyfin::OpenItem {
+                        account_key: rep.account.key(),
+                        item_id: rep.item_id.clone(),
+                        saved: Some((rep.ticks, rep.played)),
+                    }));
+                }
             }
         }
         if report.is_none() {
             live.pending = None;
         }
 
+        tasks.push(self.update_reading_session(report.as_ref()));
+
+        let live = &mut self.jf.live;
         if let Some(rep) = &report {
             if !live.pinging && live.pinged_at.is_none_or(|t| t.elapsed() >= PING_EVERY) {
                 live.pinging = true;
                 live.pinged_at = Some(now);
                 tasks.push(ping_task(rep.account.url.clone()));
+            }
+        }
+        Task::batch(tasks)
+    }
+
+    /// Keeps the server's dashboard in step with what's open: starts a
+    /// reading session for a newly opened item, checks in about it every
+    /// minute, and ends it when the item closes.
+    fn update_reading_session(&mut self, report: Option<&Report>) -> Task<Message> {
+        let mut tasks = Vec::new();
+        let open = report.map(|r| r.item_id.as_str());
+        if self.jf.reading.as_ref().map(|(_, id, _)| id.as_str()) != open {
+            if let Some((account, item_id, _)) = self.jf.reading.take() {
+                tasks.push(session_task(async move { jellyfin::report_reading_stopped(&account, &item_id).await }));
+                jellyfin::remember_open(None);
+            }
+            if let Some(rep) = report {
+                let (account, item_id) = (rep.account.clone(), rep.item_id.clone());
+                self.jf.reading = Some((account.clone(), item_id.clone(), Instant::now()));
+                jellyfin::remember_open(Some(&jellyfin::OpenItem {
+                    account_key: account.key(),
+                    item_id: item_id.clone(),
+                    saved: None,
+                }));
+                tasks.push(session_task(async move { jellyfin::report_reading_started(&account, &item_id).await }));
+            }
+        } else if let Some((account, item_id, at)) = self.jf.reading.as_mut() {
+            if at.elapsed() >= CHECK_IN_EVERY {
+                *at = Instant::now();
+                let (account, item_id) = (account.clone(), item_id.clone());
+                tasks.push(session_task(async move { jellyfin::report_reading_check_in(&account, &item_id).await }));
             }
         }
         Task::batch(tasks)
@@ -568,7 +632,7 @@ impl App {
                         self.jf.status = Some(format!("Signed in as {}. Loading your books…", account.label()));
                         self.jf.syncing.insert(account.key());
                         self.jellyfin.upsert(account.clone());
-                        return fetch_task(account);
+                        return fetch_task(account, None);
                     }
                     Err(e) => self.jf.status = Some(e),
                 }
@@ -592,7 +656,7 @@ impl App {
             JfMsg::Sync(key) => {
                 if let Some(account) = self.jellyfin.find(&key).cloned() {
                     self.jf.syncing.insert(key);
-                    return fetch_task(account);
+                    return fetch_task(account, None);
                 }
             }
             JfMsg::Fetched(key, result) => {
@@ -672,6 +736,15 @@ impl App {
                     if live.sent.as_ref() != Some(&rep.id()) {
                         jellyfin::save_progress_now(&rep.account, &rep.item_id, rep.ticks, rep.played);
                     }
+                }
+                if let Some((account, item_id, _)) = self.jf.reading.take() {
+                    jellyfin::report_reading_stopped_now(&account, &item_id);
+                    jellyfin::remember_open(None);
+                }
+            }
+            JfMsg::SessionReported(result) => {
+                if let Err(e) = result {
+                    log::warn!("jellyfin: reading session report: {e}");
                 }
             }
         }

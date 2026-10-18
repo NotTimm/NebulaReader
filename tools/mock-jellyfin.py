@@ -191,6 +191,13 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/Sessions/Logout":
             print("logout", flush=True)
             return self.send_empty(204)
+        if p in ("/Sessions/Playing", "/Sessions/Playing/Progress", "/Sessions/Playing/Stopped"):
+            iid = body.get("ItemId", "")
+            name = os.path.basename(ITEMS.get(iid, {}).get("path", iid))[:40]
+            event = {"/Sessions/Playing": "started", "/Sessions/Playing/Progress": "check-in"}.get(p, "stopped")
+            extra = " (failed: user data untouched)" if body.get("Failed") else ""
+            print(f"reading {event:8} {name}{extra}", flush=True)
+            return self.send_empty(204)
         m = re.fullmatch(r"/UserItems/([^/]+)/UserData", p)
         if m:
             iid = m.group(1)

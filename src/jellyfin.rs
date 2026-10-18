@@ -440,6 +440,110 @@ pub async fn cover(account: &Account, item_id: &str, max_height: u32) -> Result<
 
 /// Saves reading progress to Jellyfin: the page (as Jellyfin's web reader
 /// stores it) and whether the item is finished.
+// ── "Now reading" on the server's dashboard ─────────────────────────────────
+//
+// Jellyfin lists a client on its dashboard while it reports playback:
+// started, progress check-ins (the server stops a session itself after 5
+// minutes without one) and stopped. Books and comics have no run time, and
+// for such items Jellyfin treats any progress or stop report that changes
+// the play state as "played to the end": it marks the item read and clears
+// the position. So these reports never carry a position, the stop is sent as
+// `Failed` (the one case where the server leaves the user's data alone), and
+// reading progress keeps going through `save_progress`.
+
+async fn post_session(account: &Account, path: &str, body: serde_json::Value) -> Result<(), String> {
+    let resp = client()
+        .post(format!("{}{path}", account.url))
+        .header("Authorization", account.auth())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() { Ok(()) } else { Err(format!("HTTP {}", resp.status())) }
+}
+
+/// Shows `item_id` as being read by this device on the dashboard.
+pub async fn report_reading_started(account: &Account, item_id: &str) -> Result<(), String> {
+    let body = serde_json::json!({
+        "ItemId": item_id,
+        "CanSeek": false,
+        "IsPaused": false,
+        "PlayMethod": "DirectPlay",
+    });
+    post_session(account, "/Sessions/Playing", body).await
+}
+
+/// Keeps the dashboard entry alive (no position, so nothing is changed).
+pub async fn report_reading_check_in(account: &Account, item_id: &str) -> Result<(), String> {
+    let body = serde_json::json!({ "ItemId": item_id, "IsPaused": false, "EventName": "timeupdate" });
+    post_session(account, "/Sessions/Playing/Progress", body).await
+}
+
+/// Removes the dashboard entry without touching the user's progress.
+pub async fn report_reading_stopped(account: &Account, item_id: &str) -> Result<(), String> {
+    post_session(account, "/Sessions/Playing/Stopped", stopped_body(item_id)).await
+}
+
+fn stopped_body(item_id: &str) -> serde_json::Value {
+    serde_json::json!({ "ItemId": item_id, "Failed": true })
+}
+
+/// The same, blocking for at most a few seconds, for when the app closes.
+pub fn report_reading_stopped_now(account: &Account, item_id: &str) {
+    let (url, auth) = (format!("{}/Sessions/Playing/Stopped", account.url), account.auth());
+    let body = stopped_body(item_id);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let r = blocking_client()
+            .post(url)
+            .header("Authorization", auth)
+            .timeout(std::time::Duration::from_secs(3))
+            .json(&body)
+            .send();
+        let _ = tx.send(r.map(|r| r.status().is_success()));
+    });
+    if !matches!(rx.recv_timeout(std::time::Duration::from_secs(4)), Ok(Ok(true))) {
+        log::warn!("jellyfin: couldn't end the reading session on exit");
+    }
+}
+
+/// What's open on a server, kept on disk while it is: if the app ends
+/// without closing it (a crash, a dead battery), the server stops the
+/// session 5 minutes later and marks the item read. The next start uses this
+/// to end the session properly and put the last saved progress back.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OpenItem {
+    pub account_key: String,
+    pub item_id: String,
+    /// The last progress saved, if any: (ticks, played).
+    pub saved: Option<(i64, bool)>,
+}
+
+fn open_item_path() -> std::path::PathBuf {
+    crate::library::config_dir().join("jellyfin-reading.json")
+}
+
+/// Records the open item, or clears the record with `None`.
+pub fn remember_open(item: Option<&OpenItem>) {
+    let path = open_item_path();
+    match item.and_then(|i| serde_json::to_string(i).ok()) {
+        Some(json) => {
+            let _ = std::fs::write(path, json);
+        }
+        None => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// The item left open by the last run, if it didn't close cleanly.
+pub fn take_open() -> Option<OpenItem> {
+    let path = open_item_path();
+    let item = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok();
+    let _ = std::fs::remove_file(path);
+    item
+}
+
 /// Whether the server answers. `/System/Ping` needs no sign-in and isn't
 /// logged as activity, so it's cheap to call while reading.
 pub async fn ping(url: &str) -> bool {
