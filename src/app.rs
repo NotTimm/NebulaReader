@@ -1980,19 +1980,28 @@ impl App {
         match message {
             Message::GoToLibrary => {
                 self.show_chapter_select = false;
+                // Leaving the reader also leaves full screen, so the library
+                // is a normal window again.
+                let windowed = match self.core.main_window_id() {
+                    Some(id) if self.fullscreen => {
+                        self.fullscreen = false;
+                        window::set_mode(id, window::Mode::Windowed)
+                    }
+                    _ => Task::none(),
+                };
                 if self.app_view == AppView::Reader && self.epub_book.is_some() {
                     self.persist_book_position();
                 }
                 if self.app_view == AppView::Reader && self.back_to_series {
                     if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
                         let t = self.refresh_views();
-                        return Task::batch([t, self.open_series_page(key)]);
+                        return Task::batch([windowed, t, self.open_series_page(key)]);
                     }
                 }
                 self.app_view = AppView::Library;
                 self.series_page = None;
                 self.set_header_title("Nebula".into());
-                return self.refresh_views();
+                return Task::batch([windowed, self.refresh_views()]);
             }
             Message::OpenSeriesPage(key) => {
                 return self.open_series_page(key);
