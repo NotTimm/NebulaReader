@@ -91,6 +91,58 @@ fn continue_label(e: &SeriesEntry) -> String {
 }
 
 impl App {
+    /// The All / Local / Jellyfin picker at the left of the header: a pill
+    /// with the current choice's icon, opening a menu of all three.
+    pub(super) fn library_source_picker(&self) -> Element<'_, Message> {
+        let current = self.settings.library_source;
+        let label = |src: LibrarySource| {
+            LibrarySource::ALL.iter().position(|s| *s == src).map_or("", |i| LibrarySource::LABELS[i])
+        };
+
+        let pill = widget::button::custom(
+            widget::row::with_capacity(3)
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .push(widget::icon(source_icon(current)).size(16))
+                .push(widget::text::body(label(current)))
+                .push(widget::icon(ui_icon(CHEVRON_DOWN)).size(12)),
+        )
+        .class(cosmic::theme::Button::Standard)
+        .padding([4, 12])
+        .on_press(Message::ToggleLibraryMenu);
+
+        let mut picker = widget::popover(pill)
+            .position(widget::popover::Position::Bottom)
+            .on_close(Message::CloseLibraryMenu);
+        if self.library_menu {
+            let mut menu = widget::column::with_capacity(LibrarySource::ALL.len()).spacing(2);
+            for (i, src) in LibrarySource::ALL.into_iter().enumerate() {
+                let mut row = widget::row::with_capacity(3)
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .push(widget::icon(source_icon(src)).size(16))
+                    .push(widget::text::body(LibrarySource::LABELS[i]).width(Length::Fill));
+                if src == current {
+                    row = row.push(widget::icon(ui_icon(CHECK)).size(16));
+                }
+                menu = menu.push(
+                    widget::button::custom(row)
+                        .class(cosmic::theme::Button::MenuItem)
+                        .padding([6, 10])
+                        .width(Length::Fill)
+                        .on_press(Message::LibrarySource(i)),
+                );
+            }
+            picker = picker.popup(
+                widget::container(menu)
+                    .padding(4)
+                    .width(Length::Fixed(200.0))
+                    .class(cosmic::theme::Container::Dropdown),
+            );
+        }
+        picker.into()
+    }
+
     /// Whether the library has both local and Jellyfin series, which is
     /// when the All / Local / Jellyfin dropdown shows.
     pub(super) fn has_local_and_remote(&self) -> bool {
@@ -552,4 +604,26 @@ pub(super) fn next_issue(issues: &[IssueEntry]) -> Option<&IssueEntry> {
 
 fn is_remote(e: &SeriesEntry) -> bool {
     crate::jellyfin::is_key(&e.library_root) || crate::jellyfin::is_key(&e.path)
+}
+
+const ALL_ICON: &[u8] = include_bytes!("../../res/icons/ui/all.svg");
+const LOCAL_ICON: &[u8] = include_bytes!("../../res/icons/ui/local.svg");
+const JELLYFIN_ICON: &[u8] = include_bytes!("../../res/icons/ui/jellyfin.svg");
+const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg");
+const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
+
+/// A single-colour icon of ours, drawn in the theme's text colour.
+fn ui_icon(svg: &'static [u8]) -> widget::icon::Handle {
+    let mut handle = widget::icon::from_svg_bytes(svg);
+    handle.symbolic = true;
+    handle
+}
+
+fn source_icon(src: LibrarySource) -> widget::icon::Handle {
+    match src {
+        LibrarySource::All => ui_icon(ALL_ICON),
+        LibrarySource::Local => ui_icon(LOCAL_ICON),
+        // The Jellyfin logo keeps its own colours.
+        LibrarySource::Jellyfin => widget::icon::from_svg_bytes(JELLYFIN_ICON),
+    }
 }

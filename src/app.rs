@@ -121,6 +121,8 @@ pub enum Message {
     // Library
     LibrarySearchChanged(String),
     LibrarySource(usize),
+    ToggleLibraryMenu,
+    CloseLibraryMenu,
     RootDiscovered(PathBuf, Option<Vec<scan::Discovered>>),
     SeriesScanned(Result<scan::ScanResult, String>),
     IssueCoverReady { key: String, idx: usize },
@@ -221,6 +223,8 @@ pub struct App {
     db: Option<rusqlite::Connection>,
     library_entries: Vec<SeriesEntry>,
     library_search: String,
+    /// The All / Local / Jellyfin menu is open.
+    library_menu: bool,
     /// The All / Local / Jellyfin switch above the library.
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
@@ -988,6 +992,7 @@ impl Application for App {
             db,
             library_entries: Vec::new(),
             library_search: String::new(),
+            library_menu: false,
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -1103,13 +1108,7 @@ impl Application for App {
                 "Back to library",
             )],
             // All / Local / Jellyfin, once the library has some of each.
-            AppView::Library if self.has_local_and_remote() => {
-                let current = LibrarySource::ALL.iter().position(|s| *s == self.settings.library_source);
-                vec![tip(
-                    widget::dropdown(&LibrarySource::LABELS[..], current, Message::LibrarySource),
-                    "Which libraries to show",
-                )]
-            }
+            AppView::Library if self.has_local_and_remote() => vec![self.library_source_picker()],
             AppView::Library => vec![],
         }
     }
@@ -2608,7 +2607,10 @@ impl App {
                 self.library_search = q;
                 return self.reload_library();
             }
+            Message::ToggleLibraryMenu => self.library_menu = !self.library_menu,
+            Message::CloseLibraryMenu => self.library_menu = false,
             Message::LibrarySource(i) => {
+                self.library_menu = false;
                 if let Some(src) = LibrarySource::ALL.get(i) {
                     self.settings.library_source = *src;
                     self.settings.save();
