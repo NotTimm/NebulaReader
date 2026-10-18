@@ -1,5 +1,12 @@
 # Getting Nebula Reader into Flathub (and the COSMIC Store)
 
+> **Read Flathub's [generative AI policy](https://docs.flathub.org/docs/for-app-authors/requirements)
+> first.** Manifests submitted to Flathub must not contain AI-generated or
+> AI-assisted content, AI tools must not open or automate the submission PR
+> or write its text and replies, and AI-generated application code must be
+> disclosed. The manifest in this folder was written with AI help, so it
+> can't be the one submitted.
+
 The COSMIC Store lists Flathub apps out of the box, so publishing on
 Flathub is how Nebula Reader shows up there (and in GNOME Software and
 KDE Discover).

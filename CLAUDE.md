@@ -43,6 +43,18 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   `library::sync_issues` on them from the reader, since it deletes chapters
   that aren't loaded. Test against `tools/mock-jellyfin.py`.
 
+## Flathub: hands off
+
+Flathub's generative AI policy
+(https://docs.flathub.org/docs/for-app-authors/requirements) forbids AI
+tools from opening or automating submission PRs or writing their
+descriptions, commit messages or replies; Flathub manifests must not
+contain AI-generated or AI-assisted content (disclosure doesn't exempt
+them); AI-generated app code must be disclosed and may be rejected. So
+Claude must not prepare, open or reply on the Flathub submission, and the
+manifest under `packaging/flathub/` can't be what gets submitted. The owner
+decides whether and how to submit. Research and debugging help is fine.
+
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
@@ -61,8 +73,10 @@ the owner's laptop).
   VCRUNTIME140.dll, and winget's test runs with --skip-dependencies, so a
   VCRedist dependency doesn't help; the DLL now ships app-locally). PR
   microsoft/winget-pkgs#454452 is moved to 0.1.1; once merged, the
-  workflow's `winget` job submits later releases. Then Flathub (owner is
-  being walked through it; `packaging/flathub/`). Jellyfin: title-bar
+  workflow's `winget` job submits later releases. Flathub: owner's call,
+  see "Flathub: hands off" above. 0.1.2 adds the "Made for COSMIC" tag to
+  the metainfo; the repo was renamed to NebulaReader for Flathub's app ID
+  check. Jellyfin: title-bar
   source label with online dot, progress saved after 10 s on a page;
   syncing a book's position *from* the server isn't done yet.
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
