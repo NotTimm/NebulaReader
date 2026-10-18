@@ -111,7 +111,16 @@ cp -R "$APP" "$DMG_ROOT/"
 ln -s /Applications "$DMG_ROOT/Applications"
 OUT="$DIST_DIR/NebulaReader-$VERSION-macos-$ARCH.dmg"
 rm -f "$OUT"
-hdiutil create -volname "Nebula Reader" -srcfolder "$DMG_ROOT" -fs HFS+ -format UDZO -ov "$OUT"
+# hdiutil sometimes fails with "Resource busy" on CI Macs (something still
+# holds the freshly written files); it goes through on a retry.
+for attempt in 1 2 3 4 5; do
+    if hdiutil create -volname "Nebula Reader" -srcfolder "$DMG_ROOT" -fs HFS+ -format UDZO -ov "$OUT"; then
+        break
+    fi
+    [ "$attempt" = 5 ] && { echo "hdiutil create kept failing" >&2; exit 1; }
+    echo "hdiutil create failed (attempt $attempt), retrying in 5 s"
+    sleep 5
+done
 rm -rf "$DMG_ROOT"
 
 echo "==> $OUT"
