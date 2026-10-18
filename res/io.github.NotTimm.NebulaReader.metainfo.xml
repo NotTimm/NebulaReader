@@ -69,6 +69,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.4" date="2026-10-18" type="stable">
+      <description>
+        <p>Fixes the comic reader's chapter list and error messages showing through to the desktop in theater mode when the window isn't maximized.</p>
+      </description>
+    </release>
     <release version="0.1.3" date="2026-10-18" type="stable">
       <description>
         <ul>

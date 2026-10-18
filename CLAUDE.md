@@ -92,6 +92,8 @@ the owner's laptop).
   colour themes (`src/themes.rs`: COSMIC `.ron` and KDE `.colors`, built-ins
   in `res/themes/`), live system colours, creators and release dates,
   wheel zoom without Ctrl, libcosmic synced with upstream, new screenshots.
+  0.1.4: theater mode no longer shows the desktop through the comic
+  reader's chapter panel and error banner.
   The winget job fails until #454452 is merged (the package doesn't exist
   in winget yet).
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
