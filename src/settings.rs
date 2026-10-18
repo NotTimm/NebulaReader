@@ -159,6 +159,8 @@ pub struct Settings {
     pub corners: crate::platform::look::Corners,
     /// The library's All / Local / Jellyfin switch.
     pub library_source: LibrarySource,
+    /// Ask GitHub for a newer release when the app starts.
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -173,6 +175,7 @@ impl Default for Settings {
             look: crate::platform::look::Look::Auto,
             corners: crate::platform::look::Corners::Auto,
             library_source: LibrarySource::All,
+            check_for_updates: true,
         }
     }
 }

@@ -1,0 +1,207 @@
+//! What version this is, how it was installed, and whether GitHub has a
+//! newer release.
+//!
+//! The check is one unauthenticated request to GitHub's releases API. The
+//! app never updates itself: how to get the new version depends on how it
+//! was installed (Flathub, a .flatpak file, rpm/deb, AppImage, winget or the
+//! Windows installer, the Mac .dmg, or built from source), so the About
+//! section says what to do for that install.
+
+use std::sync::OnceLock;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const REPO_URL: &str = "https://github.com/NotTimm/NebulaReader";
+pub const RELEASES_URL: &str = "https://github.com/NotTimm/NebulaReader/releases";
+const LATEST_API: &str = "https://api.github.com/repos/NotTimm/NebulaReader/releases/latest";
+
+/// The commit this was built from (set by build.rs), if it was built from a
+/// git checkout.
+pub fn build_commit() -> Option<&'static str> {
+    option_env!("NEBULA_COMMIT").filter(|c| !c.is_empty())
+}
+
+/// How this copy was installed, as far as we can tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Install {
+    Flatpak,
+    AppImage,
+    Rpm,
+    Deb,
+    /// Under ~/.local, from install.sh.
+    Source,
+    /// Per-user install from the setup .exe or winget.
+    WindowsInstaller,
+    WindowsPortable,
+    MacApp,
+    Unknown,
+}
+
+impl Install {
+    pub fn detect() -> Self {
+        if std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists() {
+            return Install::Flatpak;
+        }
+        if std::env::var_os("APPIMAGE").is_some() {
+            return Install::AppImage;
+        }
+        let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        if cfg!(windows) {
+            return if exe.to_ascii_lowercase().contains("\\appdata\\local\\programs\\") {
+                Install::WindowsInstaller
+            } else {
+                Install::WindowsPortable
+            };
+        }
+        if cfg!(target_os = "macos") {
+            return if exe.contains(".app/Contents/MacOS/") { Install::MacApp } else { Install::Unknown };
+        }
+        if exe.starts_with("/usr/") {
+            if std::path::Path::new("/etc/debian_version").exists() {
+                return Install::Deb;
+            }
+            if std::path::Path::new("/usr/bin/rpm").exists() {
+                return Install::Rpm;
+            }
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            if exe.starts_with(&*std::path::Path::new(&home).join(".local").to_string_lossy()) {
+                return Install::Source;
+            }
+        }
+        Install::Unknown
+    }
+
+    /// One line on how to get a newer version for this install.
+    pub fn how_to_update(self) -> &'static str {
+        match self {
+            Install::Flatpak => {
+                "Installed from Flathub: your software center (or `flatpak update`) brings it in. \
+                 Installed from a .flatpak file: download the new one from the release page."
+            }
+            Install::AppImage => "Download the new AppImage from the release page and replace this one.",
+            Install::Rpm => "Download the new .rpm from the release page and install it with `sudo dnf install ./nebula-reader-*.rpm`.",
+            Install::Deb => "Download the new .deb from the release page and install it with `sudo apt install ./nebula-reader_*.deb`.",
+            Install::Source => "Run ./install.sh again in your checkout; it pulls the latest code and rebuilds.",
+            Install::WindowsInstaller => {
+                "Run `winget upgrade NotTimm.NebulaReader`, or download and run the new installer from the release page."
+            }
+            Install::WindowsPortable => "Download the new .zip from the release page and replace this folder.",
+            Install::MacApp => "Download the new .dmg from the release page and drag Nebula Reader into Applications again.",
+            Install::Unknown => "Get the new version from the release page.",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Install::Flatpak => "Flatpak",
+            Install::AppImage => "AppImage",
+            Install::Rpm => "RPM package",
+            Install::Deb => "Debian package",
+            Install::Source => "Built from source",
+            Install::WindowsInstaller => "Windows installer",
+            Install::WindowsPortable => "Windows (portable)",
+            Install::MacApp => "macOS app",
+            Install::Unknown => "Unknown",
+        }
+    }
+}
+
+/// The newest release on GitHub.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Release {
+    pub version: String,
+    pub url: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    html_url: String,
+}
+
+fn client() -> &'static reqwest::Client {
+    static C: OnceLock<reqwest::Client> = OnceLock::new();
+    C.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            // GitHub's API refuses requests without a User-Agent.
+            .user_agent(concat!("nebula-reader/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .expect("http client")
+    })
+}
+
+/// The latest release, or `None` when this is already the newest.
+pub async fn check() -> Result<Option<Release>, String> {
+    let resp = client()
+        .get(LATEST_API)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach GitHub: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("GitHub answered HTTP {}", resp.status()));
+    }
+    let release: GhRelease = resp.json().await.map_err(|e| e.to_string())?;
+    let version = release.tag_name.trim_start_matches('v').to_string();
+    Ok(is_newer(&version, VERSION).then_some(Release { version, url: release.html_url }))
+}
+
+/// Whether `candidate` is a later version than `current` (semver-style:
+/// `0.1.10` > `0.1.9`, and `0.2.0` > `0.2.0-beta.3`).
+pub fn is_newer(candidate: &str, current: &str) -> bool {
+    fn parse(v: &str) -> Option<([u64; 3], Option<&str>)> {
+        let (core, pre) = match v.split_once('-') {
+            Some((c, p)) => (c, Some(p)),
+            None => (v, None),
+        };
+        let mut nums = [0u64; 3];
+        for (i, part) in core.split('.').enumerate() {
+            *nums.get_mut(i)? = part.parse().ok()?;
+        }
+        Some((nums, pre))
+    }
+    let (Some((a, a_pre)), Some((b, b_pre))) = (parse(candidate), parse(current)) else { return false };
+    match a.cmp(&b) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match (a_pre, b_pre) {
+            (None, Some(_)) => true,
+            (Some(x), Some(y)) => pre_newer(x, y),
+            _ => false,
+        },
+    }
+}
+
+/// Compares pre-release tags like `beta.3` and `beta.10` part by part.
+fn pre_newer(a: &str, b: &str) -> bool {
+    for (x, y) in a.split('.').zip(b.split('.')) {
+        let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
+            (Ok(x), Ok(y)) => x.cmp(&y),
+            _ => x.cmp(y),
+        };
+        if ord != std::cmp::Ordering::Equal {
+            return ord == std::cmp::Ordering::Greater;
+        }
+    }
+    a.split('.').count() > b.split('.').count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_newer;
+
+    #[test]
+    fn compares_versions() {
+        assert!(is_newer("0.1.3", "0.1.2"));
+        assert!(is_newer("0.1.10", "0.1.9"));
+        assert!(is_newer("0.2.0", "0.1.12"));
+        assert!(is_newer("1.0.0", "0.9.9"));
+        assert!(!is_newer("0.1.2", "0.1.2"));
+        assert!(!is_newer("0.1.1", "0.1.2"));
+        assert!(is_newer("0.2.0", "0.2.0-beta.3"));
+        assert!(!is_newer("0.2.0-beta.3", "0.2.0"));
+        assert!(is_newer("0.1.0-beta.10", "0.1.0-beta.9"));
+        assert!(!is_newer("garbage", "0.1.2"));
+    }
+}

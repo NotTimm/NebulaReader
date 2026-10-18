@@ -14,6 +14,7 @@ mod platform;
 mod remote_zip;
 mod scan;
 mod settings;
+mod updates;
 
 use cosmic::app::Settings;
 use cosmic::iced::Size;

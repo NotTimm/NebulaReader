@@ -143,6 +143,9 @@ pub enum Message {
     /// A window opened; (re)apply the window icon to it.
     WindowOpened,
     SetFetchMetadata(bool),
+    SetCheckForUpdates(bool),
+    CheckForUpdates,
+    UpdateChecked(Result<Option<crate::updates::Release>, String>),
     // Keys / pointer / touch
     Key(Key),
     ModifiersChanged(keyboard::Modifiers),
@@ -225,6 +228,8 @@ pub struct App {
     library_search: String,
     /// The All / Local / Jellyfin menu is open.
     library_menu: bool,
+    /// The latest update check, shown in Settings → About.
+    update: UpdateStatus,
     /// The All / Local / Jellyfin switch above the library.
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
@@ -931,6 +936,15 @@ impl App {
     }
 }
 
+/// Where the update check stands (Settings → About).
+enum UpdateStatus {
+    NotChecked,
+    Checking,
+    UpToDate,
+    Available(crate::updates::Release),
+    Failed(String),
+}
+
 // ── Application ───────────────────────────────────────────────────────────────
 
 impl Application for App {
@@ -993,6 +1007,7 @@ impl Application for App {
             library_entries: Vec::new(),
             library_search: String::new(),
             library_menu: false,
+            update: UpdateStatus::NotChecked,
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -1033,6 +1048,9 @@ impl Application for App {
 
         tasks.push(app.reload_library());
         tasks.push(app.sync_all_jellyfin());
+        if app.settings.check_for_updates {
+            tasks.push(app.check_for_updates());
+        }
         if let Some(path) = flags {
             tasks.push(app.open_linked(path));
         }
@@ -1832,8 +1850,76 @@ impl App {
             library_section.into(),
             add_folder_row.into(),
             self.build_jellyfin_section(),
+            self.build_about_section(),
         ])
         .into()
+    }
+
+    fn check_for_updates(&mut self) -> Task<Message> {
+        self.update = UpdateStatus::Checking;
+        cosmic::task::future(async { Message::UpdateChecked(crate::updates::check().await) })
+    }
+
+    /// Settings → About: version and build, who made it, and updates.
+    fn build_about_section(&self) -> Element<'_, Message> {
+        use crate::updates::{self, Install};
+        let install = Install::detect();
+        let version = match updates::build_commit() {
+            Some(commit) => format!("Version {} (build {commit})", updates::VERSION),
+            None => format!("Version {}", updates::VERSION),
+        };
+
+        let mut section = widget::settings::section()
+            .title("About")
+            .add(
+                widget::column::with_capacity(3)
+                    .spacing(2)
+                    .push(widget::text::title4("Nebula Reader"))
+                    .push(widget::text::body(version))
+                    .push(widget::text::caption(format!("Made by Tim Singel  ·  {}", install.label()))),
+            )
+            .add(
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .push(widget::button::standard("GitHub").on_press(Message::OpenUrl(updates::REPO_URL.into())))
+                    .push(
+                        widget::button::standard("Release notes")
+                            .on_press(Message::OpenUrl(updates::RELEASES_URL.into())),
+                    ),
+            );
+
+        let status: Element<'_, Message> = match &self.update {
+            UpdateStatus::NotChecked => widget::text::body("Not checked yet").into(),
+            UpdateStatus::Checking => widget::text::body("Checking…").into(),
+            UpdateStatus::UpToDate => widget::text::body("You have the latest version").into(),
+            UpdateStatus::Failed(e) => widget::text::body(format!("Couldn't check: {e}")).into(),
+            UpdateStatus::Available(release) => widget::column::with_capacity(3)
+                .spacing(6)
+                .push(widget::text::heading(format!("Version {} is available", release.version)))
+                .push(widget::text::caption(install.how_to_update()))
+                .push(
+                    widget::button::suggested("Open release page")
+                        .on_press(Message::OpenUrl(release.url.clone())),
+                )
+                .into(),
+        };
+        section = section
+            .add(
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(widget::container(status).width(Length::Fill))
+                    .push(
+                        widget::button::standard("Check now").on_press_maybe(
+                            (!matches!(self.update, UpdateStatus::Checking)).then_some(Message::CheckForUpdates),
+                        ),
+                    ),
+            )
+            .add(widget::settings::item(
+                "Check for updates on start",
+                widget::toggler(self.settings.check_for_updates).on_toggle(Message::SetCheckForUpdates),
+            ));
+        section.into()
     }
 
     fn build_info_panel(&self) -> Element<'_, Message> {
@@ -2529,6 +2615,21 @@ impl App {
                     self.settings.save();
                     return cosmic::command::set_theme(look::theme(self.look(), self.settings.corners));
                 }
+            }
+            Message::SetCheckForUpdates(enabled) => {
+                self.settings.check_for_updates = enabled;
+                self.settings.save();
+            }
+            Message::CheckForUpdates => return self.check_for_updates(),
+            Message::UpdateChecked(result) => {
+                self.update = match result {
+                    Ok(Some(release)) => UpdateStatus::Available(release),
+                    Ok(None) => UpdateStatus::UpToDate,
+                    Err(e) => {
+                        log::warn!("update check: {e}");
+                        UpdateStatus::Failed(e)
+                    }
+                };
             }
             Message::SetFetchMetadata(enabled) => {
                 self.settings.fetch_metadata = enabled;
