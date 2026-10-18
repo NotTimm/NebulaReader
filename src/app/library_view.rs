@@ -175,7 +175,11 @@ impl App {
         let meta_left = self.meta_left();
         if self.scans_pending > 0 || meta_left > 0 {
             let mut status = widget::Row::new().spacing(8).align_y(Alignment::Center);
+            // libcosmic's own progress rings, kept small to sit with the
+            // caption: spinning for scans (no total known), filling for
+            // lookups.
             if self.scans_pending > 0 {
+                status = status.push(widget::indeterminate_circular().size(14.0).bar_height(2.0));
                 status = status.push(widget::text::caption(format!(
                     "Scanning library… ({} left)",
                     self.scans_pending
@@ -184,6 +188,9 @@ impl App {
             if meta_left > 0 {
                 let total = self.meta_done + meta_left;
                 let percent = self.meta_done * 100 / total;
+                status = status.push(
+                    widget::determinate_circular(self.meta_done as f32 / total as f32).size(14.0).bar_height(2.0),
+                );
                 status = status.push(widget::text::caption(format!(
                     "Looking up metadata… {percent}% ({meta_left} of {total} left)"
                 )));
