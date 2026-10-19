@@ -54,11 +54,14 @@ regex = "1"
 # 8. Adds image::Viewer::whole_page(bool): a page turned to with it set (a
 #    two-page spread) is zoomed out to fit, and the zoom before it returns
 #    on the next page.
+# 9. With client_decorations(false) (system title bar: Windows, macOS,
+#    KDE) the content keeps square corners and no outline of its own,
+#    instead of rounding inside the system's frame.
 # Kept in sync with upstream by merging (never rebasing): run
 # tools/libcosmic-drift.sh and see "The libcosmic fork" in docs/DEVELOPING.md.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "593f79275d6cbdbe55c9c8756a4c5f3ad78029da"
+rev = "b79494840b1a41c65ce07edcc65406f4f2b2abc2"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -66,12 +69,12 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "593f79275d6cbdbe55c9c8756a4c5f3ad78029da", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "b79494840b1a41c65ce07edcc65406f4f2b2abc2", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "593f79275d6cbdbe55c9c8756a4c5f3ad78029da", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "b79494840b1a41c65ce07edcc65406f4f2b2abc2", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).
