@@ -69,6 +69,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.6" date="2026-10-19" type="stable">
+      <description>
+        <ul>
+          <li>Windows, macOS and KDE: the window has square corners and no extra outline inside the system's title bar and frame</li>
+          <li>Clicking beside the Settings or Details panel closes it, without opening what's under the click</li>
+          <li>The library tells you when a new version is out (close the banner to hide it for that version) and confirms when an update went through</li>
+          <li>The chapter list shows the whole series, grouped by volume, with a dropdown to jump between volumes</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-10-18" type="stable">
       <description>
         <ul>

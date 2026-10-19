@@ -101,9 +101,11 @@ decides whether and how to submit. Research and debugging help is fine.
 Keep this short and current; it is the handoff between sessions (cloud or
 the owner's laptop). Last updated 2026-10-19.
 
-- Released: 0.1.5 (2026-10-18), all formats including the Apple Silicon
+- Released: 0.1.6 (2026-10-19): square corners under a system title bar,
+  click beside a drawer closes it, update banners, volume-grouped chapter
+  list. 0.1.5 (2026-10-18) had all formats including the Apple Silicon
   .dmg. Releases 0.1.1–0.1.5 all went out on 2026-10-17/18.
-- Unreleased on master: the chapter list (`src/app/chapter_list.rs`, C key)
+- In 0.1.6, details: the chapter list (`src/app/chapter_list.rs`, C key)
   shows the whole series grouped by volume (`naming::volume_of`; blocks of
   25 when fewer than 75% of chapters have a volume) with a jump dropdown.
   Tested by unit tests only, not yet seen in the running app. The library
