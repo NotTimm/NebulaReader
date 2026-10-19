@@ -129,6 +129,28 @@ when the version has a `-suffix`) with every package attached. Re-running it upd
 same release. `.github/workflows/ci.yml` runs `cargo test --release` on
 pushes to `master` and on pull requests.
 
+### Signing and in-app updates
+
+Every published file has a minisign signature next to it
+(`<name>.minisig`, trusted comment `file:<name>`), made by the `sign` job
+in `release.yml` from two repository secrets: `MINISIGN_KEY` (the whole
+encrypted secret key file) and `MINISIGN_PASSWORD`. The job checks every
+signature against `PUBLIC_KEY` in `src/updater.rs` (key ID
+`AFE5BA3AD81D4B31`), and a publish fails without the secrets.
+
+The Windows installer, the Windows zip and the Mac app update themselves
+(`src/updater.rs`): they download their package for the newest release
+(the setup `.exe`, the `.zip`, or `NebulaReader-<version>-macos-arm64.app.tar.gz`,
+which `build-macos.sh` packs), refuse it unless its signature checks out,
+and replace themselves when the user restarts. The Windows job tests the
+installer the way the updater runs it, over a running older install.
+
+The secret key's only copies are the owner's (backed up) and the secret.
+If it's ever lost or leaked: make a new pair, ship a release signed with
+the old key whose `PUBLIC_KEY` is the new one, then switch the secrets.
+Without the old key, installed copies can't verify updates and have to be
+updated by hand once.
+
 ## The libcosmic fork
 
 `Cargo.toml` points at `github.com/NotTimm/libcosmic`, a small fork of

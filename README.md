@@ -177,7 +177,14 @@ also how apps reach the COSMIC Store).
 - Use `dnf`/`apt` as above rather than `rpm -i`/`dpkg -i`, so the
   libraries it needs (`libarchive`, `libxkbcommon`, `openssl`, ...) come
   along. The `.rpm` and `.deb` also replace an old `cosmic-comic` package.
-- To upgrade, install the newer package the same way. To remove,
+- **Updates:** Nebula tells you when a new version is out. On Windows
+  (installer or zip) and on the Mac, **Update now** downloads it, checks
+  it's signed by the Nebula release key, and restarts into the new
+  version. On the Mac that needs the app in Applications, not opened from
+  the disk image. Every release file also has a `.minisig` signature you
+  can check yourself with
+  `minisign -Vm <file> -P RWQxSx3YOrrlrxqPlxFEY6QXstC2sjcXdOCKJNHI1xtIKT1o8nN41ZIV`.
+- To upgrade a Linux package, install the newer one the same way. To remove,
   `sudo dnf remove nebula-reader` or `sudo apt remove nebula-reader`. Your
   library and settings are kept either way.
 - Windows SmartScreen may warn about an unrecognised app because the
