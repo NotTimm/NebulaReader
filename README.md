@@ -240,7 +240,8 @@ How it works:
 - CBZ chapters aren't downloaded whole: Nebula reads the archive's index
   with a few HTTP range requests, then fetches pages as you read, a few
   ahead. CBR/RAR chapters and EPUBs are downloaded to the cache first,
-  since RAR has no index to seek in.
+  since RAR has no index to seek in: only the chapter you're reading, then
+  the next one as you near its end. The cache trims itself to 2 GB.
 - Progress uses the same fields as Jellyfin's web reader (the page in
   `PlaybackPositionTicks`, `Played` when a chapter is finished), so it
   carries over between machines and the Jellyfin web app. Marking chapters
