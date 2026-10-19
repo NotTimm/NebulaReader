@@ -165,6 +165,10 @@ pub struct Settings {
     pub check_for_updates: bool,
     /// Show the time and battery in a corner while reading in full screen.
     pub fullscreen_status: bool,
+    /// The version that last ran, to say "updated" once after an update.
+    pub last_version: Option<String>,
+    /// A newer release whose banner was closed; a later one shows again.
+    pub dismissed_update: Option<String>,
 }
 
 impl Default for Settings {
@@ -182,6 +186,8 @@ impl Default for Settings {
             library_source: LibrarySource::All,
             check_for_updates: true,
             fullscreen_status: true,
+            last_version: None,
+            dismissed_update: None,
         }
     }
 }
@@ -196,6 +202,11 @@ impl Settings {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default()
+    }
+
+    /// Whether a settings file was saved before, i.e. not a fresh install.
+    pub fn exists() -> bool {
+        config_path().exists()
     }
 
     pub fn save(&self) {

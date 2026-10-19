@@ -166,6 +166,9 @@ impl App {
     pub(super) fn view_library(&self) -> Element<'_, Message> {
         let mut col = widget::Column::new().spacing(20).padding([16, 20]);
 
+        for banner in self.version_banners() {
+            col = col.push(banner);
+        }
         if let Some(err) = self.error.as_deref() {
             col = col.push(error_banner(err));
         }

@@ -103,7 +103,10 @@ the owner's laptop). Last updated 2026-10-19.
 - Unreleased on master: the chapter list (`src/app/chapter_list.rs`, C key)
   shows the whole series grouped by volume (`naming::volume_of`; blocks of
   25 when fewer than 75% of chapters have a volume) with a jump dropdown.
-  Tested by unit tests only, not yet seen in the running app.
+  Tested by unit tests only, not yet seen in the running app. The library
+  shows a closable "Nebula X is available" banner (closing remembers that
+  version in `dismissed_update`) and, on the first start of a new version,
+  an "updated to X" banner (`last_version`; not on a fresh install).
 - Not verified in the GUI: Jellyfin downloads/offline reading (0.1.5) are
   unit-tested only. Unfetched remote chapter covers show a placeholder.
 - winget: microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.1) has

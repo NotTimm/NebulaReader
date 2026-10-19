@@ -169,6 +169,8 @@ pub enum Message {
     SetCheckForUpdates(bool),
     CheckForUpdates,
     UpdateChecked(Result<Option<crate::updates::Release>, String>),
+    DismissUpdateBanner,
+    DismissUpdatedBanner,
     // Keys / pointer / touch
     Key(Key),
     ModifiersChanged(keyboard::Modifiers),
@@ -269,6 +271,9 @@ pub struct App {
     library_menu: bool,
     /// The latest update check, shown in Settings → About.
     update: UpdateStatus,
+    /// The first start of a new version: the library says it updated
+    /// until the banner is closed.
+    just_updated: bool,
     /// The All / Local / Jellyfin switch above the library.
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
@@ -1139,7 +1144,16 @@ impl Application for App {
                 log::info!("forgot {removed} opened files that were deleted");
             }
         }
-        let settings = Settings::load();
+        let mut settings = Settings::load();
+        // Settings saved by an older version (before `last_version`
+        // existed, too) mean this is the first start after an update; a
+        // fresh install has none.
+        let just_updated = settings.last_version.as_deref() != Some(crate::updates::VERSION)
+            && (settings.last_version.is_some() || Settings::exists());
+        if settings.last_version.as_deref() != Some(crate::updates::VERSION) {
+            settings.last_version = Some(crate::updates::VERSION.into());
+            settings.save();
+        }
         let library_dirs: Vec<PathBuf> = db
             .as_ref()
             .map(|db| library::list_library_dirs(db).into_iter().map(PathBuf::from).collect())
@@ -1198,6 +1212,7 @@ impl Application for App {
             library_search: String::new(),
             library_menu: false,
             update: UpdateStatus::NotChecked,
+            just_updated,
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -2266,6 +2281,55 @@ fn first_path_from_uri_list(data: &[u8]) -> Option<PathBuf> {
         .and_then(|url| url.to_file_path().ok())
 }
 
+impl App {
+    /// The library's "new version available" and "updated" banners.
+    pub(super) fn version_banners(&self) -> Vec<Element<'_, Message>> {
+        use crate::updates;
+        let mut banners = Vec::new();
+        if let UpdateStatus::Available(release) = &self.update {
+            if self.settings.dismissed_update.as_deref() != Some(release.version.as_str()) {
+                banners.push(notice_banner(
+                    "software-update-available-symbolic",
+                    format!("Nebula {} is available. {}", release.version, updates::Install::detect().how_to_update()),
+                    widget::button::standard("Release page").on_press(Message::OpenUrl(release.url.clone())),
+                    Message::DismissUpdateBanner,
+                ));
+            }
+        }
+        if self.just_updated {
+            banners.push(notice_banner(
+                "emblem-ok-symbolic",
+                format!("Nebula updated to {}.", updates::VERSION),
+                widget::button::standard("What's new")
+                    .on_press(Message::OpenUrl(format!("{}/tag/v{}", updates::RELEASES_URL, updates::VERSION))),
+                Message::DismissUpdatedBanner,
+            ));
+        }
+        banners
+    }
+}
+
+fn notice_banner<'a>(
+    icon_name: &'static str,
+    msg: String,
+    action: impl Into<Element<'a, Message>>,
+    on_close: Message,
+) -> Element<'a, Message> {
+    widget::container(
+        widget::Row::new()
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .push(icon::from_name(icon_name).size(20))
+            .push(widget::text::body(msg).width(Length::Fill))
+            .push(action)
+            .push(widget::button::icon(icon::from_name("window-close-symbolic")).on_press(on_close)),
+    )
+    .padding([8, 12])
+    .width(Length::Fill)
+    .class(cosmic::theme::Container::Card)
+    .into()
+}
+
 pub(super) fn error_banner(msg: &str) -> Element<'_, Message> {
     widget::container(
         widget::Row::new()
@@ -2920,6 +2984,13 @@ impl App {
                     }
                 };
             }
+            Message::DismissUpdateBanner => {
+                if let UpdateStatus::Available(release) = &self.update {
+                    self.settings.dismissed_update = Some(release.version.clone());
+                    self.settings.save();
+                }
+            }
+            Message::DismissUpdatedBanner => self.just_updated = false,
             Message::SetFetchMetadata(enabled) => {
                 self.settings.fetch_metadata = enabled;
                 self.settings.save();
