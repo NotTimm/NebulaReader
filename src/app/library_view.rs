@@ -24,7 +24,7 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn progress_bar<'a>(fraction: f32) -> Element<'a, Message> {
+pub(super) fn progress_bar<'a>(fraction: f32) -> Element<'a, Message> {
     cosmic::iced::widget::ProgressBar::new(0.0..=1.0, fraction).girth(4.0).into()
 }
 

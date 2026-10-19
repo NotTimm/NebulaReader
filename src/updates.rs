@@ -2,10 +2,10 @@
 //! newer release.
 //!
 //! The check is one unauthenticated request to GitHub's releases API. The
-//! app never updates itself: how to get the new version depends on how it
-//! was installed (Flathub, a .flatpak file, rpm/deb, AppImage, winget or the
-//! Windows installer, the Mac .dmg, or built from source), so the About
-//! section says what to do for that install.
+//! Windows installer, the Windows zip and the Mac app can update themselves
+//! (`crate::updater`); every other install updates through its own channel
+//! (Flathub, a .flatpak file, rpm/deb, AppImage, or built from source), so
+//! the About section says what to do for that install.
 
 use std::sync::OnceLock;
 
@@ -46,7 +46,13 @@ impl Install {
         }
         let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
         if cfg!(windows) {
-            return if exe.to_ascii_lowercase().contains("\\appdata\\local\\programs\\") {
+            // Inno Setup leaves its uninstaller next to the exe, for
+            // per-user and all-users installs alike.
+            let installed = std::env::current_exe()
+                .ok()
+                .and_then(|p| Some(p.parent()?.join("unins000.exe").exists()))
+                .unwrap_or(false);
+            return if installed || exe.to_ascii_lowercase().contains("\\appdata\\local\\programs\\") {
                 Install::WindowsInstaller
             } else {
                 Install::WindowsPortable
@@ -111,12 +117,24 @@ impl Install {
 pub struct Release {
     pub version: String,
     pub url: String,
+    /// The files attached to the release.
+    pub assets: Vec<Asset>,
+}
+
+/// A file attached to a release.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+pub struct Asset {
+    pub name: String,
+    #[serde(rename = "browser_download_url")]
+    pub url: String,
 }
 
 #[derive(serde::Deserialize)]
 struct GhRelease {
     tag_name: String,
     html_url: String,
+    #[serde(default)]
+    assets: Vec<Asset>,
 }
 
 fn client() -> &'static reqwest::Client {
@@ -144,7 +162,7 @@ pub async fn check() -> Result<Option<Release>, String> {
     }
     let release: GhRelease = resp.json().await.map_err(|e| e.to_string())?;
     let version = release.tag_name.trim_start_matches('v').to_string();
-    Ok(is_newer(&version, VERSION).then_some(Release { version, url: release.html_url }))
+    Ok(is_newer(&version, VERSION).then_some(Release { version, url: release.html_url, assets: release.assets }))
 }
 
 /// Whether `candidate` is a later version than `current` (semver-style:

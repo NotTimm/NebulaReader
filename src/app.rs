@@ -170,6 +170,9 @@ pub enum Message {
     CheckForUpdates,
     UpdateChecked(Result<Option<crate::updates::Release>, String>),
     DismissUpdateBanner,
+    UpdateNow,
+    UpdateProgress(crate::updater::Progress),
+    RestartToUpdate,
     DismissUpdatedBanner,
     // Keys / pointer / touch
     Key(Key),
@@ -274,6 +277,7 @@ pub struct App {
     /// The first start of a new version: the library says it updated
     /// until the banner is closed.
     just_updated: bool,
+    update_job: UpdateJob,
     /// The All / Local / Jellyfin switch above the library.
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
@@ -1125,6 +1129,15 @@ enum UpdateStatus {
     Failed(String),
 }
 
+/// An in-app update (`crate::updater`) the user started.
+enum UpdateJob {
+    Idle,
+    Downloading { done: u64, total: Option<u64> },
+    /// Downloaded and checked; installs when the app restarts.
+    Ready(crate::updater::Staged),
+    Failed(String),
+}
+
 // ── Application ───────────────────────────────────────────────────────────────
 
 impl Application for App {
@@ -1213,6 +1226,7 @@ impl Application for App {
             library_menu: false,
             update: UpdateStatus::NotChecked,
             just_updated,
+            update_job: UpdateJob::Idle,
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -1254,6 +1268,8 @@ impl Application for App {
         }];
 
         tasks.push(app.reload_library());
+        // Files an earlier update left behind.
+        std::thread::spawn(crate::updater::clean_up);
         tasks.push(app.sync_all_jellyfin());
         if app.settings.check_for_updates {
             tasks.push(app.check_for_updates());
@@ -2121,15 +2137,16 @@ impl App {
             UpdateStatus::Checking => widget::text::body("Checking…").into(),
             UpdateStatus::UpToDate => widget::text::body("You have the latest version").into(),
             UpdateStatus::Failed(e) => widget::text::body(format!("Couldn't check: {e}")).into(),
-            UpdateStatus::Available(release) => widget::column::with_capacity(3)
-                .spacing(6)
-                .push(widget::text::heading(format!("Version {} is available", release.version)))
-                .push(widget::text::caption(install.how_to_update()))
-                .push(
-                    widget::button::suggested("Open release page")
-                        .on_press(Message::OpenUrl(release.url.clone())),
-                )
-                .into(),
+            UpdateStatus::Available(release) => {
+                let (msg, action) = self.update_message(release);
+                widget::column::with_capacity(4)
+                    .spacing(6)
+                    .push(widget::text::heading(format!("Version {} is available", release.version)))
+                    .push_maybe((!matches!(self.update_job, UpdateJob::Idle)).then(|| widget::text::body(msg)))
+                    .push(action)
+                    .push(widget::text::caption(install.how_to_update()))
+                    .into()
+            }
         };
         section = section
             .add(
@@ -2287,12 +2304,15 @@ impl App {
         use crate::updates;
         let mut banners = Vec::new();
         if let UpdateStatus::Available(release) = &self.update {
-            if self.settings.dismissed_update.as_deref() != Some(release.version.as_str()) {
+            // A started update stays visible until it's done.
+            let busy = !matches!(self.update_job, UpdateJob::Idle);
+            if busy || self.settings.dismissed_update.as_deref() != Some(release.version.as_str()) {
+                let (msg, action) = self.update_message(release);
                 banners.push(notice_banner(
                     "software-update-available-symbolic",
-                    format!("Nebula {} is available. {}", release.version, updates::Install::detect().how_to_update()),
-                    widget::button::standard("Release page").on_press(Message::OpenUrl(release.url.clone())),
-                    Message::DismissUpdateBanner,
+                    msg,
+                    action,
+                    (!matches!(self.update_job, UpdateJob::Downloading { .. })).then_some(Message::DismissUpdateBanner),
                 ));
             }
         }
@@ -2302,10 +2322,54 @@ impl App {
                 format!("Nebula updated to {}.", updates::VERSION),
                 widget::button::standard("What's new")
                     .on_press(Message::OpenUrl(format!("{}/tag/v{}", updates::RELEASES_URL, updates::VERSION))),
-                Message::DismissUpdatedBanner,
+                Some(Message::DismissUpdatedBanner),
             ));
         }
         banners
+    }
+
+    /// What the update banner and Settings → About say about `release`, and
+    /// the button next to it: Update now where this install can update
+    /// itself, otherwise the release page.
+    fn update_message(&self, release: &crate::updates::Release) -> (String, Element<'_, Message>) {
+        let install = crate::updates::Install::detect();
+        let in_app = crate::updater::Plan::for_release(install, release).is_some();
+        let release_page = || -> Element<'_, Message> {
+            widget::button::standard("Release page").on_press(Message::OpenUrl(release.url.clone())).into()
+        };
+        match &self.update_job {
+            UpdateJob::Idle if in_app => (
+                format!("Nebula {} is available.", release.version),
+                widget::button::suggested("Update now").on_press(Message::UpdateNow).into(),
+            ),
+            UpdateJob::Idle => {
+                (format!("Nebula {} is available. {}", release.version, install.how_to_update()), release_page())
+            }
+            UpdateJob::Downloading { done, total } => {
+                let msg = match total {
+                    Some(total) if *total > 0 => format!(
+                        "Downloading Nebula {}… {}%",
+                        release.version,
+                        done * 100 / total
+                    ),
+                    _ => format!("Downloading Nebula {}… {:.1} MB", release.version, *done as f64 / 1e6),
+                };
+                let fraction = total.filter(|t| *t > 0).map_or(0.0, |t| *done as f32 / t as f32);
+                (msg, widget::container(library_view::progress_bar(fraction)).width(Length::Fixed(140.0)).into())
+            }
+            UpdateJob::Ready(_) => (
+                format!("Nebula {} is ready. Restart Nebula to finish updating.", release.version),
+                widget::button::suggested("Restart now").on_press(Message::RestartToUpdate).into(),
+            ),
+            UpdateJob::Failed(e) => (
+                format!("Couldn't update: {e}"),
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .push(widget::button::standard("Try again").on_press(Message::UpdateNow))
+                    .push(release_page())
+                    .into(),
+            ),
+        }
     }
 }
 
@@ -2313,7 +2377,7 @@ fn notice_banner<'a>(
     icon_name: &'static str,
     msg: String,
     action: impl Into<Element<'a, Message>>,
-    on_close: Message,
+    on_close: Option<Message>,
 ) -> Element<'a, Message> {
     widget::container(
         widget::Row::new()
@@ -2322,7 +2386,7 @@ fn notice_banner<'a>(
             .push(icon::from_name(icon_name).size(20))
             .push(widget::text::body(msg).width(Length::Fill))
             .push(action)
-            .push(widget::button::icon(icon::from_name("window-close-symbolic")).on_press(on_close)),
+            .push_maybe(on_close.map(|m| widget::button::icon(icon::from_name("window-close-symbolic")).on_press(m))),
     )
     .padding([8, 12])
     .width(Length::Fill)
@@ -2991,6 +3055,48 @@ impl App {
                 }
             }
             Message::DismissUpdatedBanner => self.just_updated = false,
+            Message::UpdateNow => {
+                let plan = match &self.update {
+                    UpdateStatus::Available(release) => {
+                        crate::updater::Plan::for_release(crate::updates::Install::detect(), release)
+                    }
+                    _ => None,
+                };
+                if let Some(plan) = plan {
+                    if !matches!(self.update_job, UpdateJob::Downloading { .. } | UpdateJob::Ready(_)) {
+                        self.update_job = UpdateJob::Downloading { done: 0, total: None };
+                        return cosmic::task::stream(cosmic::iced::futures::StreamExt::map(
+                            crate::updater::start(plan),
+                            Message::UpdateProgress,
+                        ))
+                            .map(cosmic::Action::App);
+                    }
+                }
+            }
+            Message::UpdateProgress(progress) => {
+                self.update_job = match progress {
+                    crate::updater::Progress::Downloading { done, total } => UpdateJob::Downloading { done, total },
+                    crate::updater::Progress::Ready(staged) => UpdateJob::Ready(staged),
+                    crate::updater::Progress::Failed(e) => UpdateJob::Failed(e),
+                };
+            }
+            Message::RestartToUpdate => {
+                if matches!(self.update_job, UpdateJob::Ready(_)) {
+                    // What quitting normally does first: save the place and
+                    // end a Jellyfin reading session.
+                    self.persist_progress();
+                    let _ = self.update(Message::Jf(JfMsg::Closing));
+                }
+                if let UpdateJob::Ready(staged) = std::mem::replace(&mut self.update_job, UpdateJob::Idle) {
+                    match crate::updater::apply(&staged) {
+                        Ok(()) => return cosmic::iced::exit(),
+                        Err(e) => {
+                            log::warn!("update: {e}");
+                            self.update_job = UpdateJob::Failed(e);
+                        }
+                    }
+                }
+            }
             Message::SetFetchMetadata(enabled) => {
                 self.settings.fetch_metadata = enabled;
                 self.settings.save();

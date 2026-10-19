@@ -15,6 +15,7 @@ mod remote_zip;
 mod scan;
 mod settings;
 mod themes;
+mod updater;
 mod updates;
 
 use cosmic::app::Settings;

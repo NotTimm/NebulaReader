@@ -31,6 +31,7 @@ reqwest = { version = "0.12", features = ["json", "blocking"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 quick-xml = "0.37"
 regex = "1"
+minisign-verify = "0.3"
 
 # Fork of pop-os/libcosmic with these patches on top of pop-os/libcosmic:
 # 1. Forwards winit's trackpad pinch gesture (WindowEvent::PinchGesture)
@@ -96,3 +97,6 @@ windows-sys = { version = "0.61", features = [
 
 [profile.release]
 lto = true
+
+[dev-dependencies]
+minisign = "0.10.0"
