@@ -34,6 +34,7 @@ mod library_view;
 mod window_icon;
 mod jellyfin_view;
 mod downloads;
+mod properties;
 mod chapter_list;
 
 use book_view::{BookMsg, BookScroll};
@@ -65,7 +66,7 @@ pub enum Layout { Single, Dual }
 
 /// Which panel the context drawer is currently showing.
 #[derive(Clone, Debug, PartialEq)]
-pub enum ContextPage { Settings, Info, Typography }
+pub enum ContextPage { Settings, Info, Typography, Properties }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
@@ -191,6 +192,10 @@ pub enum Message {
     Jf(JfMsg),
     /// Jellyfin downloads for offline reading.
     Dl(DlMsg),
+    /// A library card was right-clicked.
+    CardMenuOpened(String),
+    CardMenu(properties::CardAction),
+    PageSizeRead(String, Option<(u32, u32)>),
     // Fit page
     FitPage,
     FitPageSize(cosmic::iced::Size),
@@ -247,6 +252,9 @@ pub struct App {
     start_chapter: Option<usize>,
     /// Whether "back" from the reader returns to a series page.
     back_to_series: bool,
+    /// The library card whose right-click menu is open.
+    menu_target: Option<String>,
+    properties: Option<properties::Props>,
     // epub
     epub_book: Option<epub::EpubBook>,
     epub_chapter: usize,
@@ -1208,6 +1216,8 @@ impl Application for App {
             reader_issues: Vec::new(),
             start_chapter: None,
             back_to_series: false,
+            menu_target: None,
+            properties: None,
             epub_book: None,
             epub_chapter: 0,
             epub_cover: None,
@@ -1326,6 +1336,11 @@ impl Application for App {
                 Message::CloseContext,
             )
             .title("Reading"),
+            ContextPage::Properties => cosmic::app::context_drawer::context_drawer(
+                self.build_properties_panel(),
+                Message::CloseContext,
+            )
+            .title("Properties"),
         })
     }
 
@@ -2448,6 +2463,9 @@ impl App {
                 return Task::batch([windowed, self.refresh_views()]);
             }
             Message::OpenSeriesPage(key) => {
+                if self.context_page == ContextPage::Properties {
+                    self.set_show_context(false);
+                }
                 return self.open_series_page(key);
             }
             Message::OpenFile => {
@@ -2804,17 +2822,13 @@ impl App {
                 return Task::batch([self.refresh_views(), self.jellyfin_mark(remote, completed)]);
             }
             Message::MarkSeriesRead(completed) => {
-                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
-                    let _ = library::set_series_completed(db, &key, completed);
+                if let Some(key) = self.series_page.as_ref().map(|s| s.path.clone()) {
+                    return self.mark_series(&key, completed);
                 }
-                let remote: Vec<String> = self
-                    .series_page_issues
-                    .iter()
-                    .filter(|i| crate::jellyfin::is_key(&i.path))
-                    .map(|i| i.path.clone())
-                    .collect();
-                return Task::batch([self.refresh_views(), self.jellyfin_mark(remote, completed)]);
             }
+            Message::CardMenuOpened(key) => self.menu_target = Some(key),
+            Message::CardMenu(action) => return self.card_action(action),
+            Message::PageSizeRead(key, size) => self.page_size_read(key, size),
             Message::ChapterCoverReady { chapter_idx, result } => {
                 self.covers_pending.remove(&chapter_idx);
                 if let Ok((w, h, rgba)) = result {
