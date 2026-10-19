@@ -51,11 +51,14 @@ regex = "1"
 # 6. Header bar items are vertically centred on whole pixels, so small icons
 #    in the header stay sharp.
 # 7. In image::Viewer, holding Shift zooms the wheel in quarter-size steps.
+# 8. Adds image::Viewer::whole_page(bool): a page turned to with it set (a
+#    two-page spread) is zoomed out to fit, and the zoom before it returns
+#    on the next page.
 # Kept in sync with upstream by merging (never rebasing): run
 # tools/libcosmic-drift.sh and see "The libcosmic fork" in docs/DEVELOPING.md.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "405cd72f8b6af1941acc769a790f72fbc1769e2a"
+rev = "4fa40bc2a8f9f5df84bbb613e9825fd36c7704db"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -63,12 +66,12 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "405cd72f8b6af1941acc769a790f72fbc1769e2a", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "4fa40bc2a8f9f5df84bbb613e9825fd36c7704db", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "405cd72f8b6af1941acc769a790f72fbc1769e2a", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "4fa40bc2a8f9f5df84bbb613e9825fd36c7704db", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).

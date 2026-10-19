@@ -1691,6 +1691,9 @@ impl App {
                             // Keep the zoom across page turns but start
                             // each new page at its top.
                             .page(self.current_page as u64)
+                            // A spread is shown whole, then the zoom
+                            // comes back on the next page.
+                            .whole_page(self.is_spread(self.current_page))
                             .width(Length::Fill)
                             .height(Length::Fill)
                             .into()

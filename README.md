@@ -89,7 +89,8 @@ the way so you can read.
   header bar back.
 - Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
   on a trackpad, or a pinch, and pan by dragging. The zoom stays as you
-  turn pages, and each new page starts at its top.
+  turn pages, and each new page starts at its top; a two-page spread
+  shows whole, and your zoom comes back on the page after it.
 - Fast CBR: archives are unpacked in one pass and cached, so page turns
   stay instant.
 - An info panel with the issue's `ComicInfo.xml` and what was matched
