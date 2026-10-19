@@ -46,6 +46,10 @@ the way so you can read.
   AniList and ComicVine.
 - Read, unread or "page 12 of 30" for every issue, a Continue Reading
   shelf, and search across the library.
+- Every series and one-shot has its own page with the cover, description
+  and details; Continue Reading jumps straight back in. Right-click a
+  cover to read, download, mark it read, show it in its folder or see its
+  **Properties** (format, location, pages, page size, size on disk).
 - Drag a file or folder onto the window to open it.
 - Libraries on a USB drive are kept while the drive is unplugged and come
   back when it's plugged in again.
@@ -248,13 +252,21 @@ How it works:
   account in settings. The server's progress wins only when it's newer
   than this machine's.
 - **Downloads:** a series page has **Download All**, each chapter a
-  download button, and the reader's header bar downloads what's open
-  (handy for books and one-shots). Downloads stay part of the Jellyfin
+  download button, a one-shot's page a **Download** button, and the
+  reader's header bar downloads what's open. Downloads stay part of the Jellyfin
   library, marked with a badge, rather than becoming local files. When the
   server can't be reached, its libraries show only what's downloaded,
   Nebula retries every minute, and progress made meanwhile is sent once
-  it's back (unless the server has something newer). Manage them in
-  **Settings → Jellyfin**.
+  it's back (unless the server has something newer).
+- The **Downloads** page (the download button at the top of the library,
+  or **Settings → Jellyfin → Manage Downloads**) lists everything by
+  series with its size, the total and the free space, and removes single
+  chapters, series or everything. **Change Folder…** puts downloads
+  somewhere else, such as a USB drive or SD card, and moves the existing
+  ones there. Each file is written to the drive in full before it counts,
+  so unplugging mid-download only loses that one file; downloads on a
+  drive that isn't plugged in are kept and show as not connected. Eject
+  the drive in your file manager before unplugging it.
 
 No server handy? `tools/mock-jellyfin.py` serves a folder as a fake
 Jellyfin books library (Quick Connect approves itself on the second poll;
@@ -281,7 +293,7 @@ Linux:
 | `~/.local/share/nebula-reader/library.db` | Library, reading progress, metadata |
 | `~/.config/nebula-reader/settings.json` | Preferences |
 | `~/.config/nebula-reader/themes/` | Your imported themes |
-| `~/.local/share/nebula-reader/jellyfin-downloads/` | Jellyfin chapters and books downloaded for offline reading |
+| `~/.local/share/nebula-reader/jellyfin-downloads/` | Jellyfin chapters and books downloaded for offline reading (or a `Nebula Reader` folder in the download folder you picked) |
 | `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
 | `~/.cache/nebula-reader/` | Cover thumbnails, extracted archives; safe to delete |
 

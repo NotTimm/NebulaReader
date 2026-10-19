@@ -67,6 +67,12 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   chapters are filtered to downloads, retried every 60 s. Saves that can't
   reach the server go to `pending_progress` and are sent at the next sync
   unless the server's `LastPlayedDate` is newer.
+  The folder can be changed (`settings.download_dir`; files go in its
+  `Nebula Reader` subfolder) and may be removable: never create the chosen
+  folder itself, write `.part` + sync + rename (`platform/disk.rs`), keep
+  rows whose files are on a disconnected drive (`DlState::Unavailable`),
+  and never prune or remove those until the drive is back. The Downloads
+  page is `AppView::Downloads` (`view_downloads`).
 
 ## Flathub: hands off
 
@@ -117,6 +123,12 @@ the owner's laptop). Last updated 2026-10-19.
   shutdown message, so silent installs over a running copy cancelled.
 - Not verified in the GUI: Jellyfin downloads/offline reading (0.1.5) are
   unit-tested only. Unfetched remote chapter covers show a placeholder.
+- Unreleased on master (owner testing, don't release): library cards open
+  the series/details page (one-shots get a page without the chapter list,
+  with a Download button); Continue Reading opens the reader. Downloads
+  page with a choosable folder (USB-safe, see Jellyfin downloads above).
+  Right-click menu on library cards and a Properties drawer
+  (`src/app/properties.rs`, `ContextPage::Properties`).
 - winget: microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.1) has
   passed validation and waits for a moderator. Decision: keep it at 0.1.1
   (changing it re-runs validation). Once merged, re-run the release
