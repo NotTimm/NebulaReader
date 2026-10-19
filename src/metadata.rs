@@ -347,7 +347,7 @@ pub async fn match_series(q: SeriesQuery) -> Result<Option<SeriesMatch>, String>
                                 .filter_map(|i| {
                                     Some(IssueMeta {
                                         number: normalize_number(i.issue_number.as_deref()?),
-                                        title: i.name.unwrap_or_default(),
+                                        title: i.name.filter(|n| !crate::library::is_placeholder_title(n)).unwrap_or_default(),
                                         cover_date: i.cover_date.unwrap_or_default(),
                                         url: i.site_detail_url.unwrap_or_default(),
                                     })

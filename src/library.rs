@@ -155,9 +155,9 @@ impl IssueEntry {
     }
 
     pub fn heading(&self) -> String {
-        if !self.title.is_empty() {
+        if !self.title.is_empty() && !is_placeholder_title(&self.title) {
             self.title.clone()
-        } else if !self.subtitle.is_empty() {
+        } else if !self.subtitle.is_empty() && !is_placeholder_title(&self.subtitle) {
             self.subtitle.clone()
         } else {
             String::new()
@@ -1282,6 +1282,13 @@ mod credit_tests {
     }
 }
 
+/// A stand-in some databases use for an issue with no story title, like
+/// ComicVine's "[untitled]": better shown as no title at all.
+pub fn is_placeholder_title(title: &str) -> bool {
+    let t = title.trim().trim_matches(|c| matches!(c, '[' | ']' | '(' | ')')).trim().to_ascii_lowercase();
+    matches!(t.as_str(), "untitled" | "no title" | "none" | "n/a" | "tba" | "tbd" | "" )
+}
+
 /// Points the library at a file that was converted (a CBR repacked as a
 /// CBZ): the issue, the series' "last read" and, when the series is that
 /// one file, the series itself and its cover cache. Progress stays.
@@ -1322,6 +1329,16 @@ mod download_tests {
         init_schema(&conn).unwrap();
         run_migrations(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn placeholder_titles() {
+        for t in ["[untitled]", "Untitled", "(No Title)", "[ ]", "TBA"] {
+            assert!(is_placeholder_title(t), "{t}");
+        }
+        for t in ["Whose Side Are You On?", "Untitled Love Story", "None More Black"] {
+            assert!(!is_placeholder_title(t), "{t}");
+        }
     }
 
     #[test]
