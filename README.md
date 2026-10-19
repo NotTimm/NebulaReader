@@ -107,7 +107,8 @@ an **All / Local / Jellyfin** switch at the top. Comic pages stream as you
 read instead of downloading whole chapters, and progress syncs both ways
 with Jellyfin's own web reader. The title bar shows which server a comic
 comes from and whether it's online, and what you're reading shows on the
-server's dashboard. [How it works](#jellyfin)
+server's dashboard. **Download** whole series or single chapters to read
+when the server can't be reached. [How it works](#jellyfin)
 
 ### 🎨 At home on your desktop
 
@@ -235,6 +236,14 @@ How it works:
 - Libraries re-sync on startup and from the refresh button next to the
   account in settings. The server's progress wins only when it's newer
   than this machine's.
+- **Downloads:** a series page has **Download All**, each chapter a
+  download button, and the reader's header bar downloads what's open
+  (handy for books and one-shots). Downloads stay part of the Jellyfin
+  library, marked with a badge, rather than becoming local files. When the
+  server can't be reached, its libraries show only what's downloaded,
+  Nebula retries every minute, and progress made meanwhile is sent once
+  it's back (unless the server has something newer). Manage them in
+  **Settings → Jellyfin**.
 
 No server handy? `tools/mock-jellyfin.py` serves a folder as a fake
 Jellyfin books library (Quick Connect approves itself on the second poll;
@@ -261,6 +270,7 @@ Linux:
 | `~/.local/share/nebula-reader/library.db` | Library, reading progress, metadata |
 | `~/.config/nebula-reader/settings.json` | Preferences |
 | `~/.config/nebula-reader/themes/` | Your imported themes |
+| `~/.local/share/nebula-reader/jellyfin-downloads/` | Jellyfin chapters and books downloaded for offline reading |
 | `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
 | `~/.cache/nebula-reader/` | Cover thumbnails, extracted archives; safe to delete |
 

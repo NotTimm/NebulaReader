@@ -52,6 +52,14 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   (`UserDataManager.UpdatePlayState`). Progress goes through
   `save_progress` only. `jellyfin-reading.json` in the config dir marks an
   item left open; the next start ends that session and re-saves progress.
+- Jellyfin downloads (`src/app/downloads.rs`): files in
+  `data_dir()/jellyfin-downloads/<account>/<itemId>.<ext>` (books must keep
+  the item id as the file stem), rows in the `downloads` table, issues keep
+  their `jellyfin://` keys. `load_issues` prefers the downloaded file. A
+  server whose sync fails to connect goes in `jf.offline`: its series and
+  chapters are filtered to downloads, retried every 60 s. Saves that can't
+  reach the server go to `pending_progress` and are sent at the next sync
+  unless the server's `LastPlayedDate` is newer.
 
 ## Flathub: hands off
 

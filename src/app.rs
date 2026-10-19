@@ -33,9 +33,11 @@ mod paged;
 mod library_view;
 mod window_icon;
 mod jellyfin_view;
+mod downloads;
 
 use book_view::{BookMsg, BookScroll};
 use jellyfin_view::{JfMsg, JfState, RemoteReading};
+use downloads::{DlMsg, Downloads};
 
 /// Dropdown labels for [`BgStyle::ALL`], kept in the same order.
 const BG_LABELS: [&str; 2] = ["Theme", "Black"];
@@ -179,6 +181,8 @@ pub enum Message {
     // Books
     Book(BookMsg),
     Jf(JfMsg),
+    /// Jellyfin downloads for offline reading.
+    Dl(DlMsg),
     // Fit page
     FitPage,
     FitPageSize(cosmic::iced::Size),
@@ -290,6 +294,7 @@ pub struct App {
     /// Signed-in Jellyfin accounts (tokens only).
     jellyfin: crate::jellyfin::Accounts,
     jf: JfState,
+    dl: Downloads,
     /// The Jellyfin series being read, if any.
     remote: Option<RemoteReading>,
     context_page: ContextPage,
@@ -908,6 +913,23 @@ impl App {
         self.open_entry(key, None)
     }
 
+    /// A series' chapters for its page: all of them, or only the downloaded
+    /// ones while its Jellyfin server can't be reached.
+    fn series_issues(&self, key: &str) -> Vec<IssueEntry> {
+        let Some(db) = &self.db else { return Vec::new() };
+        let mut issues = library::issues_for(db, key);
+        if self.jellyfin_offline(key) {
+            issues.retain(|i| self.dl.file(&i.path).is_some());
+        }
+        issues
+    }
+
+    /// Whether a library key belongs to a Jellyfin server that couldn't be
+    /// reached at the last sync.
+    fn jellyfin_offline(&self, key: &str) -> bool {
+        crate::jellyfin::parse_key(key).is_some_and(|(account, _)| self.jf.offline.contains(account))
+    }
+
     fn open_series_page(&mut self, key: String) -> Task<Message> {
         let Some(db) = &self.db else { return Task::none() };
         let Some(entry) = library::get_series(db, &key) else { return Task::none() };
@@ -916,7 +938,7 @@ impl App {
             self.series_covers_pending.clear();
             self.series_search_input = entry.search_override.clone();
         }
-        self.series_page_issues = library::issues_for(db, &key);
+        self.series_page_issues = self.series_issues(&key);
         self.set_header_title(entry.name().to_string());
         self.series_page = Some(entry);
         self.app_view = AppView::Series;
@@ -946,7 +968,7 @@ impl App {
         let mut tasks = vec![self.reload_library()];
         if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
             self.series_page = library::get_series(db, &key);
-            self.series_page_issues = library::issues_for(db, &key);
+            self.series_page_issues = self.series_issues(&key);
         }
         if let (Some(db), Some(key)) = (&self.db, self.open_path.as_ref()) {
             let key = key.to_string_lossy();
@@ -1119,6 +1141,7 @@ impl Application for App {
             .unwrap_or_default();
 
         let native_titlebar = settings.look.resolve(Desktop::detect()).native_titlebar();
+        let dl = db.as_ref().map(Downloads::load).unwrap_or_default();
         let mut app = App {
             core,
             native_titlebar,
@@ -1189,6 +1212,7 @@ impl Application for App {
             settings,
             jellyfin: crate::jellyfin::Accounts::load(),
             jf: JfState::default(),
+            dl,
             remote: None,
             context_page: ContextPage::Settings,
         };
@@ -1486,7 +1510,7 @@ impl Application for App {
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), pointer, system_colors, status])
+        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), pointer, system_colors, status])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1924,7 +1948,11 @@ impl App {
     /// everything with a persistent preference now lives in the settings
     /// drawer instead of the header bar.
     fn reader_common_controls(&self) -> Vec<Element<'_, Message>> {
-        vec![
+        // From Jellyfin: download what's open for reading offline.
+        let download = self
+            .current_jellyfin_item()
+            .map(|(issue, series)| self.download_button(&issue, &series, widget::tooltip::Position::Bottom));
+        download.into_iter().chain([
             tip(
                 widget::button::icon(icon::from_name("zoom-fit-best-symbolic")).on_press(Message::FitPage),
                 "Fit page to window",
@@ -1943,7 +1971,8 @@ impl App {
                 widget::button::icon(icon::from_name("document-open-symbolic")).on_press(Message::OpenFile),
                 "Open a file",
             ),
-        ]
+        ])
+        .collect()
     }
 
     fn build_settings_panel(&self) -> Element<'_, Message> {
@@ -3149,6 +3178,7 @@ impl App {
             }
             Message::Book(msg) => return self.update_book(msg),
             Message::Jf(msg) => return self.update_jellyfin(msg),
+            Message::Dl(msg) => return self.update_downloads(msg),
             Message::FitPage => {
                 let Some(page) = self.page_data(self.current_page) else { return Task::none() };
                 let Some(id) = self.core.main_window_id() else { return Task::none() };

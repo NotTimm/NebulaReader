@@ -173,6 +173,29 @@ impl App {
         // Shown from the first lookup to the last, including the pauses
         // between them.
         let meta_left = self.meta_left();
+        if let Some(dl) = self.download_status() {
+            col = col.push(dl);
+        }
+        // Servers that can't be reached: their libraries show downloads only.
+        let offline: Vec<String> = self
+            .jellyfin
+            .accounts
+            .iter()
+            .filter(|a| self.jf.offline.contains(&a.key()))
+            .map(|a| a.server_name.clone())
+            .collect();
+        if !offline.is_empty() {
+            col = col.push(
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(icon::from_name("network-error-symbolic").size(16))
+                    .push(widget::text::caption(format!(
+                        "{} can't be reached right now, so only your downloads from it are shown. Nebula keeps trying.",
+                        offline.join(", ")
+                    ))),
+            );
+        }
         if self.scans_pending > 0 || meta_left > 0 {
             let mut status = widget::Row::new().spacing(8).align_y(Alignment::Center);
             // libcosmic's own progress rings, kept small to sit with the
@@ -339,7 +362,9 @@ impl App {
             return false;
         }
         if is_remote(e) {
-            return self.has_account(e);
+            // While its server can't be reached, only what's downloaded.
+            let key = if crate::jellyfin::is_key(&e.path) { &e.path } else { &e.library_root };
+            return self.has_account(e) && (!self.jellyfin_offline(key) || self.dl.has_series(&e.path));
         }
         !self.missing_roots.iter().any(|r| {
             let r = r.to_string_lossy();
@@ -362,6 +387,33 @@ impl App {
             ),
         };
 
+        // Downloaded (some or all of it): a small badge on the cover.
+        let cover: Element<'_, Message> = if self.dl.has_series(&e.path) {
+            cosmic::iced::widget::stack![
+                cover,
+                widget::container(
+                    widget::container(icon::from_name("folder-download-symbolic").size(14))
+                        .padding(4)
+                        .style(|theme: &cosmic::Theme| {
+                            let mut bg: cosmic::iced::Color = theme.cosmic().bg_color().into();
+                            bg.a = 0.85;
+                            widget::container::Style {
+                                background: Some(cosmic::iced::Background::Color(bg)),
+                                text_color: Some(theme.cosmic().on_bg_color().into()),
+                                icon_color: Some(theme.cosmic().on_bg_color().into()),
+                                border: cosmic::iced::Border { radius: 10.0.into(), ..Default::default() },
+                                ..Default::default()
+                            }
+                        }),
+                )
+                .width(Length::Fixed(CARD_W))
+                .align_right(Length::Fixed(CARD_W))
+                .padding(6),
+            ]
+            .into()
+        } else {
+            cover
+        };
         let mut card = widget::Column::new()
             .spacing(4)
             .width(Length::Fixed(CARD_W))
@@ -497,6 +549,13 @@ impl App {
         if read > 0 || issues.iter().any(|i| i.in_progress()) {
             actions = actions.push(widget::button::standard("Mark All Unread").on_press(Message::MarkSeriesRead(false)));
         }
+        // Jellyfin series can be downloaded for reading offline.
+        if crate::jellyfin::is_key(&series.path) {
+            let keys: Vec<String> = issues.iter().map(|i| i.path.clone()).collect();
+            for button in self.series_download_actions(&series.path, &keys) {
+                actions = actions.push(button);
+            }
+        }
         details = details.push(actions);
 
         // Fix-the-match controls.
@@ -597,6 +656,8 @@ impl App {
             })
             .push_maybe((!meta.is_empty()).then(|| widget::text::caption(meta.join("  ·  "))));
 
+        let download = crate::jellyfin::is_key(&issue.path)
+            .then(|| self.download_button(&issue.path, &series.path, widget::tooltip::Position::Left));
         let row = widget::Row::new()
             .spacing(12)
             .align_y(Alignment::Center)
@@ -604,6 +665,7 @@ impl App {
             .push(thumb)
             .push(info)
             .push(status)
+            .push_maybe(download)
             .push(toggle);
 
         let row: Element<'_, Message> = if is_current {

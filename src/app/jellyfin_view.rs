@@ -58,7 +58,13 @@ pub enum JfMsg {
     CoverSaved,
     MoreLoaded(String, Result<(Vec<PageSource>, Vec<ChapterInfo>), String>),
     EpubDownloaded(Result<PathBuf, String>),
-    Saved(Result<(), String>),
+    /// A progress save came back; the items it carried, to keep for later
+    /// if the server couldn't be reached.
+    Saved(Result<(), String>, Vec<(String, i64, bool)>),
+    /// Progress kept while offline was sent (item key, when it was kept).
+    PendingSent(String, i64, Result<(), String>),
+    /// Try the servers that couldn't be reached again.
+    RetryOffline,
     /// Wakes the reader up to send a due save or ping.
     Timer,
     Pinged(bool),
@@ -88,14 +94,19 @@ pub struct JfState {
     user_input: String,
     password_input: String,
     pub syncing: HashSet<String>,
+    /// Accounts whose server couldn't be reached at the last sync; their
+    /// libraries show only what's downloaded until it's back.
+    pub offline: HashSet<String>,
     /// Item id -> file extension, from the latest sync.
-    extensions: HashMap<String, String>,
+    pub(super) extensions: HashMap<String, String>,
     /// Library root key -> "Manga · deepdish", for section headings.
     pub library_names: HashMap<String, String>,
     /// Account of the EPUB being downloaded, then of the one open (with its
     /// cached path), for the reader's title bar.
     book_pending: Option<Account>,
     book: Option<(PathBuf, Account)>,
+    /// The open book's (issue key, series key), for its download button.
+    book_keys: Option<(String, String)>,
     /// Progress saving and reachability of the server being read from.
     live: Live,
     /// The item shown as being read on the server's dashboard, and when we
@@ -191,6 +202,7 @@ fn load_issues(
     account: &Account,
     issues: &[(String, String)],
     extensions: &HashMap<String, String>,
+    downloaded: &HashMap<String, PathBuf>,
 ) -> Result<(Vec<PageSource>, Vec<ChapterInfo>), String> {
     let mut sources = Vec::new();
     let mut chapters = Vec::new();
@@ -199,14 +211,21 @@ fn load_issues(
         let ext = extensions.get(item_id).map(String::as_str).unwrap_or("");
         let start = sources.len();
 
-        let streamed = if matches!(ext, "" | "cbz" | "zip") {
+        // Downloaded: read the local copy, no network needed.
+        let local = downloaded.get(key).filter(|f| f.exists());
+        let streamed = if local.is_some() {
+            None
+        } else if matches!(ext, "" | "cbz" | "zip") {
             RemoteZip::open(Box::new(account.range_source(item_id)))
                 .ok()
                 .filter(|z| !z.entries.is_empty())
         } else {
             None
         };
-        if let Some(zip) = streamed {
+        if let Some(file) = local {
+            let (pages, _) = comic::collect_sources(file)?;
+            sources.extend(pages);
+        } else if let Some(zip) = streamed {
             sources.extend((0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }));
         } else {
             let local = download(account, item_id, if ext.is_empty() { "cbz" } else { ext })?;
@@ -233,10 +252,17 @@ fn download(account: &Account, item_id: &str, ext: &str) -> Result<PathBuf, Stri
     Ok(path)
 }
 
-fn load_task(account: Account, series_key: String, issues: Vec<(String, String)>, extensions: HashMap<String, String>, more: bool) -> Task<Message> {
+fn load_task(
+    account: Account,
+    series_key: String,
+    issues: Vec<(String, String)>,
+    extensions: HashMap<String, String>,
+    downloaded: HashMap<String, PathBuf>,
+    more: bool,
+) -> Task<Message> {
     cosmic::task::future(async move {
         let key = series_key.clone();
-        let result = tokio::task::spawn_blocking(move || load_issues(&account, &issues, &extensions))
+        let result = tokio::task::spawn_blocking(move || load_issues(&account, &issues, &extensions, &downloaded))
             .await
             .unwrap_or_else(|e| Err(format!("loading panicked: {e}")));
         if more {
@@ -252,8 +278,24 @@ fn load_task(account: Account, series_key: String, issues: Vec<(String, String)>
 
 fn save_task(r: Report) -> Task<Message> {
     cosmic::task::future(async move {
-        Message::Jf(JfMsg::Saved(jellyfin::save_progress(&r.account, &r.item_id, r.ticks, r.played).await))
+        let result = jellyfin::save_progress(&r.account, &r.item_id, r.ticks, r.played).await;
+        Message::Jf(JfMsg::Saved(result, vec![(r.account.item_key(&r.item_id), r.ticks, r.played)]))
     })
+}
+
+/// Sends progress kept while the server was offline.
+fn pending_task(account: Account, item_key: String, ticks: i64, played: bool, at: i64) -> Task<Message> {
+    cosmic::task::future(async move {
+        let id = jellyfin::parse_key(&item_key).map(|(_, id)| id.to_string()).unwrap_or_default();
+        let result = jellyfin::save_progress(&account, &id, ticks, played).await;
+        Message::Jf(JfMsg::PendingSent(item_key, at, result))
+    })
+}
+
+/// A failed save that means the server couldn't be reached (as opposed to
+/// the server answering with an error).
+fn unreachable(e: &str) -> bool {
+    !e.starts_with("HTTP")
 }
 
 fn session_task(report: impl std::future::Future<Output = Result<(), String>> + Send + 'static) -> Task<Message> {
@@ -303,9 +345,18 @@ impl App {
             return Task::done(cosmic::Action::App(Message::LoadFailed("This series has no chapters on the server.".into())));
         }
 
-        // EPUBs open in the book reader from a downloaded copy.
+        // EPUBs open in the book reader from a downloaded copy: the user's
+        // download if there is one, else one fetched into the cache.
         let first_id = jellyfin::parse_key(&issues[0].0).map(|(_, id)| id.to_string()).unwrap_or_default();
-        if issues.len() == 1 && self.jf.extensions.get(&first_id).is_some_and(|e| e == "epub") {
+        let saved = self.dl.file(&issues[0].0).cloned();
+        let is_epub = self.jf.extensions.get(&first_id).is_some_and(|e| e == "epub")
+            || saved.as_ref().is_some_and(|f| f.extension().is_some_and(|e| e == "epub"));
+        if issues.len() == 1 && is_epub {
+            self.jf.book_keys = Some((issues[0].0.clone(), key.clone()));
+            if let Some(path) = saved {
+                self.jf.book_pending = Some(account);
+                return Task::done(cosmic::Action::App(Message::Jf(JfMsg::EpubDownloaded(Ok(path)))));
+            }
             self.jf.book_pending = Some(account.clone());
             self.jf.live = Live::default();
             return cosmic::task::future(async move {
@@ -328,6 +379,21 @@ impl App {
                 None => 0,
             }
         });
+        // Offline, only the downloaded chapters can be read.
+        let (issues, start) = if self.jf.offline.contains(&account.key()) {
+            let want = all.get(start).map(|i| i.path.clone());
+            let kept: Vec<(String, String)> = issues.into_iter().filter(|(k, _)| self.dl.file(k).is_some()).collect();
+            if kept.is_empty() {
+                return Task::done(cosmic::Action::App(Message::LoadFailed(format!(
+                    "{} can't be reached, and nothing from this series is downloaded.",
+                    account.server_name
+                ))));
+            }
+            let start = want.and_then(|w| kept.iter().position(|(k, _)| *k == w)).unwrap_or(0);
+            (kept, start)
+        } else {
+            (issues, start)
+        };
         let start = start.min(issues.len() - 1);
         let first = start.saturating_sub(1);
         let end = (start + 1 + WINDOW_AHEAD).min(issues.len());
@@ -340,7 +406,21 @@ impl App {
             loading: false,
         });
         self.jf.live = Live::default();
-        load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), false)
+        load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), self.dl.files(), false)
+    }
+
+    /// The Jellyfin chapter or book on screen: (issue key, series key).
+    pub(super) fn current_jellyfin_item(&self) -> Option<(String, String)> {
+        if self.app_view != AppView::Reader || self.loading {
+            return None;
+        }
+        let open = self.open_path.as_ref()?;
+        if self.jf.book.as_ref().is_some_and(|(p, _)| p == open) {
+            return self.jf.book_keys.clone();
+        }
+        let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
+        let (_, ch, _) = self.current_chapter()?;
+        Some((ch.path.to_string_lossy().into_owned(), r.series_key.clone()))
     }
 
     /// The position to report for what's open, if it's from Jellyfin.
@@ -398,7 +478,7 @@ impl App {
                 r.loading = true;
                 let end = (r.next + WINDOW_AHEAD).min(r.issues.len());
                 let issues = r.issues[r.next..end].to_vec();
-                tasks.push(load_task(r.account.clone(), r.series_key.clone(), issues, self.jf.extensions.clone(), true));
+                tasks.push(load_task(r.account.clone(), r.series_key.clone(), issues, self.jf.extensions.clone(), self.dl.files(), true));
             }
         }
 
@@ -477,11 +557,18 @@ impl App {
     /// A timer while something from Jellyfin is open, so a settled page is
     /// saved and the server pinged even when nothing else happens.
     pub(super) fn jellyfin_subscription(&self) -> cosmic::iced::Subscription<Message> {
-        if self.jellyfin_source().is_some() {
+        let reading = if self.jellyfin_source().is_some() {
             cosmic::iced::time::every(Duration::from_secs(5)).map(|_| Message::Jf(JfMsg::Timer))
         } else {
             cosmic::iced::Subscription::none()
-        }
+        };
+        // An offline server is tried again every minute.
+        let retry = if self.jf.offline.is_empty() {
+            cosmic::iced::Subscription::none()
+        } else {
+            cosmic::iced::time::every(Duration::from_secs(60)).map(|_| Message::Jf(JfMsg::RetryOffline))
+        };
+        cosmic::iced::Subscription::batch([reading, retry])
     }
 
     /// Mirrors read/unread marks from the series page to Jellyfin.
@@ -489,14 +576,16 @@ impl App {
         let Some(account) = issue_keys.first().and_then(|k| self.account_for(k)) else { return Task::none() };
         cosmic::task::future(async move {
             let mut result = Ok(());
+            let mut failed = Vec::new();
             for key in issue_keys {
                 if let Some((_, id)) = jellyfin::parse_key(&key) {
                     if let Err(e) = jellyfin::save_progress(&account, id, 0, played).await {
+                        failed.push((key.clone(), 0, played));
                         result = Err(e);
                     }
                 }
             }
-            Message::Jf(JfMsg::Saved(result))
+            Message::Jf(JfMsg::Saved(result, failed))
         })
     }
 
@@ -643,12 +732,15 @@ impl App {
                 if let Some(db) = &self.db {
                     library::remove_series_under_root_prefix(db, &format!("{}{key}/", jellyfin::KEY_PREFIX));
                 }
+                // Its downloads go with it.
+                self.prune_downloads();
+                self.jf.offline.remove(&key);
                 self.jf.status = Some(format!("Signed out of {}.", account.server_name));
                 let refresh = self.refresh_views();
                 return Task::batch([
                     cosmic::task::future(async move {
                         jellyfin::sign_out(&account).await;
-                        Message::Jf(JfMsg::Saved(Ok(())))
+                        Message::Jf(JfMsg::Saved(Ok(()), Vec::new()))
                     }),
                     refresh,
                 ]);
@@ -662,13 +754,41 @@ impl App {
             JfMsg::Fetched(key, result) => {
                 self.jf.syncing.remove(&key);
                 match result {
-                    Ok(series) => return self.apply_jellyfin_library(&key, series),
+                    Ok(series) => {
+                        self.jf.offline.remove(&key);
+                        return self.apply_jellyfin_library(&key, series);
+                    }
                     Err(e) => {
                         let server = self.jellyfin.find(&key).map(|a| a.server_name.clone()).unwrap_or_default();
+                        if unreachable(&e) {
+                            // Show what's downloaded from it until it's back.
+                            self.jf.offline.insert(key);
+                            self.jf.status = Some(format!("{server} can't be reached; showing your downloads from it."));
+                            return self.refresh_views();
+                        }
                         self.jf.status = Some(format!("Couldn't load {server}: {e}"));
                     }
                 }
             }
+            JfMsg::RetryOffline => {
+                let keys: Vec<String> = self.jf.offline.iter().filter(|k| !self.jf.syncing.contains(*k)).cloned().collect();
+                let mut tasks = Vec::new();
+                for key in keys {
+                    if let Some(account) = self.jellyfin.find(&key).cloned() {
+                        self.jf.syncing.insert(key);
+                        tasks.push(fetch_task(account, None));
+                    }
+                }
+                return Task::batch(tasks);
+            }
+            JfMsg::PendingSent(item_key, at, result) => match result {
+                Ok(()) => {
+                    if let Some(db) = &self.db {
+                        library::clear_pending_progress(db, &item_key, at);
+                    }
+                }
+                Err(e) => log::warn!("jellyfin: sending progress kept offline for {item_key}: {e}"),
+            },
             JfMsg::CoverSaved => return self.reload_library(),
             JfMsg::MoreLoaded(key, result) => {
                 let Some(r) = self.remote.as_mut().filter(|r| r.series_key == key) else { return Task::none() };
@@ -702,7 +822,7 @@ impl App {
                 }
                 Err(e) => return Task::done(cosmic::Action::App(Message::LoadFailed(e))),
             },
-            JfMsg::Saved(result) => {
+            JfMsg::Saved(result, items) => {
                 let live = &mut self.jf.live;
                 live.saving = live.saving.saturating_sub(1);
                 match result {
@@ -711,11 +831,19 @@ impl App {
                         live.error = None;
                         live.online = Some(true);
                     }
+                    Err(e) if unreachable(&e) => {
+                        log::warn!("jellyfin: saving progress: {e}");
+                        live.online = Some(false);
+                        // Kept here and sent when the server is back.
+                        if let Some(db) = &self.db {
+                            for (item_key, ticks, played) in &items {
+                                library::set_pending_progress(db, item_key, *ticks, *played);
+                            }
+                        }
+                        live.error = Some("Server offline: progress is kept here and sent when it's back".into());
+                    }
                     Err(e) => {
                         log::warn!("jellyfin: saving progress: {e}");
-                        if !e.starts_with("HTTP") {
-                            live.online = Some(false);
-                        }
                         live.error = Some(format!("Couldn't save progress: {e}"));
                     }
                 }
@@ -733,8 +861,12 @@ impl App {
             JfMsg::Closing => {
                 let live = &mut self.jf.live;
                 if let Some((rep, _)) = live.pending.take() {
-                    if live.sent.as_ref() != Some(&rep.id()) {
-                        jellyfin::save_progress_now(&rep.account, &rep.item_id, rep.ticks, rep.played);
+                    if live.sent.as_ref() != Some(&rep.id())
+                        && !jellyfin::save_progress_now(&rep.account, &rep.item_id, rep.ticks, rep.played)
+                    {
+                        if let Some(db) = &self.db {
+                            library::set_pending_progress(db, &rep.account.item_key(&rep.item_id), rep.ticks, rep.played);
+                        }
                     }
                 }
                 if let Some((account, item_id, _)) = self.jf.reading.take() {
@@ -876,11 +1008,24 @@ impl App {
         }
         let roots: HashSet<&str> = by_root.keys().map(String::as_str).collect();
         library::prune_jellyfin_roots(db, &format!("{}{account_key}/", jellyfin::KEY_PREFIX), &roots);
+
+        // Progress kept while the server was offline goes up now, unless
+        // the server has something newer (read elsewhere meanwhile).
+        let server_read: HashMap<&str, i64> =
+            series.iter().flat_map(|s| s.issues.iter().map(|i| (i.key.as_str(), i.last_read))).collect();
+        for (item_key, ticks, played, at) in library::pending_progress(db, &format!("{}{account_key}/", jellyfin::KEY_PREFIX)) {
+            match server_read.get(item_key.as_str()) {
+                Some(&read) if read < at => tasks.push(pending_task(account.clone(), item_key, ticks, played, at)),
+                _ => library::clear_pending_progress(db, &item_key, at),
+            }
+        }
         let names: Vec<String> =
             series.iter().filter(|s| library::get_series(db, &s.key).is_some_and(|e| e.meta_fetched_at == 0)).map(|s| s.key.clone()).collect();
         for key in names {
             tasks.push(self.enqueue_meta(key));
         }
+        // Downloads of chapters the server no longer has.
+        self.prune_downloads();
         self.jf.status = None;
         tasks.push(self.refresh_views());
         Task::batch(tasks)
@@ -907,7 +1052,13 @@ impl App {
                         widget::Column::new()
                             .width(Length::Fill)
                             .push(widget::text::body(account.label()))
-                            .push(widget::text::caption(if syncing { "Syncing…".to_string() } else { account.url.clone() })),
+                            .push(widget::text::caption(if syncing {
+                                "Syncing…".to_string()
+                            } else if self.jf.offline.contains(&key) {
+                                format!("{}  ·  can't be reached, showing downloads", account.url)
+                            } else {
+                                account.url.clone()
+                            })),
                     )
                     .push(
                         widget::button::icon(icon::from_name("view-refresh-symbolic"))
@@ -916,6 +1067,10 @@ impl App {
                     )
                     .push(widget::button::standard("Sign out").on_press(Message::Jf(JfMsg::SignOut(key)))),
             );
+        }
+
+        if !self.jellyfin.accounts.is_empty() {
+            section = section.add(self.downloads_settings());
         }
 
         if let Some(p) = &self.jf.pending {
