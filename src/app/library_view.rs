@@ -436,7 +436,9 @@ impl App {
             }
         }
 
-        let msg = if continuing || e.issue_count <= 1 {
+        // Continue Reading opens the reader; everything else its page, one-
+        // shots included, for the description and the download button.
+        let msg = if continuing {
             Message::OpenEntry { key: e.path.clone(), chapter: None }
         } else {
             Message::OpenSeriesPage(e.path.clone())
@@ -451,10 +453,9 @@ impl App {
             return self.view_library();
         };
         let issues = &self.series_page_issues;
-        let manga = issues.iter().any(|i| {
-            let n = i.name.to_ascii_lowercase();
-            n.starts_with("ch") || n.contains("chapter")
-        });
+        let manga = is_manga(issues);
+        // A single book or issue: its details, without a chapter list.
+        let one_shot = issues.len() <= 1;
 
         let mut col = widget::Column::new().spacing(16).padding([16, 20]);
         if let Some(err) = self.error.as_deref() {
@@ -462,7 +463,8 @@ impl App {
         }
 
         // ── Header: cover + details + actions ─────────────────────────────
-        let cover: Element<'_, Message> = match self.series_page_covers.get(&0) {
+        let cover = self.series_page_covers.get(&0).or_else(|| self.library_covers.get(&series.id));
+        let cover: Element<'_, Message> = match cover {
             Some(h) => widget::image(h.clone())
                 .width(Length::Fixed(THUMB_W as f32 * 0.75))
                 .height(Length::Fixed(THUMB_H as f32 * 0.75))
@@ -484,10 +486,26 @@ impl App {
         if let Some(v) = series.volume {
             facts.push(format!("Vol. {v}"));
         }
-        facts.push(format!("{} {}", issues.len(), if manga { "chapters" } else { "issues" }));
         let read = issues.iter().filter(|i| i.completed).count();
-        if read > 0 {
-            facts.push(format!("{read} read"));
+        if one_shot {
+            if let Some(issue) = issues.first() {
+                if !issue.date().is_empty() && series.year.is_none() {
+                    facts.push(crate::library::pretty_date(issue.date()));
+                }
+                if issue.page_count > 0 {
+                    facts.push(format!("{} pages", issue.page_count));
+                }
+                if issue.completed {
+                    facts.push("Read".into());
+                } else if issue.in_progress() {
+                    facts.push(format!("Page {} of {}", issue.last_page + 1, issue.page_count.max(1)));
+                }
+            }
+        } else {
+            facts.push(format!("{} {}", issues.len(), if manga { "chapters" } else { "issues" }));
+            if read > 0 {
+                facts.push(format!("{read} read"));
+            }
         }
 
         let mut details = widget::Column::new()
@@ -534,6 +552,7 @@ impl App {
         // Primary action: continue where you left off, or start.
         let next = next_issue(issues);
         let primary_label = match next {
+            Some(i) if one_shot && i.in_progress() => "Continue Reading".to_string(),
             Some(i) if i.in_progress() => format!("Continue {}", i.label(manga)),
             Some(i) if read > 0 => format!("Read {}", i.label(manga)),
             Some(_) => "Start Reading".to_string(),
@@ -546,20 +565,29 @@ impl App {
                 widget::button::suggested(primary_label)
                     .on_press(Message::OpenEntry { key: series.path.clone(), chapter: Some(primary_idx) }),
             );
+        let (mark_read, mark_unread) = if one_shot { ("Mark Read", "Mark Unread") } else { ("Mark All Read", "Mark All Unread") };
         if read < issues.len() {
-            actions = actions.push(widget::button::standard("Mark All Read").on_press(Message::MarkSeriesRead(true)));
+            actions = actions.push(widget::button::standard(mark_read).on_press(Message::MarkSeriesRead(true)));
         }
         if read > 0 || issues.iter().any(|i| i.in_progress()) {
-            actions = actions.push(widget::button::standard("Mark All Unread").on_press(Message::MarkSeriesRead(false)));
+            actions = actions.push(widget::button::standard(mark_unread).on_press(Message::MarkSeriesRead(false)));
         }
-        // Jellyfin series can be downloaded for reading offline.
+        // Jellyfin items can be downloaded for reading offline: a series
+        // all at once (each chapter has its own button below), a one-shot
+        // on its own.
         if crate::jellyfin::is_key(&series.path) {
-            let keys: Vec<String> = issues.iter().map(|i| i.path.clone()).collect();
-            for button in self.series_download_actions(&series.path, &keys) {
-                actions = actions.push(button);
+            if one_shot {
+                if let Some(issue) = issues.first() {
+                    actions = actions.push(self.one_shot_download_action(&issue.path, &series.path));
+                }
+            } else {
+                let keys: Vec<String> = issues.iter().map(|i| i.path.clone()).collect();
+                for button in self.series_download_actions(&series.path, &keys) {
+                    actions = actions.push(button);
+                }
             }
         }
-        details = details.push(actions);
+        details = details.push(actions.wrap());
 
         // Fix-the-match controls.
         details = details.push(
@@ -578,7 +606,13 @@ impl App {
                 })),
         );
 
-        col = col.push(widget::Row::new().spacing(24).push(cover).push(details));
+        let header = widget::Row::new().spacing(24).push(cover).push(details);
+        if one_shot {
+            // The whole page is the details; scroll if the description is long.
+            col = col.push(widget::scrollable(header.padding([0, 12, 24, 0])).height(Length::Fill));
+            return widget::container(col).width(Length::Fill).height(Length::Fill).into();
+        }
+        col = col.push(header);
         col = col.push(widget::divider::horizontal::default());
 
         // ── Issue list ────────────────────────────────────────────────────
@@ -602,12 +636,7 @@ impl App {
             None => placeholder_cover(54.0, 76.0, "image-x-generic-symbolic"),
         };
 
-        let heading = issue.heading();
-        let title_line = if heading.is_empty() || issue.number.is_empty() {
-            if issue.number.is_empty() { issue.name.clone() } else { issue.label(manga) }
-        } else {
-            format!("{}  —  {}", issue.label(manga), heading)
-        };
+        let title_line = issue_title(issue, manga);
 
         let mut meta: Vec<String> = Vec::new();
         if !issue.date().is_empty() {
@@ -697,6 +726,24 @@ pub(super) fn next_issue(issues: &[IssueEntry]) -> Option<&IssueEntry> {
         }
     }
     issues.iter().find(|i| !i.completed)
+}
+
+/// Whether the issues are named like manga chapters ("Ch. 3").
+pub(super) fn is_manga(issues: &[IssueEntry]) -> bool {
+    issues.iter().any(|i| {
+        let n = i.name.to_ascii_lowercase();
+        n.starts_with("ch") || n.contains("chapter")
+    })
+}
+
+/// "Ch. 12  —  The Title", or the file name when there's no number.
+pub(super) fn issue_title(issue: &IssueEntry, manga: bool) -> String {
+    let heading = issue.heading();
+    if heading.is_empty() || issue.number.is_empty() {
+        if issue.number.is_empty() { issue.name.clone() } else { issue.label(manga) }
+    } else {
+        format!("{}  —  {}", issue.label(manga), heading)
+    }
 }
 
 fn is_remote(e: &SeriesEntry) -> bool {

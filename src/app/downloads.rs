@@ -271,6 +271,31 @@ impl App {
         widget::tooltip(button, widget::text(hint), hint_at).into()
     }
 
+    /// A one-shot's page: one "Download" button that shows its progress.
+    pub(super) fn one_shot_download_action<'a>(&self, issue_key: &str, series_key: &str) -> Element<'a, Message> {
+        let remove = Message::Dl(DlMsg::Remove(vec![issue_key.to_string()]));
+        let busy = |ring: Element<'a, Message>, label: String| -> Element<'a, Message> {
+            widget::button::custom(
+                widget::row::with_capacity(2).spacing(8).align_y(Alignment::Center).push(ring).push(widget::text::body(label)),
+            )
+            .class(cosmic::theme::Button::Standard)
+            .on_press(remove.clone())
+            .into()
+        };
+        match self.dl.state(issue_key) {
+            DlState::None => widget::button::standard("Download")
+                .leading_icon(icon::from_name("folder-download-symbolic"))
+                .on_press(Message::Dl(DlMsg::Download(vec![(issue_key.to_string(), series_key.to_string())])))
+                .into(),
+            DlState::Queued => busy(widget::indeterminate_circular().size(14.0).bar_height(2.0).into(), "Waiting… (Cancel)".into()),
+            DlState::Running(f) => busy(
+                widget::determinate_circular(f).size(14.0).bar_height(2.0).into(),
+                format!("Downloading {:.0}% (Cancel)", f * 100.0),
+            ),
+            DlState::Done => widget::button::standard("Remove Download").on_press(remove).into(),
+        }
+    }
+
     /// The series page's "Download All" / "Remove Downloads" buttons.
     pub(super) fn series_download_actions<'a>(&self, series_key: &str, issue_keys: &[String]) -> Vec<Element<'a, Message>> {
         let mut out = Vec::new();
