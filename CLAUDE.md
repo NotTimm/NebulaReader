@@ -32,8 +32,11 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
 - Rust + libcosmic (the owner's fork `NotTimm/libcosmic`, pinned by `rev` in
   `Cargo.toml`). Goal: stay in sync with `pop-os/libcosmic`. Run
   `tools/libcosmic-drift.sh` at the start of a session and before every
-  release; when upstream has moved, tell the owner what's new and sync
-  (merge, never rebase; steps in docs/DEVELOPING.md). Runs on COSMIC, KDE, GNOME and Windows; per-OS code lives in
+  release. **Syncing is a release blocker:** never bump, tag or publish
+  while the drift script reports upstream commits missing; merge them
+  first (merge, never rebase; steps in docs/DEVELOPING.md), tell the owner
+  what's new, and check the fork's patches (listed above the libcosmic
+  dependency in `Cargo.toml`) are all still there before pinning it. Runs on COSMIC, KDE, GNOME and Windows; per-OS code lives in
   `src/platform/`, per-desktop theming in `src/platform/look.rs`.
 - Linux build deps: `libarchive`, `libxkbcommon`, `wayland`, `openssl` dev
   packages plus `pkg-config`. Windows: libarchive from vcpkg (see docs/DEVELOPING.md, which holds the
@@ -117,9 +120,8 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
-- libcosmic: fork pinned at `1d178e0` (patch 10: a click beside the
-  settings/details drawer closes it), merged with upstream through
-  `3a37c8bf` (2026-10-19, iced bumped to 229186b5); 0.1.2 was built from
+- libcosmic: fork pinned at `d0bd23f` (patches 1–10, see Cargo.toml),
+  merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
   touched chapter); a per-chapter shelf would be an option, not default.

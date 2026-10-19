@@ -63,7 +63,7 @@ regex = "1"
 # tools/libcosmic-drift.sh and see "The libcosmic fork" in docs/DEVELOPING.md.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "1d178e0a9f16ddcd46c41badaee385e91f3f6e20"
+rev = "d0bd23f2a5dbf723d95856ac48e1173677e22911"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -71,12 +71,12 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "1d178e0a9f16ddcd46c41badaee385e91f3f6e20", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d0bd23f2a5dbf723d95856ac48e1173677e22911", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "1d178e0a9f16ddcd46c41badaee385e91f3f6e20", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d0bd23f2a5dbf723d95856ac48e1173677e22911", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).
