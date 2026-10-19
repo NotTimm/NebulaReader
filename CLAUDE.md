@@ -101,17 +101,20 @@ decides whether and how to submit. Research and debugging help is fine.
 Keep this short and current; it is the handoff between sessions (cloud or
 the owner's laptop). Last updated 2026-10-19.
 
-- Released: 0.1.6 (2026-10-19): square corners under a system title bar,
-  click beside a drawer closes it, update banners, volume-grouped chapter
-  list. 0.1.5 (2026-10-18) had all formats including the Apple Silicon
-  .dmg. Releases 0.1.1–0.1.5 all went out on 2026-10-17/18.
-- In 0.1.6, details: the chapter list (`src/app/chapter_list.rs`, C key)
-  shows the whole series grouped by volume (`naming::volume_of`; blocks of
-  25 when fewer than 75% of chapters have a volume) with a jump dropdown.
-  Tested by unit tests only, not yet seen in the running app. The library
-  shows a closable "Nebula X is available" banner (closing remembers that
-  version in `dismissed_update`) and, on the first start of a new version,
-  an "updated to X" banner (`last_version`; not on a fresh install).
+- Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
+  Windows installer, Windows zip and Mac app, and minisign signatures on
+  every release file (`sign` job, secrets MINISIGN_KEY/MINISIGN_PASSWORD,
+  key ID AFE5BA3AD81D4B31; see docs/DEVELOPING.md). 0.1.7 is the first
+  version that can update itself; the first real in-app update will be
+  0.1.7 -> 0.1.8, so check that one on Windows and a Mac. 0.1.6 had the
+  square corners, click-beside-drawer close, update banners and the
+  volume-grouped chapter list (`src/app/chapter_list.rs`, not yet seen in
+  the running app).
+- The library banner says when a new version is out (closing remembers it
+  in `dismissed_update`) and, on the first start of a new version, that
+  it updated (`last_version`; not on a fresh install).
+- The installer uses `CloseApplications=force`: winit ignores Windows'
+  shutdown message, so silent installs over a running copy cancelled.
 - Not verified in the GUI: Jellyfin downloads/offline reading (0.1.5) are
   unit-tested only. Unfetched remote chapter covers show a placeholder.
 - winget: microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.1) has

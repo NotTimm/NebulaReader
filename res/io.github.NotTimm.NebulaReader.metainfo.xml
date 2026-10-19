@@ -69,6 +69,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.7" date="2026-10-19" type="stable">
+      <description>
+        <ul>
+          <li>Windows and macOS: Update now in the new-version banner downloads the update, checks it is signed with the Nebula release key and restarts into it</li>
+          <li>Every release file now comes with a minisign signature</li>
+          <li>Windows: installing over a running Nebula closes it instead of cancelling</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.6" date="2026-10-19" type="stable">
       <description>
         <ul>
