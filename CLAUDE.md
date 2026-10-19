@@ -19,6 +19,9 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   progress from the repo page. Each commit that builds and passes
   `cargo test` goes to `master` right away (fast-forward or a merge commit;
   never squash, the history is the log). Keep the session branch in sync.
+- Don't make releases (version bumps, tags, publish runs) unless the owner
+  asks for one. Push features to `master`; a test build without `publish`
+  is fine when useful.
 - Claude sessions' GitHub tokens may lack the `workflow` scope, so changes
   under `.github/workflows/` can be refused on push or merge. When that
   happens, park the new file under `packaging/pending/`, push that, and ask
@@ -86,9 +89,9 @@ decides whether and how to submit. Research and debugging help is fine.
   `CARGO_BUILD_JOBS=4 nice -n 19 just rpm`) and warn before deleting
   target dirs. Installing dev tools system-wide with `dnf` is fine (the
   owner runs the sudo). Don't touch `~/Projects/flathub`.
-- Cloud sessions can't push `.github/workflows/` (see Workflow) and have no
-  libcosmic clone; `git ls-remote` against pop-os/libcosmic still shows
-  drift.
+- Cloud sessions can't push `.github/workflows/` (see Workflow). They can
+  attach `NotTimm/libcosmic` (add it to the session) and clone it next to
+  this checkout, where `tools/libcosmic-drift.sh` finds it.
 
 ## Where things stand
 
@@ -111,9 +114,9 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
-- libcosmic: fork pinned at `4fa40bc` (upstream merged through
-  `e1f2cd2e`, tag `nebula-0.1.2`). Upstream gained `3a37c8b` "chore:
-  update iced" on 2026-10-19; sync before the next release.
+- libcosmic: fork pinned at `593f792`, merged with upstream through
+  `3a37c8bf` (2026-10-19, iced bumped to 229186b5); 0.1.2 was built from
+  tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
   touched chapter); a per-chapter shelf would be an option, not default.
 - Open: Jellyfin book position isn't synced *from* the server yet; runtime
