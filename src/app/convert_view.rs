@@ -31,7 +31,6 @@ pub enum ConvMsg {
 
 /// What the dialog offers to convert.
 pub struct ConvertPlan {
-    series: String,
     name: String,
     files: Vec<PathBuf>,
     bytes: u64,
@@ -79,7 +78,7 @@ impl App {
                     .and_then(|db| library::get_series(db, &series))
                     .map(|e| e.name().to_string())
                     .unwrap_or_default();
-                self.convert_ask = Some(ConvertPlan { series, name, files, bytes });
+                self.convert_ask = Some(ConvertPlan { name, files, bytes });
             }
             ConvMsg::CancelAsk => self.convert_ask = None,
             ConvMsg::Start => {

@@ -129,6 +129,12 @@ the owner's laptop). Last updated 2026-10-19.
   page with a choosable folder (USB-safe, see Jellyfin downloads above).
   Right-click menu on library cards and a Properties drawer
   (`src/app/properties.rs`, `ContextPage::Properties`).
+  CBRs: local ones list pages from headers and extract lazily per archive
+  (`comic::rar_page`); Jellyfin ones stream via `src/remote_rar.rs`
+  (header walk, index cached in `cache/jellyfin-index`), solid ones are
+  fetched whole after asking above 100 MB (`jf.blocked`). Caches trimmed
+  to 2 GB at startup. Convert to CBZ: `src/convert.rs` +
+  `src/app/convert_view.rs` (CBRs to the Trash via the `trash` crate).
 - winget: microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.1) has
   passed validation and waits for a moderator. Decision: keep it at 0.1.1
   (changing it re-runs validation). Once merged, re-run the release

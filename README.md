@@ -50,6 +50,9 @@ the way so you can read.
   and details; Continue Reading jumps straight back in. Right-click a
   cover to read, download, mark it read, show it in its folder or see its
   **Properties** (format, location, pages, page size, size on disk).
+- **Convert to CBZ** (right-click a series with CBR files): the pages are
+  repacked unchanged into CBZs, which open faster and stream from
+  Jellyfin. Progress carries over, and the CBRs go to the Trash.
 - Drag a file or folder onto the window to open it.
 - Libraries on a USB drive are kept while the drive is unplugged and come
   back when it's plugged in again.
@@ -237,11 +240,13 @@ How it works:
 
 - Only Jellyfin's access token is stored, in `jellyfin.json`, which only
   your user can read.
-- CBZ chapters aren't downloaded whole: Nebula reads the archive's index
-  with a few HTTP range requests, then fetches pages as you read, a few
-  ahead. CBR/RAR chapters and EPUBs are downloaded to the cache first,
-  since RAR has no index to seek in: only the chapter you're reading, then
-  the next one as you near its end. The cache trims itself to 2 GB.
+- CBZ and CBR chapters aren't downloaded whole: Nebula reads where each
+  page is with HTTP range requests (a CBZ's index, or a CBR's headers,
+  remembered after the first time), then fetches pages as you read, a few
+  ahead. What can't be read a page at a time (a "solid" CBR, other
+  formats) is fetched whole into the cache, one chapter at a time as you
+  reach it; above 100 MB Nebula asks first and shows the size (turn that
+  off in **Settings → Jellyfin**). The cache trims itself to 2 GB.
 - Progress uses the same fields as Jellyfin's web reader (the page in
   `PlaybackPositionTicks`, `Played` when a chapter is finished), so it
   carries over between machines and the Jellyfin web app. Marking chapters
