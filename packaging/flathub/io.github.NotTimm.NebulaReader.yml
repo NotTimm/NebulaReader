@@ -50,7 +50,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/NotTimm/NebulaReader.git
-        tag: v0.1.4
-        # The tag's commit: git rev-parse v0.1.4^{commit}
-        commit: 5a01b2bcb26e7906f9f3240dea3bf4f1b0f30d43
+        tag: v0.1.5
+        # The tag's commit: git rev-parse v0.1.5^{commit}
+        commit: f5aa73aeb3713cb13f7d11123dd64277b9210ec7
       - cargo-sources.json
