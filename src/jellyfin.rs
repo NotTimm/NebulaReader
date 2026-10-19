@@ -47,7 +47,7 @@ impl Account {
         format!("{} on {}", self.user_name, self.server_name)
     }
 
-    fn auth(&self) -> String {
+    pub fn auth(&self) -> String {
         auth_header(Some(&self.token))
     }
 
@@ -594,8 +594,9 @@ pub async fn save_progress(account: &Account, item_id: &str, ticks: i64, played:
 }
 
 /// The same, blocking for at most a few seconds: for the last save while
-/// the app is closing, when there's no time to wait for a task.
-pub fn save_progress_now(account: &Account, item_id: &str, ticks: i64, played: bool) {
+/// the app is closing, when there's no time to wait for a task. False when
+/// it didn't go through.
+pub fn save_progress_now(account: &Account, item_id: &str, ticks: i64, played: bool) -> bool {
     let (url, auth) = (format!("{}/UserItems/{item_id}/UserData", account.url), account.auth());
     let body = progress_body(ticks, played);
     let (tx, rx) = std::sync::mpsc::channel();
@@ -611,8 +612,11 @@ pub fn save_progress_now(account: &Account, item_id: &str, ticks: i64, played: b
         let _ = tx.send(r.map(|r| r.status().is_success()));
     });
     match rx.recv_timeout(std::time::Duration::from_secs(4)) {
-        Ok(Ok(true)) => {}
-        other => log::warn!("jellyfin: last progress save on exit didn't go through: {other:?}"),
+        Ok(Ok(true)) => true,
+        other => {
+            log::warn!("jellyfin: last progress save on exit didn't go through: {other:?}");
+            false
+        }
     }
 }
 
@@ -880,6 +884,109 @@ impl crate::remote_zip::RangeSource for HttpRange {
     }
 }
 
+// ── Downloads for offline reading ──────────────────────────────────────────
+
+/// Where an account's downloads are kept: in the data folder, not the
+/// cache, since they're the user's to keep. Files are named `<item id>.<ext>`
+/// (the book reader reads the item id back from the file name).
+pub fn download_dir(account_key: &str) -> std::path::PathBuf {
+    crate::platform::data_dir().join("jellyfin-downloads").join(account_key)
+}
+
+/// A running download's progress, shared with the UI; `cancel` stops it.
+#[derive(Debug, Default)]
+pub struct Progress {
+    pub done: std::sync::atomic::AtomicU64,
+    pub total: std::sync::atomic::AtomicU64,
+    pub cancel: std::sync::atomic::AtomicBool,
+}
+
+impl Progress {
+    /// 0.0–1.0, or 0 until the size is known.
+    pub fn fraction(&self) -> f32 {
+        let total = self.total.load(Ordering::Relaxed);
+        if total == 0 {
+            return 0.0;
+        }
+        (self.done.load(Ordering::Relaxed) as f64 / total as f64).min(1.0) as f32
+    }
+}
+
+/// No overall time limit (a big chapter on a slow link takes a while), but
+/// gives up when the connection stalls.
+fn download_client() -> &'static reqwest::Client {
+    static C: OnceLock<reqwest::Client> = OnceLock::new();
+    C.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(std::time::Duration::from_secs(60))
+            .build()
+            .expect("http client")
+    })
+}
+
+/// Downloads an item's file to `dest` (via `dest.part`, renamed when
+/// complete). Returns its size.
+pub async fn download_item(
+    account: &Account,
+    item_id: &str,
+    dest: &std::path::Path,
+    progress: &Progress,
+) -> Result<u64, String> {
+    use std::io::Write;
+
+    let mut resp = None;
+    for url in [account.file_url(item_id), account.download_url(item_id)] {
+        let r = download_client()
+            .get(&url)
+            .header("Authorization", account.auth())
+            .send()
+            .await
+            .map_err(|e| format!("couldn't reach the server: {e}"))?;
+        // Servers without /File answer 403/404/405; try /Download.
+        if matches!(r.status().as_u16(), 403 | 404 | 405) {
+            continue;
+        }
+        resp = Some(r);
+        break;
+    }
+    let mut resp = resp.ok_or("the server doesn't offer this file for download")?;
+    if !resp.status().is_success() {
+        return Err(format!("download failed: HTTP {}", resp.status()));
+    }
+    progress.total.store(resp.content_length().unwrap_or(0), Ordering::Relaxed);
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let part = dest.with_extension("part");
+    let result = async {
+        let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+        let mut size = 0u64;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download failed: {e}"))? {
+            if progress.cancel.load(Ordering::Relaxed) {
+                return Err("cancelled".to_string());
+            }
+            file.write_all(&chunk).map_err(|e| e.to_string())?;
+            size += chunk.len() as u64;
+            progress.done.store(size, Ordering::Relaxed);
+        }
+        file.sync_all().map_err(|e| e.to_string())?;
+        Ok(size)
+    }
+    .await;
+    match result {
+        Ok(size) => {
+            std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
+            Ok(size)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&part);
+            Err(e)
+        }
+    }
+}
+
 /// `bytes 1234-5677/5678` → 5678.
 fn parse_content_range_total(v: &str) -> Option<u64> {
     v.rsplit('/').next()?.trim().parse().ok()
@@ -888,6 +995,80 @@ fn parse_content_range_total(v: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A one-shot HTTP server: answers each request in turn with the given
+    /// status and body, and records the request paths.
+    fn serve(responses: Vec<(u16, Vec<u8>)>) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let mut paths = Vec::new();
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                paths.push(line.split_whitespace().nth(1).unwrap_or("").to_string());
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).unwrap();
+                    if h.trim().is_empty() {
+                        break;
+                    }
+                }
+                let head = format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+            paths
+        });
+        (url, handle)
+    }
+
+    fn test_account(url: String) -> Account {
+        Account {
+            url,
+            server_id: "s".into(),
+            server_name: "Test".into(),
+            user_id: "u".into(),
+            user_name: "me".into(),
+            token: "t".into(),
+        }
+    }
+
+    #[test]
+    fn downloads_a_file_falling_back_to_download_url() {
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        // /File refused (older servers), /Download serves it.
+        let (url, server) = serve(vec![(404, Vec::new()), (200, body.clone())]);
+        let dir = std::env::temp_dir().join(format!("nebula-dl-{}", std::process::id()));
+        let dest = dir.join("item1.cbz");
+        let progress = Progress::default();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let size = rt.block_on(download_item(&test_account(url), "item1", &dest, &progress)).unwrap();
+        assert_eq!(size, body.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert!(!dest.with_extension("part").exists());
+        assert_eq!(progress.fraction(), 1.0);
+        assert_eq!(server.join().unwrap(), ["/Items/item1/File", "/Items/item1/Download"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cancelled_download_leaves_nothing_behind() {
+        let (url, server) = serve(vec![(200, vec![7u8; 100_000])]);
+        let dir = std::env::temp_dir().join(format!("nebula-dl-cancel-{}", std::process::id()));
+        let dest = dir.join("item2.cbz");
+        let progress = Progress::default();
+        progress.cancel.store(true, Ordering::Relaxed);
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let result = rt.block_on(download_item(&test_account(url), "item2", &dest, &progress));
+        assert_eq!(result, Err("cancelled".to_string()));
+        assert!(!dest.exists() && !dest.with_extension("part").exists());
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn candidate_urls_for_typed_addresses() {

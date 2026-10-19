@@ -295,6 +295,15 @@ pub fn open_db() -> Result<Connection, String> {
     std::fs::create_dir_all(path.parent().unwrap())
         .map_err(|e| format!("failed to create data dir: {e}"))?;
     let conn = Connection::open(&path).map_err(|e| format!("open db: {e}"))?;
+    init_schema(&conn)?;
+    migrate_legacy_cache();
+    run_migrations(&conn)?;
+    Ok(conn)
+}
+
+/// Creates the tables a new database needs (a no-op for existing ones,
+/// which `run_migrations` brings up to date).
+fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          CREATE TABLE IF NOT EXISTS series (
@@ -334,18 +343,27 @@ pub fn open_db() -> Result<Connection, String> {
              position      REAL    NOT NULL DEFAULT 0,
              UNIQUE(series_path, path)
          );
-         CREATE INDEX IF NOT EXISTS issues_by_path ON issues(path);",
+         CREATE INDEX IF NOT EXISTS issues_by_path ON issues(path);
+         CREATE TABLE IF NOT EXISTS downloads (
+             path          TEXT    PRIMARY KEY,
+             series_path   TEXT    NOT NULL,
+             file          TEXT    NOT NULL,
+             size          INTEGER NOT NULL DEFAULT 0,
+             added_at      INTEGER NOT NULL DEFAULT 0
+         );
+         CREATE TABLE IF NOT EXISTS pending_progress (
+             item_key      TEXT    PRIMARY KEY,
+             ticks         INTEGER NOT NULL,
+             played        INTEGER NOT NULL,
+             at            INTEGER NOT NULL
+         );",
     )
-    .map_err(|e| format!("init schema: {e}"))?;
-
-    migrate_legacy_cache();
-    run_migrations(&conn)?;
-    Ok(conn)
+    .map_err(|e| format!("init schema: {e}"))
 }
 
 /// Current expected schema version. Bump this and add a matching arm in
 /// [`run_migrations`] whenever the schema changes.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// Brings an existing database up to [`SCHEMA_VERSION`] without touching
 /// user data. Uses SQLite's `user_version` pragma as the version marker, so
@@ -449,6 +467,10 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
         let _ = conn.execute("ALTER TABLE issues ADD COLUMN creators TEXT NOT NULL DEFAULT ''", []);
         let _ = conn.execute("ALTER TABLE issues ADD COLUMN details_read INTEGER NOT NULL DEFAULT 0", []);
     }
+
+    // v6 -> v7: `downloads` (Jellyfin chapters kept for reading offline)
+    // and `pending_progress` (progress that couldn't reach the server yet)
+    // come from the CREATE TABLE IF NOT EXISTS above.
 
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
         .map_err(|e| format!("set schema version: {e}"))?;
@@ -1118,6 +1140,95 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SeriesEntry> {
     })
 }
 
+// ── Downloads (Jellyfin chapters kept for offline reading) ─────────────────
+
+/// A downloaded Jellyfin chapter or book. `path` is the issue's key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Download {
+    pub path: String,
+    pub series_path: String,
+    pub file: PathBuf,
+    pub size: u64,
+}
+
+pub fn add_download(conn: &Connection, d: &Download) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO downloads (path, series_path, file, size, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![d.path, d.series_path, d.file.to_string_lossy(), d.size as i64, now_unix()],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("add_download: {e}"))
+}
+
+pub fn downloads(conn: &Connection) -> Vec<Download> {
+    conn.prepare("SELECT path, series_path, file, size FROM downloads ORDER BY added_at")
+        .and_then(|mut st| {
+            st.query_map([], |r| {
+                Ok(Download {
+                    path: r.get(0)?,
+                    series_path: r.get(1)?,
+                    file: PathBuf::from(r.get::<_, String>(2)?),
+                    size: r.get::<_, i64>(3)?.max(0) as u64,
+                })
+            })
+            .map(|it| it.flatten().collect())
+        })
+        .unwrap_or_default()
+}
+
+/// Forgets a download; returns its file so the caller can delete it.
+pub fn remove_download(conn: &Connection, path: &str) -> Option<PathBuf> {
+    let file: String = conn
+        .query_row("SELECT file FROM downloads WHERE path = ?1", params![path], |r| r.get(0))
+        .ok()?;
+    let _ = conn.execute("DELETE FROM downloads WHERE path = ?1", params![path]);
+    Some(PathBuf::from(file))
+}
+
+/// Downloads whose chapter is no longer in the library (removed on the
+/// server, or its account signed out).
+pub fn orphaned_downloads(conn: &Connection) -> Vec<Download> {
+    downloads(conn)
+        .into_iter()
+        .filter(|d| {
+            !conn
+                .query_row(
+                    "SELECT 1 FROM issues WHERE series_path = ?1 AND path = ?2",
+                    params![d.series_path, d.path],
+                    |_| Ok(()),
+                )
+                .is_ok()
+        })
+        .collect()
+}
+
+// ── Progress waiting for its server ────────────────────────────────────────
+
+/// Jellyfin progress that couldn't be sent (server unreachable), keyed by
+/// the item's library key, to send once the server is back.
+pub fn set_pending_progress(conn: &Connection, item_key: &str, ticks: i64, played: bool) {
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO pending_progress (item_key, ticks, played, at) VALUES (?1, ?2, ?3, ?4)",
+        params![item_key, ticks, played, now_unix()],
+    );
+}
+
+/// Pending progress under a key prefix: (item key, ticks, played, when).
+pub fn pending_progress(conn: &Connection, prefix: &str) -> Vec<(String, i64, bool, i64)> {
+    conn.prepare("SELECT item_key, ticks, played, at FROM pending_progress WHERE substr(item_key, 1, length(?1)) = ?1")
+        .and_then(|mut st| {
+            st.query_map(params![prefix], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .map(|it| it.flatten().collect())
+        })
+        .unwrap_or_default()
+}
+
+/// Clears pending progress, but only if it's still the one that was sent
+/// (`at`), not a newer one saved meanwhile.
+pub fn clear_pending_progress(conn: &Connection, item_key: &str, at: i64) {
+    let _ = conn.execute("DELETE FROM pending_progress WHERE item_key = ?1 AND at <= ?2", params![item_key, at]);
+}
+
 fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1168,5 +1279,54 @@ mod credit_tests {
         assert_eq!(pretty_date("2021"), "2021");
         assert_eq!(pretty_date("2021-00-00"), "2021");
         assert_eq!(pretty_date("someday"), "someday");
+    }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn downloads_and_orphans() {
+        let conn = db();
+        conn.execute("INSERT INTO issues (series_path, path) VALUES ('jellyfin://a/s', 'jellyfin://a/i1')", []).unwrap();
+        let d = |path: &str| Download {
+            path: path.into(),
+            series_path: "jellyfin://a/s".into(),
+            file: PathBuf::from(format!("/tmp/{path}.cbz")),
+            size: 10,
+        };
+        add_download(&conn, &d("jellyfin://a/i1")).unwrap();
+        add_download(&conn, &d("jellyfin://a/gone")).unwrap();
+        assert_eq!(downloads(&conn).len(), 2);
+        let orphans: Vec<String> = orphaned_downloads(&conn).into_iter().map(|d| d.path).collect();
+        assert_eq!(orphans, ["jellyfin://a/gone"]);
+        assert_eq!(remove_download(&conn, "jellyfin://a/gone"), Some(PathBuf::from("/tmp/jellyfin://a/gone.cbz")));
+        assert_eq!(remove_download(&conn, "jellyfin://a/gone"), None);
+        assert_eq!(downloads(&conn).len(), 1);
+    }
+
+    #[test]
+    fn pending_progress_keeps_newer_saves() {
+        let conn = db();
+        set_pending_progress(&conn, "jellyfin://a/i1", 50_000, false);
+        set_pending_progress(&conn, "jellyfin://b/i9", 10_000, true);
+        let mine = pending_progress(&conn, "jellyfin://a/");
+        assert_eq!(mine.len(), 1);
+        let (key, ticks, played, at) = mine[0].clone();
+        assert_eq!((key.as_str(), ticks, played), ("jellyfin://a/i1", 50_000, false));
+        // Sent while a newer one was saved: the newer one stays.
+        clear_pending_progress(&conn, "jellyfin://a/i1", at - 1);
+        assert_eq!(pending_progress(&conn, "jellyfin://a/").len(), 1);
+        clear_pending_progress(&conn, "jellyfin://a/i1", at);
+        assert!(pending_progress(&conn, "jellyfin://a/").is_empty());
+        assert_eq!(pending_progress(&conn, "jellyfin://").len(), 1);
     }
 }
