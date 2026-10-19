@@ -76,6 +76,10 @@ libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d0bd23f2a
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 
+[target.'cfg(unix)'.dependencies]
+# Free space on the download folder's drive (src/platform/disk.rs).
+libc = "0.2"
+
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "d0bd23f2a5dbf723d95856ac48e1173677e22911", default-features = false, features = ["rfd"] }
 
@@ -87,10 +91,12 @@ winresource = "0.1"
 # Dark mode and accent colour for the Windows 11 look.
 windows-registry = "0.6"
 # Sets the title bar / taskbar icon (see src/app/window_icon.rs) and reads
-# the battery (src/platform/status.rs).
+# the battery (src/platform/status.rs) and free disk space
+# (src/platform/disk.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
+    "Win32_Storage_FileSystem",
     "Win32_System_Power",
     "Win32_UI_WindowsAndMessaging",
 ] }

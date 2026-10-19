@@ -886,11 +886,12 @@ impl crate::remote_zip::RangeSource for HttpRange {
 
 // ── Downloads for offline reading ──────────────────────────────────────────
 
-/// Where an account's downloads are kept: in the data folder, not the
-/// cache, since they're the user's to keep. Files are named `<item id>.<ext>`
-/// (the book reader reads the item id back from the file name).
-pub fn download_dir(account_key: &str) -> std::path::PathBuf {
-    crate::platform::data_dir().join("jellyfin-downloads").join(account_key)
+/// Where downloads are kept unless the user picks a folder: in the data
+/// folder, not the cache, since they're the user's to keep. Each account
+/// has a folder in it, and files are named `<item id>.<ext>` (the book
+/// reader reads the item id back from the file name).
+pub fn default_download_root() -> std::path::PathBuf {
+    crate::platform::data_dir().join("jellyfin-downloads")
 }
 
 /// A running download's progress, shared with the UI; `cancel` stops it.
@@ -925,8 +926,10 @@ fn download_client() -> &'static reqwest::Client {
     })
 }
 
-/// Downloads an item's file to `dest` (via `dest.part`, renamed when
-/// complete). Returns its size.
+/// Downloads an item's file to `dest` (via `dest.part`, flushed to the drive
+/// and renamed when complete), refusing when the drive is too full. The
+/// folder must exist: it's never created here, so a download can't land in
+/// an empty mount point when its drive has been unplugged. Returns its size.
 pub async fn download_item(
     account: &Account,
     item_id: &str,
@@ -956,8 +959,17 @@ pub async fn download_item(
     }
     progress.total.store(resp.content_length().unwrap_or(0), Ordering::Relaxed);
 
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let dir = dest.parent().filter(|d| d.is_dir()).ok_or("the download folder isn't available")?;
+    // Leave some room: a completely full drive is no good to anyone.
+    const SPARE: u64 = 64 * 1024 * 1024;
+    if let (Some(len), Some(free)) = (resp.content_length(), crate::platform::disk::free_space(dir)) {
+        if len + SPARE > free {
+            return Err(format!(
+                "not enough space on the drive: {} MB needed, {} MB free",
+                (len + SPARE) / 1_048_576,
+                free / 1_048_576
+            ));
+        }
     }
     let part = dest.with_extension("part");
     let result = async {
@@ -967,7 +979,7 @@ pub async fn download_item(
             if progress.cancel.load(Ordering::Relaxed) {
                 return Err("cancelled".to_string());
             }
-            file.write_all(&chunk).map_err(|e| e.to_string())?;
+            file.write_all(&chunk).map_err(|e| format!("couldn't write to the download folder: {e}"))?;
             size += chunk.len() as u64;
             progress.done.store(size, Ordering::Relaxed);
         }
@@ -978,6 +990,7 @@ pub async fn download_item(
     match result {
         Ok(size) => {
             std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
+            crate::platform::disk::sync_dir(dest);
             Ok(size)
         }
         Err(e) => {
@@ -1043,6 +1056,7 @@ mod tests {
         // /File refused (older servers), /Download serves it.
         let (url, server) = serve(vec![(404, Vec::new()), (200, body.clone())]);
         let dir = std::env::temp_dir().join(format!("nebula-dl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
         let dest = dir.join("item1.cbz");
         let progress = Progress::default();
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -1059,6 +1073,7 @@ mod tests {
     fn cancelled_download_leaves_nothing_behind() {
         let (url, server) = serve(vec![(200, vec![7u8; 100_000])]);
         let dir = std::env::temp_dir().join(format!("nebula-dl-cancel-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
         let dest = dir.join("item2.cbz");
         let progress = Progress::default();
         progress.cancel.store(true, Ordering::Relaxed);

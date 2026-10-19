@@ -179,6 +179,20 @@ impl App {
         if let Some(dl) = self.download_status() {
             col = col.push(dl);
         }
+        if let Some(e) = self.dl.error.as_deref() {
+            col = col.push(
+                widget::row::with_capacity(3)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(icon::from_name("dialog-warning-symbolic").size(16))
+                    .push(widget::text::caption(format!("Downloads: {e}")).width(Length::Shrink))
+                    .push(widget::button::link("Manage Downloads").on_press(Message::Dl(super::DlMsg::OpenManager)))
+                    .push(
+                        widget::button::icon(icon::from_name("window-close-symbolic"))
+                            .on_press(Message::Dl(super::DlMsg::DismissError)),
+                    ),
+            );
+        }
         // Servers that can't be reached: their libraries show downloads only.
         let offline: Vec<String> = self
             .jellyfin

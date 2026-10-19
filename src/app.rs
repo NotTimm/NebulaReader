@@ -58,7 +58,7 @@ const CACHE_RADIUS: usize = 14;
 // ── View modes ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum AppView { Library, Series, Reader }
+pub enum AppView { Library, Series, Reader, Downloads }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Layout { Single, Dual }
@@ -1345,7 +1345,7 @@ impl Application for App {
                 ),
                 self.source_label(),
             ],
-            AppView::Series => vec![tip(
+            AppView::Series | AppView::Downloads => vec![tip(
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
                 "Back to library",
             )],
@@ -1359,7 +1359,7 @@ impl Application for App {
         let mut els: Vec<Element<'_, Message>> = Vec::new();
 
         match self.app_view {
-            AppView::Series => {
+            AppView::Series | AppView::Downloads => {
                 els.push(
                     widget::button::icon(icon::from_name("emblem-system-symbolic"))
                         .on_press(Message::ToggleSettings)
@@ -1373,6 +1373,14 @@ impl Application for App {
                         .width(Length::Fixed(220.0))
                         .into(),
                 );
+                // Downloads, once there are some.
+                if !self.dl.is_empty() {
+                    els.push(tip(
+                        widget::button::icon(icon::from_name("folder-download-symbolic"))
+                            .on_press(Message::Dl(DlMsg::OpenManager)),
+                        "Downloads",
+                    ));
+                }
                 els.push(
                     widget::button::standard("Open File")
                         .on_press(Message::OpenFile)
@@ -1576,6 +1584,7 @@ impl Application for App {
             AppView::Library => self.view_library(),
             AppView::Series => self.view_series(),
             AppView::Reader => self.view_reader(),
+            AppView::Downloads => self.view_downloads(),
         };
 
         // While the settings or details drawer is open, a click anywhere

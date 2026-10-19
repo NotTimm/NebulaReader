@@ -3610,6 +3610,7 @@ dependencies = [
  "env_logger",
  "flate2",
  "image",
+ "libc",
  "libcosmic",
  "log",
  "minisign",
