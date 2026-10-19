@@ -39,6 +39,7 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the 
   the .deb, .rpm, AppImage, .flatpak, Windows .zip/setup and macOS .dmg, and a manual run with
   `publish` ticked creates the GitHub Release `v<Cargo.toml version>`.
 - The owner's editor is Neovim; use `nvim`, not `nano`, in instructions.
+  Their shell on Linux is fish (give `set -x VAR value`, not `VAR=value`).
 - Jellyfin: `src/jellyfin.rs` (API client, accounts in `jellyfin.json`),
   `src/remote_zip.rs` (CBZ pages over HTTP ranges) and
   `src/app/jellyfin_view.rs` (sync, reader window, settings UI). Library keys
@@ -73,44 +74,49 @@ Claude must not prepare, open or reply on the Flathub submission, and the
 manifest under `packaging/flathub/` can't be what gets submitted. The owner
 decides whether and how to submit. Research and debugging help is fine.
 
+## The owner's machines
+
+- Home PC: Fedora COSMIC (gaming). Laptop: Fedora COSMIC, with the repo at
+  `~/Projects/cosmic-comic` and the libcosmic fork at `~/Projects/libcosmic`
+  (what `tools/libcosmic-drift.sh` expects), and now also a fresh Windows
+  install. Work: Windows only (PowerShell, VS Code, Visual Studio), where
+  the owner tests the winget/installer builds.
+- On the laptop, don't build unless asked to test: CI builds the packages.
+  When asked, build gently (`nice -n 19 cargo build -j 4`,
+  `CARGO_BUILD_JOBS=4 nice -n 19 just rpm`) and warn before deleting
+  target dirs. Installing dev tools system-wide with `dnf` is fine (the
+  owner runs the sudo). Don't touch `~/Projects/flathub`.
+- Cloud sessions can't push `.github/workflows/` (see Workflow) and have no
+  libcosmic clone; `git ls-remote` against pop-os/libcosmic still shows
+  drift.
+
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop).
+the owner's laptop). Last updated 2026-10-19.
 
-- Done: per-desktop looks and button roundness; Windows build, icons and
-  Inno installer; release workflow for all formats; winget submission
-  (microsoft/winget-pkgs#454352, awaiting review); manga-tui name cleanup;
-  Jellyfin reading (owner confirms it works on the real server; pages
-  stream from `/Items/{id}/File`, since `/Download` logs an activity entry
-  per request); books
-  paginate like a Kindle (`src/app/paged.rs`, single/two pages, scroll as
-  an option) with click-to-zoom images; hover hints on reader buttons;
-  All/Local/Jellyfin library switch; v0.1.0-beta.4 released.
-- Next: 0.1.1 released to fix winget validation (0.1.0's exe needed
-  VCRUNTIME140.dll, and winget's test runs with --skip-dependencies, so a
-  VCRedist dependency doesn't help; the DLL now ships app-locally). PR
-  microsoft/winget-pkgs#454452 is moved to 0.1.1; once merged, the
-  workflow's `winget` job submits later releases. Flathub: owner's call,
-  see "Flathub: hands off" above. 0.1.2 adds the "Made for COSMIC" tag to
-  the metainfo; the repo was renamed to NebulaReader for Flathub's app ID
-  check. Jellyfin: title-bar
-  source label with online dot, progress saved after 10 s on a page;
-  syncing a book's position *from* the server isn't done yet. 0.1.3:
-  colour themes (`src/themes.rs`: COSMIC `.ron` and KDE `.colors`, built-ins
-  in `res/themes/`), live system colours, creators and release dates,
-  wheel zoom without Ctrl, libcosmic synced with upstream, new screenshots.
-  0.1.4: theater mode no longer shows the desktop through the comic
-  reader's chapter panel and error banner. 0.1.5: Jellyfin downloads and
-  offline reading, full-screen clock and battery, spreads zoomed out to fit.
-  The winget job fails until #454452 is merged (the package doesn't exist
-  in winget yet).
-- macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
-  .dmg; the `macos` job in `release.yml` is live (first run 39006216181
-  was its first real build). Windows packages now bundle vcruntime140.dll.
-- Owner's laptop: don't run release builds there unless asked to test;
-  `cargo check` is fine, CI builds the packages. `just rpm` builds an rpm.
-- Open: runtime window icons on Linux are dropped by a libcosmic/iced bug
-  (`conversion::icon` builds a RawImage that winit ignores); a patch for the
-  fork is pending. Flathub submission. Code signing.
-  Scan-group names like `Jaimini's~box~` aren't stripped yet.
+- Released: 0.1.5 (2026-10-18), all formats including the Apple Silicon
+  .dmg. Releases 0.1.1–0.1.5 all went out on 2026-10-17/18.
+- Unreleased on master: the chapter list (`src/app/chapter_list.rs`, C key)
+  shows the whole series grouped by volume (`naming::volume_of`; blocks of
+  25 when fewer than 75% of chapters have a volume) with a jump dropdown.
+  Tested by unit tests only, not yet seen in the running app.
+- Not verified in the GUI: Jellyfin downloads/offline reading (0.1.5) are
+  unit-tested only. Unfetched remote chapter covers show a placeholder.
+- winget: microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.1) has
+  passed validation and waits for a moderator. Decision: keep it at 0.1.1
+  (changing it re-runs validation). Once merged, re-run the release
+  workflow's `winget` job from the newest release to file the update; until
+  then that job fails, which is expected.
+- awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
+- Flathub: owner's call only, see "Flathub: hands off". The manifest in
+  `packaging/flathub/` tracks the latest release (v0.1.5).
+- libcosmic: fork pinned at `4fa40bc` (upstream merged through
+  `e1f2cd2e`, tag `nebula-0.1.2`). Upstream gained `3a37c8b` "chore:
+  update iced" on 2026-10-19; sync before the next release.
+- Decisions: Continue Reading shows one card per series (the most recently
+  touched chapter); a per-chapter shelf would be an option, not default.
+- Open: Jellyfin book position isn't synced *from* the server yet; runtime
+  window icons on Linux are dropped by an iced bug (`conversion::icon`
+  builds a RawImage winit ignores); code signing; scan-group names like
+  `Jaimini's~box~` aren't stripped.
