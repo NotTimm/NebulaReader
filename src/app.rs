@@ -1552,7 +1552,11 @@ impl Application for App {
         let content: Element<'_, Message> = if self.core.window.show_context {
             cosmic::iced::widget::stack![
                 content,
-                mouse_area(widget::Space::new().width(Length::Fill).height(Length::Fill)).on_press(Message::CloseContext),
+                // The interaction makes the stack hide the cursor from the
+                // content below; on_press alone would let the click through.
+                mouse_area(widget::Space::new().width(Length::Fill).height(Length::Fill))
+                    .on_press(Message::CloseContext)
+                    .interaction(cosmic::iced::mouse::Interaction::Idle),
             ]
             .into()
         } else {

@@ -114,8 +114,8 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
-- libcosmic: fork pinned at `b794948` (patch 9: square corners under a
-  system title bar), merged with upstream through
+- libcosmic: fork pinned at `1d178e0` (patch 10: a click beside the
+  settings/details drawer closes it), merged with upstream through
   `3a37c8bf` (2026-10-19, iced bumped to 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
