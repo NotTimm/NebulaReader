@@ -196,6 +196,20 @@ fn cover_task(account: Account, item_id: String, path: PathBuf, done: Message) -
     })
 }
 
+/// Whether a chapter has to be fetched whole before it can be read: not
+/// downloaded, and not a zip (which streams page by page).
+fn must_fetch_whole(extensions: &HashMap<String, String>, downloaded: &HashMap<String, PathBuf>, key: &str) -> bool {
+    let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
+    let ext = extensions.get(item_id).map(String::as_str).unwrap_or("");
+    !matches!(ext, "" | "cbz" | "zip") && !downloaded.get(key).is_some_and(|f| f.exists())
+}
+
+impl App {
+    fn must_fetch_whole(&self, key: &str) -> bool {
+        must_fetch_whole(&self.jf.extensions, &self.dl.files(), key)
+    }
+}
+
 /// Lists the pages of some issues: streamed for zip archives, downloaded
 /// to the cache first for anything else (RAR can't be read out of order).
 fn load_issues(
@@ -246,7 +260,10 @@ fn load_issues(
 /// to clear).
 fn download(account: &Account, item_id: &str, ext: &str) -> Result<PathBuf, String> {
     let path = library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}"));
-    if !path.exists() {
+    if path.exists() {
+        // Recently read: kept longest when the cache is trimmed.
+        let _ = std::fs::File::options().append(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    } else {
         account.range_source(item_id).download_to(&path)?;
     }
     Ok(path)
@@ -395,8 +412,11 @@ impl App {
             (issues, start)
         };
         let start = start.min(issues.len() - 1);
-        let first = start.saturating_sub(1);
-        let end = (start + 1 + WINDOW_AHEAD).min(issues.len());
+        // Chapters that can't be streamed (CBR) are fetched whole first, and
+        // can be hundreds of MB: open with just the one being read.
+        let heavy = self.must_fetch_whole(&issues[start].0);
+        let first = if heavy { start } else { start.saturating_sub(1) };
+        let end = (start + 1 + if heavy { 0 } else { WINDOW_AHEAD }).min(issues.len());
         self.start_chapter = Some(start - first);
         self.remote = Some(RemoteReading {
             account: account.clone(),
@@ -476,7 +496,8 @@ impl App {
             let near_end = self.current_page + TOP_UP_PAGES >= self.sources.len();
             if reading && near_end && !r.loading && r.next < r.issues.len() {
                 r.loading = true;
-                let end = (r.next + WINDOW_AHEAD).min(r.issues.len());
+                let ahead = if must_fetch_whole(&self.jf.extensions, &self.dl.files(), &r.issues[r.next].0) { 1 } else { WINDOW_AHEAD };
+                let end = (r.next + ahead).min(r.issues.len());
                 let issues = r.issues[r.next..end].to_vec();
                 tasks.push(load_task(r.account.clone(), r.series_key.clone(), issues, self.jf.extensions.clone(), self.dl.files(), true));
             }

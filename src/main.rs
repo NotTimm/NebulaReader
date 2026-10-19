@@ -26,6 +26,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
+    // Extracted CBR pages and Jellyfin chapters fetched for reading are
+    // cache: keep each under 2 GB, the most recently read first.
+    const CACHE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
+    comic::prune_rar_cache(CACHE_LIMIT);
+    comic::prune_cache(&library::cache_dir().join("jellyfin"), CACHE_LIMIT);
+
     // Take on the host desktop's look (Breeze on KDE, Fluent on Windows...).
     let desktop = platform::Desktop::detect();
     let saved = settings::Settings::load();

@@ -42,6 +42,9 @@ pub enum PageSource {
     Zip { archive: PathBuf, entry: String },
     /// A page of an archive on a server, fetched with an HTTP range request.
     Remote { archive: std::sync::Arc<crate::remote_zip::RemoteZip>, index: usize },
+    /// A page of a RAR archive: extracted with the rest of its archive in
+    /// the background the first time any of its pages is wanted.
+    Rar { archive: PathBuf, entry: String },
 }
 
 /// The page range one chapter occupies in the flat [`PageSource`] list.
@@ -136,12 +139,13 @@ fn decode_zip_entry(archive_path: &Path, entry: &str) -> Result<Page, String> {
 // ── RAR/CBR ──────────────────────────────────────────────────────────────────
 //
 // RAR has no central directory: reading entry N means streaming through
-// entries 1..N first. Decoding pages lazily (as ZIP does) would mean
-// re-streaming the archive from the start for every single page, which is
-// O(n^2) in page count and was the main cause of slow CBR opens. Instead we
-// extract every image in a single sequential pass up front and cache the
-// result on disk, keyed by the source file's size+mtime so re-opening the
-// same archive later is just a directory read.
+// entries 1..N first, so decoding pages one at a time (as ZIP does) would be
+// O(n^2). Instead, the first time a page of an archive is wanted, one
+// background pass extracts all its images to a disk cache, keyed by the
+// file's size and mtime. Pages are usable as soon as they're written, so
+// the first page shows while the rest is still coming out, and only the
+// chapters actually read are extracted. Listing an archive's pages only
+// reads its headers, which is quick even for a 400 MB file.
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct RarManifest {
@@ -188,31 +192,94 @@ fn cached_rar_entries(archive: &Path) -> Result<Vec<(String, PathBuf)>, String> 
     if !entries.iter().all(|(_, p)| p.is_file()) {
         return Err("incomplete".into());
     }
+    // Recently read: kept longest when the cache is trimmed.
+    let _ = File::options()
+        .append(true)
+        .open(cache_dir.join("manifest.json"))
+        .and_then(|f| f.set_modified(std::time::SystemTime::now()));
     entries.sort_by(|(a, _), (b, _)| natural_key(a).cmp(&natural_key(b)));
     Ok(entries)
 }
 
-/// Extracts every image in `archive` to a per-archive disk cache (reusing a
-/// prior extraction if the source file hasn't changed), returning
-/// `(original_name, extracted_path)` pairs in natural sort order.
-fn extract_rar(archive: &Path) -> Result<Vec<(String, PathBuf)>, String> {
-    let cache_dir = rar_cache_dir(archive);
-    let manifest_path = cache_dir.join("manifest.json");
-    let (size, mtime) = rar_source_stamp(archive)?;
+/// One archive's background extraction: entry name -> extracted file, as
+/// they're written.
+#[derive(Default)]
+struct RarJob {
+    state: Mutex<RarState>,
+    ready: std::sync::Condvar,
+}
 
-    if let Ok(entries) = cached_rar_entries(archive) {
-        return Ok(entries);
+#[derive(Default)]
+struct RarState {
+    files: HashMap<String, PathBuf>,
+    done: bool,
+    error: Option<String>,
+}
+
+fn rar_jobs() -> &'static Mutex<HashMap<PathBuf, Arc<RarJob>>> {
+    static JOBS: OnceLock<Mutex<HashMap<PathBuf, Arc<RarJob>>>> = OnceLock::new();
+    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The extracted file for one page of a RAR archive, waiting for the
+/// background extraction to reach it if need be.
+fn rar_page(archive: &Path, entry: &str) -> Result<PathBuf, String> {
+    let job = {
+        let mut jobs = rar_jobs().lock().unwrap();
+        match jobs.get(archive) {
+            Some(job) => job.clone(),
+            None => {
+                let job = Arc::new(RarJob::default());
+                if let Ok(entries) = cached_rar_entries(archive) {
+                    // Extracted by an earlier run.
+                    let mut state = job.state.lock().unwrap();
+                    state.files = entries.into_iter().collect();
+                    state.done = true;
+                } else {
+                    let (archive, job) = (archive.to_path_buf(), job.clone());
+                    std::thread::spawn(move || {
+                        let result = extract_rar_into(&archive, &job);
+                        if result.is_err() {
+                            // Try again the next time it's opened.
+                            rar_jobs().lock().unwrap().remove(&archive);
+                        }
+                        let mut state = job.state.lock().unwrap();
+                        state.done = true;
+                        state.error = result.err();
+                        job.ready.notify_all();
+                    });
+                }
+                jobs.insert(archive.to_path_buf(), job.clone());
+                job
+            }
+        }
+    };
+    let mut state = job.state.lock().unwrap();
+    loop {
+        if let Some(path) = state.files.get(entry) {
+            return Ok(path.clone());
+        }
+        if state.done {
+            return Err(state.error.clone().unwrap_or_else(|| format!("{entry} isn't in {}", archive.display())));
+        }
+        state = job.ready.wait(state).unwrap();
     }
+}
 
+/// Extracts every image in `archive` to its cache folder in one pass,
+/// publishing each page in `job` as soon as it's written.
+fn extract_rar_into(archive: &Path, job: &RarJob) -> Result<(), String> {
+    let cache_dir = rar_cache_dir(archive);
+    let (size, mtime) = rar_source_stamp(archive)?;
+    // A half-finished extraction from before is redone from scratch.
+    let _ = std::fs::remove_file(cache_dir.join("manifest.json"));
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("failed to create {}: {e}", cache_dir.display()))?;
 
     let file = File::open(archive).map_err(|e| format!("failed to open {}: {e}", archive.display()))?;
-    let iter =
-        ArchiveIterator::from_read(file).map_err(|e| format!("failed to read archive: {e}"))?;
+    let iter = ArchiveIterator::from_read(file).map_err(|e| format!("failed to read archive: {e}"))?;
 
     let mut names = Vec::new();
-    let mut entries = Vec::new();
     let mut current_name = String::new();
     let mut current_data = Vec::new();
     let mut wanted = false;
@@ -233,12 +300,14 @@ fn extract_rar(archive: &Path) -> Result<Vec<(String, PathBuf)>, String> {
             }
             ArchiveContents::EndOfEntry => {
                 if wanted {
-                    let idx = names.len();
-                    let out_path = cache_dir.join(format!("{idx:05}"));
-                    std::fs::write(&out_path, &current_data)
+                    let out_path = cache_dir.join(format!("{:05}", names.len()));
+                    let part = out_path.with_extension("part");
+                    std::fs::write(&part, &current_data)
+                        .and_then(|()| std::fs::rename(&part, &out_path))
                         .map_err(|e| format!("failed to write {}: {e}", out_path.display()))?;
                     names.push(current_name.clone());
-                    entries.push((current_name.clone(), out_path));
+                    job.state.lock().unwrap().files.insert(current_name.clone(), out_path);
+                    job.ready.notify_all();
                 } else if is_comic_info {
                     let _ = std::fs::write(cache_dir.join("ComicInfo.xml"), &current_data);
                 }
@@ -249,11 +318,55 @@ fn extract_rar(archive: &Path) -> Result<Vec<(String, PathBuf)>, String> {
 
     let manifest = RarManifest { size, mtime, names };
     if let Ok(json) = serde_json::to_vec(&manifest) {
-        let _ = std::fs::write(&manifest_path, json);
+        let _ = std::fs::write(cache_dir.join("manifest.json"), json);
     }
+    Ok(())
+}
 
-    entries.sort_by(|(a, _), (b, _)| natural_key(a).cmp(&natural_key(b)));
-    Ok(entries)
+/// A RAR archive's pages, in reading order, without extracting anything.
+fn rar_pages(archive: &Path) -> Result<Vec<PageSource>, String> {
+    // An earlier extraction already knows the names.
+    let names = match cached_rar_entries(archive) {
+        Ok(entries) => entries.into_iter().map(|(name, _)| name).collect(),
+        Err(_) => rar_image_names(archive)?,
+    };
+    Ok(names.into_iter().map(|entry| PageSource::Rar { archive: archive.to_path_buf(), entry }).collect())
+}
+
+/// Keeps a cache folder under `limit` bytes, dropping what was read
+/// longest ago: each entry is a file (by its mtime) or an extracted
+/// archive's folder (by its manifest's mtime). Run at startup, before
+/// anything is open.
+pub fn prune_cache(root: &Path, limit: u64) {
+    let mut entries: Vec<(std::time::SystemTime, u64, PathBuf)> = std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            let meta = e.metadata().ok()?;
+            if meta.is_dir() {
+                let size = std::fs::read_dir(&path).into_iter().flatten().flatten().filter_map(|f| f.metadata().ok()).map(|m| m.len()).sum();
+                let used = std::fs::metadata(path.join("manifest.json")).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                Some((used, size, path))
+            } else {
+                Some((meta.modified().unwrap_or(std::time::UNIX_EPOCH), meta.len(), path))
+            }
+        })
+        .collect();
+    entries.sort_by_key(|(used, _, _)| std::cmp::Reverse(*used));
+    let mut total = 0u64;
+    for (_, size, path) in entries {
+        total += size;
+        if total > limit {
+            let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        }
+    }
+}
+
+/// Keeps the extracted-RAR cache under `limit` bytes.
+pub fn prune_rar_cache(limit: u64) {
+    prune_cache(&crate::library::cache_dir().join("rar-cache"), limit);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -274,6 +387,11 @@ pub fn decode_source(source: &PageSource) -> Result<Page, String> {
         PageSource::Remote { archive, index } => {
             let name = archive.entries.get(*index).map(|e| e.name.clone()).unwrap_or_default();
             decode_image(&name, &archive.read(*index)?)
+        }
+        PageSource::Rar { archive, entry } => {
+            let path = rar_page(archive, entry)?;
+            let data = std::fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+            decode_image(entry, &data)
         }
     }
 }
@@ -379,10 +497,7 @@ pub fn collect_sources(path: &Path) -> Result<(Vec<PageSource>, Vec<ChapterInfo>
                 .map(|entry| PageSource::Zip { archive: archive.clone(), entry })
                 .collect()
         } else {
-            extract_rar(path)?
-                .into_iter()
-                .map(|(_, extracted)| PageSource::File(extracted))
-                .collect()
+            rar_pages(path)?
         };
 
         if pages.is_empty() {
@@ -451,7 +566,7 @@ pub fn collect_sources_for(issues: &[PathBuf]) -> Result<(Vec<PageSource>, Vec<C
                     .map(|entry| PageSource::Zip { archive: issue.clone(), entry }),
             );
         } else if is_rar_name(&name) {
-            pages.extend(extract_rar(issue)?.into_iter().map(|(_, p)| PageSource::File(p)));
+            pages.extend(rar_pages(issue)?);
         } else {
             continue;
         }
@@ -622,5 +737,39 @@ pub fn find_comic_info(path: &Path) -> Option<String> {
         String::from_utf8(data).ok()
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod rar_tests {
+    use super::*;
+
+    /// Times opening a real CBR: `NEBULA_RAR_FILE=path cargo test
+    /// opens_rar_lazily -- --ignored --nocapture`. Use a copy, so its cache
+    /// starts empty.
+    #[test]
+    #[ignore]
+    fn opens_rar_lazily() {
+        let path = PathBuf::from(std::env::var("NEBULA_RAR_FILE").expect("set NEBULA_RAR_FILE"));
+        let t = std::time::Instant::now();
+        let (pages, chapters) = collect_sources(&path).unwrap();
+        println!("listed {} pages in {:?}", pages.len(), t.elapsed());
+        assert_eq!(chapters[0].page_count, pages.len());
+        let t = std::time::Instant::now();
+        let PageSource::Rar { archive, entry } = &pages[0] else { panic!("not a RAR page") };
+        rar_page(archive, entry).unwrap();
+        println!("first page extracted in {:?}", t.elapsed());
+        let PageSource::Rar { archive, entry } = pages.last().unwrap() else { panic!() };
+        rar_page(archive, entry).unwrap();
+        println!("last page extracted in {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        let first = decode_source(&pages[0]).unwrap();
+        println!("first page {}x{} in {:?}", first.width, first.height, t.elapsed());
+        let t = std::time::Instant::now();
+        decode_source(pages.last().unwrap()).unwrap();
+        println!("last page in {:?}", t.elapsed());
+        let t = std::time::Instant::now();
+        decode_source(&pages[1]).unwrap();
+        println!("second page (already extracted) in {:?}", t.elapsed());
     }
 }
