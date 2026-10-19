@@ -1,5 +1,5 @@
 use rusqlite::{Connection, params};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1282,6 +1282,37 @@ mod credit_tests {
     }
 }
 
+/// Points the library at a file that was converted (a CBR repacked as a
+/// CBZ): the issue, the series' "last read" and, when the series is that
+/// one file, the series itself and its cover cache. Progress stays.
+pub fn rename_issue_file(conn: &Connection, old: &str, new: &str) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
+    for sql in [
+        "UPDATE issues SET path = ?2 WHERE path = ?1",
+        "UPDATE series SET last_issue_path = ?2 WHERE last_issue_path = ?1",
+        "UPDATE issues SET series_path = ?2 WHERE series_path = ?1",
+        "UPDATE series SET path = ?2 WHERE path = ?1",
+    ] {
+        tx.execute(sql, params![old, new]).map_err(|e| format!("rename {old}: {e}"))?;
+    }
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    let covers = series_cover_dir(old);
+    if covers.is_dir() {
+        let _ = std::fs::rename(covers, series_cover_dir(new));
+    }
+    Ok(())
+}
+
+/// Library series (not Jellyfin) with at least one CBR or RAR issue.
+pub fn series_with_rar(conn: &Connection) -> HashSet<String> {
+    conn.prepare(
+        "SELECT DISTINCT series_path FROM issues
+         WHERE lower(path) LIKE '%.cbr' OR lower(path) LIKE '%.rar'",
+    )
+    .and_then(|mut st| st.query_map([], |r| r.get::<_, String>(0)).map(|it| it.flatten().collect()))
+    .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod download_tests {
     use super::*;
@@ -1291,6 +1322,24 @@ mod download_tests {
         init_schema(&conn).unwrap();
         run_migrations(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn renames_a_converted_file() {
+        let conn = db();
+        upsert_series(&conn, "/c/One.cbr", "One", 10, false).unwrap();
+        conn.execute("INSERT INTO issues (series_path, path, last_page) VALUES ('/c/One.cbr', '/c/One.cbr', 4)", []).unwrap();
+        conn.execute("UPDATE series SET last_issue_path = '/c/One.cbr' WHERE path = '/c/One.cbr'", []).unwrap();
+        conn.execute("INSERT INTO issues (series_path, path) VALUES ('/c/Run', '/c/Run/02.cbr')", []).unwrap();
+        assert_eq!(series_with_rar(&conn).len(), 2);
+        rename_issue_file(&conn, "/c/One.cbr", "/c/One.cbz").unwrap();
+        rename_issue_file(&conn, "/c/Run/02.cbr", "/c/Run/02.cbz").unwrap();
+        let one = get_series(&conn, "/c/One.cbz").unwrap();
+        assert_eq!(one.last_issue_path, "/c/One.cbz");
+        let issues = issues_for(&conn, "/c/One.cbz");
+        assert_eq!((issues.len(), issues[0].last_page), (1, 4));
+        assert_eq!(issues_for(&conn, "/c/Run")[0].path, "/c/Run/02.cbz");
+        assert!(series_with_rar(&conn).is_empty());
     }
 
     #[test]

@@ -35,6 +35,7 @@ mod window_icon;
 mod jellyfin_view;
 mod downloads;
 mod properties;
+mod convert_view;
 mod chapter_list;
 
 use book_view::{BookMsg, BookScroll};
@@ -195,6 +196,7 @@ pub enum Message {
     /// A library card was right-clicked.
     CardMenuOpened(String),
     CardMenu(properties::CardAction),
+    Convert(convert_view::ConvMsg),
     PageSizeRead(String, Option<(u32, u32)>),
     // Fit page
     FitPage,
@@ -255,6 +257,11 @@ pub struct App {
     /// The library card whose right-click menu is open.
     menu_target: Option<String>,
     properties: Option<properties::Props>,
+    /// Library series with CBR issues, which can be converted to CBZ.
+    rar_series: HashSet<String>,
+    convert_ask: Option<convert_view::ConvertPlan>,
+    converting: Option<convert_view::Converting>,
+    convert_note: Option<String>,
     // epub
     epub_book: Option<epub::EpubBook>,
     epub_chapter: usize,
@@ -1106,6 +1113,7 @@ impl App {
 
     fn reload_library(&mut self) -> Task<Message> {
         let Some(db) = &self.db else { return Task::none() };
+        self.rar_series = library::series_with_rar(db);
 
         let entries = if self.library_search.is_empty() {
             library::all_series(db)
@@ -1218,6 +1226,10 @@ impl Application for App {
             back_to_series: false,
             menu_target: None,
             properties: None,
+            rar_series: HashSet::new(),
+            convert_ask: None,
+            converting: None,
+            convert_note: None,
             epub_book: None,
             epub_chapter: 0,
             epub_cover: None,
@@ -1310,6 +1322,10 @@ impl Application for App {
 
         app.refresh_themes();
         (app, Task::batch(tasks))
+    }
+
+    fn dialog(&self) -> Option<Element<'_, Message>> {
+        self.convert_dialog()
     }
 
     fn context_drawer(&self) -> Option<cosmic::app::context_drawer::ContextDrawer<'_, Message>> {
@@ -1570,7 +1586,7 @@ impl Application for App {
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), pointer, system_colors, status])
+        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), self.convert_subscription(), pointer, system_colors, status])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2833,6 +2849,7 @@ impl App {
             }
             Message::CardMenuOpened(key) => self.menu_target = Some(key),
             Message::CardMenu(action) => return self.card_action(action),
+            Message::Convert(msg) => return self.update_convert(msg),
             Message::PageSizeRead(key, size) => self.page_size_read(key, size),
             Message::ChapterCoverReady { chapter_idx, result } => {
                 self.covers_pending.remove(&chapter_idx);

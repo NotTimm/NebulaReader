@@ -5,6 +5,7 @@ mod app;
 mod comic;
 mod comicinfo;
 mod comicvine;
+mod convert;
 mod jellyfin;
 mod epub;
 mod library;

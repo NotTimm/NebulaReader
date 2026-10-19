@@ -21,6 +21,8 @@ compress-tools = "0.15"
 # Header checksums for one-page RAR archives (src/remote_rar.rs).
 crc32fast = "1"
 zip = "2"
+# The CBR files a CBZ conversion replaces go to the system Trash.
+trash = "5"
 flate2 = "1"
 arboard = "3"
 serde = { version = "1", features = ["derive"] }

@@ -179,6 +179,9 @@ impl App {
         if let Some(dl) = self.download_status() {
             col = col.push(dl);
         }
+        if let Some(conv) = self.convert_status() {
+            col = col.push(conv);
+        }
         if let Some(e) = self.dl.error.as_deref() {
             col = col.push(
                 widget::row::with_capacity(3)
