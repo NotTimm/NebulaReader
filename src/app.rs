@@ -1830,6 +1830,8 @@ impl App {
                     .into(),
                     None => spinner.into(),
                 }
+            } else if let Some(prompt) = self.big_fetch_prompt(true) {
+                prompt
             } else if self.loading {
                 widget::Column::new()
                     .spacing(12)
@@ -1871,6 +1873,9 @@ impl App {
         let mut col = widget::Column::new().spacing(8);
         if let Some(err) = self.error.as_deref() {
             col = col.push(error_banner(err));
+        }
+        if let Some(banner) = self.big_fetch_prompt(false) {
+            col = col.push(banner);
         }
         // In theater mode libcosmic's content frame is off (see `update`),
         // so nothing else paints behind the reader; without this, anything

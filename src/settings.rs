@@ -165,6 +165,9 @@ pub struct Settings {
     pub check_for_updates: bool,
     /// Show the time and battery in a corner while reading in full screen.
     pub fullscreen_status: bool,
+    /// Ask before fetching a big Jellyfin chapter that can't be streamed
+    /// (a solid CBR, say) whole.
+    pub ask_before_big_fetch: bool,
     /// Where Jellyfin downloads go; `None` is the app's data folder.
     pub download_dir: Option<std::path::PathBuf>,
     /// The version that last ran, to say "updated" once after an update.
@@ -188,6 +191,7 @@ impl Default for Settings {
             library_source: LibrarySource::All,
             check_for_updates: true,
             fullscreen_status: true,
+            ask_before_big_fetch: true,
             download_dir: None,
             last_version: None,
             dismissed_update: None,

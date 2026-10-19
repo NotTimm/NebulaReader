@@ -11,6 +11,7 @@ mod library;
 mod metadata;
 mod naming;
 mod platform;
+mod remote_rar;
 mod remote_zip;
 mod scan;
 mod settings;

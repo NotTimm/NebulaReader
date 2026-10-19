@@ -3607,6 +3607,7 @@ dependencies = [
  "ashpd 0.12.3",
  "chrono",
  "compress-tools",
+ "crc32fast",
  "env_logger",
  "flate2",
  "image",

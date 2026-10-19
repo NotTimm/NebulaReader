@@ -21,7 +21,8 @@ use crate::comic::{self, ChapterInfo, PageSource};
 use crate::jellyfin::{self, Account, RemoteSeries};
 use crate::library::{self, IssueRow, ScannedSeries, SeriesKind};
 use crate::naming;
-use crate::remote_zip::RemoteZip;
+use crate::remote_rar::RemoteRar;
+use crate::remote_zip::{RangeSource, RemoteZip};
 
 /// Chapters loaded after the one being opened, and per top-up after that.
 const WINDOW_AHEAD: usize = 3;
@@ -56,7 +57,14 @@ pub enum JfMsg {
     Sync(String),
     Fetched(String, Result<Vec<RemoteSeries>, String>),
     CoverSaved,
-    MoreLoaded(String, Result<(Vec<PageSource>, Vec<ChapterInfo>), String>),
+    /// The first chapters of a series came in.
+    FirstLoaded(String, Loaded),
+    MoreLoaded(String, Result<Loaded, String>),
+    /// Fetch the big chapter asked about; true: don't ask again.
+    FetchWhole(bool),
+    /// Don't fetch it.
+    SkipWhole,
+    SetAskBigFetch(bool),
     EpubDownloaded(Result<PathBuf, String>),
     /// A progress save came back; the items it carried, to keep for later
     /// if the server couldn't be reached.
@@ -109,10 +117,41 @@ pub struct JfState {
     book_keys: Option<(String, String)>,
     /// Progress saving and reachability of the server being read from.
     live: Live,
+    /// A big chapter waiting for the user's go-ahead to be fetched whole.
+    pub(super) blocked: Option<Blocked>,
+    /// Series whose big chapters may be fetched without asking again.
+    allowed_whole: HashSet<String>,
+    /// What's being opened: (series key, chapter), to open it again once
+    /// a big first chapter is allowed.
+    opening: Option<(String, Option<usize>)>,
     /// The item shown as being read on the server's dashboard, and when we
     /// last checked in about it.
     reading: Option<(Account, String, Instant)>,
 }
+
+/// What [`load_issues`] got: the pages of the chapters it could load, and
+/// the chapter it stopped at to ask first, if any.
+#[derive(Clone, Debug, Default)]
+pub struct Loaded {
+    sources: Vec<PageSource>,
+    chapters: Vec<ChapterInfo>,
+    blocked: Option<Blocked>,
+}
+
+/// A chapter that can't be streamed and is big: (issue key, name, size).
+#[derive(Clone, Debug)]
+pub struct Blocked {
+    series_key: String,
+    name: String,
+    size: u64,
+    /// Nothing of the series is showing yet.
+    first: bool,
+    /// "Not now" was picked: stop at it without asking again.
+    skipped: bool,
+}
+
+/// Chapters that have to be fetched whole are asked about above this.
+const BIG_FETCH: u64 = 100 * 1024 * 1024;
 
 /// Where the reader is in a Jellyfin item, as it would be reported.
 #[derive(Clone)]
@@ -196,8 +235,9 @@ fn cover_task(account: Account, item_id: String, path: PathBuf, done: Message) -
     })
 }
 
-/// Whether a chapter has to be fetched whole before it can be read: not
-/// downloaded, and not a zip (which streams page by page).
+/// Whether a chapter might have to be fetched whole before it can be read:
+/// not downloaded, and not a zip (which always streams page by page). A
+/// CBR streams too unless it turns out to be solid.
 fn must_fetch_whole(extensions: &HashMap<String, String>, downloaded: &HashMap<String, PathBuf>, key: &str) -> bool {
     let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
     let ext = extensions.get(item_id).map(String::as_str).unwrap_or("");
@@ -208,16 +248,24 @@ impl App {
     fn must_fetch_whole(&self, key: &str) -> bool {
         must_fetch_whole(&self.jf.extensions, &self.dl.files(), key)
     }
+
+    /// The size above which a chapter that has to be fetched whole is
+    /// asked about first, unless the user said not to.
+    fn ask_over(&self, series_key: &str) -> Option<u64> {
+        (self.settings.ask_before_big_fetch && !self.jf.allowed_whole.contains(series_key)).then_some(BIG_FETCH)
+    }
 }
 
 /// Lists the pages of some issues: streamed for zip archives, downloaded
 /// to the cache first for anything else (RAR can't be read out of order).
 fn load_issues(
     account: &Account,
+    series_key: &str,
     issues: &[(String, String)],
     extensions: &HashMap<String, String>,
     downloaded: &HashMap<String, PathBuf>,
-) -> Result<(Vec<PageSource>, Vec<ChapterInfo>), String> {
+    ask_over: Option<u64>,
+) -> Result<Loaded, String> {
     let mut sources = Vec::new();
     let mut chapters = Vec::new();
     for (key, name) in issues {
@@ -227,22 +275,60 @@ fn load_issues(
 
         // Downloaded: read the local copy, no network needed.
         let local = downloaded.get(key).filter(|f| f.exists());
-        let streamed = if local.is_some() {
+        let ext = if ext.is_empty() { "cbz" } else { ext };
+        let cached = library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}"));
+        let mut known_size = None;
+        let streamed = if local.is_some() || cached.exists() {
             None
-        } else if matches!(ext, "" | "cbz" | "zip") {
+        } else if matches!(ext, "cbz" | "zip") {
             RemoteZip::open(Box::new(account.range_source(item_id)))
                 .ok()
                 .filter(|z| !z.entries.is_empty())
+                .map(|zip| (0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }).collect())
+        } else if matches!(ext, "cbr" | "rar") {
+            // Pages are read one by one unless the archive is solid.
+            let index = library::cache_dir().join("jellyfin-index").join(format!("{item_id}.json"));
+            match RemoteRar::open(Box::new(account.range_source(item_id)), Some(&index)) {
+                Ok(rar) if !rar.solid() && !rar.entries().is_empty() => Some(
+                    (0..rar.entries().len()).map(|index| PageSource::RemoteRar { archive: rar.clone(), index }).collect(),
+                ),
+                Ok(rar) => {
+                    known_size = Some(rar.len());
+                    None
+                }
+                Err(_) => None,
+            }
         } else {
             None
         };
         if let Some(file) = local {
             let (pages, _) = comic::collect_sources(file)?;
             sources.extend(pages);
-        } else if let Some(zip) = streamed {
-            sources.extend((0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }));
+        } else if let Some(pages) = streamed {
+            sources.extend::<Vec<PageSource>>(pages);
         } else {
-            let local = download(account, item_id, if ext.is_empty() { "cbz" } else { ext })?;
+            // Has to be fetched whole first. Only as the first of a batch,
+            // so one big file at a time is fetched as the reader gets to it.
+            if !chapters.is_empty() && !cached.exists() {
+                return Ok(Loaded { sources, chapters, blocked: None });
+            }
+            // Ask when it's big.
+            if let (Some(limit), false) = (ask_over, cached.exists()) {
+                let size = known_size
+                    .or_else(|| account.range_source(item_id).tail(1).ok().map(|(_, len)| len))
+                    .unwrap_or(0);
+                if size > limit {
+                    let blocked = Blocked {
+                        series_key: series_key.to_string(),
+                        name: comic::display_name(name),
+                        size,
+                        first: false,
+                        skipped: false,
+                    };
+                    return Ok(Loaded { sources, chapters, blocked: Some(blocked) });
+                }
+            }
+            let local = download(account, item_id, ext)?;
             let (pages, _) = comic::collect_sources(&local)?;
             sources.extend(pages);
         }
@@ -253,7 +339,7 @@ fn load_issues(
             page_count: sources.len() - start,
         });
     }
-    Ok((sources, chapters))
+    Ok(Loaded { sources, chapters, blocked: None })
 }
 
 /// Downloads an item into the cache (kept for re-reads; the cache is safe
@@ -269,24 +355,28 @@ fn download(account: &Account, item_id: &str, ext: &str) -> Result<PathBuf, Stri
     Ok(path)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_task(
     account: Account,
     series_key: String,
     issues: Vec<(String, String)>,
     extensions: HashMap<String, String>,
     downloaded: HashMap<String, PathBuf>,
+    ask_over: Option<u64>,
     more: bool,
 ) -> Task<Message> {
     cosmic::task::future(async move {
         let key = series_key.clone();
-        let result = tokio::task::spawn_blocking(move || load_issues(&account, &issues, &extensions, &downloaded))
-            .await
-            .unwrap_or_else(|e| Err(format!("loading panicked: {e}")));
+        let result = tokio::task::spawn_blocking(move || {
+            load_issues(&account, &series_key, &issues, &extensions, &downloaded, ask_over)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("loading panicked: {e}")));
         if more {
             Message::Jf(JfMsg::MoreLoaded(key, result))
         } else {
             match result {
-                Ok((sources, chapters)) => Message::Loaded(PathBuf::from(key), sources, chapters),
+                Ok(loaded) => Message::Jf(JfMsg::FirstLoaded(key, loaded)),
                 Err(e) => Message::LoadFailed(e),
             }
         }
@@ -411,22 +501,72 @@ impl App {
         } else {
             (issues, start)
         };
+        self.jf.blocked = None;
+        self.jf.opening = Some((key.clone(), chapter));
         let start = start.min(issues.len() - 1);
-        // Chapters that can't be streamed (CBR) are fetched whole first, and
-        // can be hundreds of MB: open with just the one being read.
-        let heavy = self.must_fetch_whole(&issues[start].0);
+        // The chapter before is loaded too, unless either might have to be
+        // fetched whole (hundreds of MB for a CBR). `load_issues` stops
+        // before a whole fetch that isn't the first in its batch.
+        let heavy = self.must_fetch_whole(&issues[start].0)
+            || start.checked_sub(1).is_some_and(|p| self.must_fetch_whole(&issues[p].0));
         let first = if heavy { start } else { start.saturating_sub(1) };
-        let end = (start + 1 + if heavy { 0 } else { WINDOW_AHEAD }).min(issues.len());
+        let end = (start + 1 + WINDOW_AHEAD).min(issues.len());
         self.start_chapter = Some(start - first);
         self.remote = Some(RemoteReading {
             account: account.clone(),
             series_key: key.clone(),
             issues: issues.clone(),
-            next: end,
+            // Moved on by the chapters that actually load.
+            next: first,
             loading: false,
         });
         self.jf.live = Live::default();
-        load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), self.dl.files(), false)
+        let ask = self.ask_over(&key);
+        load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), self.dl.files(), ask, false)
+    }
+
+    /// Asks before fetching a big chapter whole: in place of the page when
+    /// nothing is showing yet (`first`), else as a banner above it.
+    pub(super) fn big_fetch_prompt(&self, first: bool) -> Option<Element<'_, Message>> {
+        let b = self.jf.blocked.as_ref().filter(|b| !b.skipped && b.first == first)?;
+        if self.app_view != AppView::Reader || self.open_path.as_ref().is_none_or(|p| p.to_string_lossy() != b.series_key) {
+            return None;
+        }
+        let size = super::downloads::human_size(b.size);
+        let buttons = widget::row::with_capacity(3)
+            .spacing(8)
+            .push(widget::button::suggested(if first { "Download and Read" } else { "Download" }).on_press(Message::Jf(JfMsg::FetchWhole(false))))
+            .push(widget::button::standard("Don't Ask Again").on_press(Message::Jf(JfMsg::FetchWhole(true))))
+            .push(widget::button::standard(if first { "Cancel" } else { "Not Now" }).on_press(Message::Jf(JfMsg::SkipWhole)));
+        if first {
+            return Some(
+                widget::column::with_capacity(4)
+                    .spacing(12)
+                    .align_x(Alignment::Center)
+                    .max_width(520.0)
+                    .push(icon::from_name("folder-download-symbolic").size(48))
+                    .push(widget::text::title3(format!("Download {size}?")))
+                    .push(widget::text::body(format!(
+                        "“{}” can't be read a page at a time (it's packed as one solid block), so the whole file has to come from the server before it opens.",
+                        b.name
+                    )))
+                    .push(buttons)
+                    .into(),
+            );
+        }
+        Some(
+            widget::row::with_capacity(3)
+                .spacing(12)
+                .padding([4, 12])
+                .align_y(Alignment::Center)
+                .push(icon::from_name("folder-download-symbolic").size(16))
+                .push(
+                    widget::text::body(format!("The next chapter, “{}”, has to be downloaded whole ({size}).", b.name))
+                        .width(Length::Fill),
+                )
+                .push(buttons)
+                .into(),
+        )
     }
 
     /// The Jellyfin chapter or book on screen: (issue key, series key).
@@ -494,12 +634,12 @@ impl App {
                 && !self.loading
                 && self.open_path.as_ref().is_some_and(|p| p.to_string_lossy() == r.series_key);
             let near_end = self.current_page + TOP_UP_PAGES >= self.sources.len();
-            if reading && near_end && !r.loading && r.next < r.issues.len() {
+            if reading && near_end && !r.loading && r.next < r.issues.len() && self.jf.blocked.is_none() {
                 r.loading = true;
-                let ahead = if must_fetch_whole(&self.jf.extensions, &self.dl.files(), &r.issues[r.next].0) { 1 } else { WINDOW_AHEAD };
-                let end = (r.next + ahead).min(r.issues.len());
+                let end = (r.next + WINDOW_AHEAD).min(r.issues.len());
                 let issues = r.issues[r.next..end].to_vec();
-                tasks.push(load_task(r.account.clone(), r.series_key.clone(), issues, self.jf.extensions.clone(), self.dl.files(), true));
+                let ask = (self.settings.ask_before_big_fetch && !self.jf.allowed_whole.contains(&r.series_key)).then_some(BIG_FETCH);
+                tasks.push(load_task(r.account.clone(), r.series_key.clone(), issues, self.jf.extensions.clone(), self.dl.files(), ask, true));
             }
         }
 
@@ -811,11 +951,58 @@ impl App {
                 Err(e) => log::warn!("jellyfin: sending progress kept offline for {item_key}: {e}"),
             },
             JfMsg::CoverSaved => return self.reload_library(),
+            JfMsg::FirstLoaded(key, loaded) => {
+                if let Some(r) = self.remote.as_mut().filter(|r| r.series_key == key) {
+                    r.next = (r.next + loaded.chapters.len()).min(r.issues.len());
+                }
+                self.jf.blocked = loaded.blocked;
+                if loaded.chapters.is_empty() {
+                    if let Some(b) = self.jf.blocked.as_mut() {
+                        // Ask before showing anything.
+                        b.first = true;
+                        self.loading = false;
+                        self.sources.clear();
+                        self.chapters.clear();
+                        self.cache.clear();
+                        self.open_path = Some(PathBuf::from(&key));
+                        return Task::none();
+                    }
+                    return Task::done(cosmic::Action::App(Message::LoadFailed("No pages found.".into())));
+                }
+                return Task::done(cosmic::Action::App(Message::Loaded(PathBuf::from(key), loaded.sources, loaded.chapters)));
+            }
+            JfMsg::FetchWhole(dont_ask) => {
+                let Some(b) = self.jf.blocked.take() else { return Task::none() };
+                self.jf.allowed_whole.insert(b.series_key.clone());
+                if dont_ask {
+                    self.settings.ask_before_big_fetch = false;
+                    self.settings.save();
+                }
+                if b.first {
+                    let chapter = self.jf.opening.as_ref().filter(|(k, _)| *k == b.series_key).and_then(|(_, c)| *c);
+                    return self.open_entry(b.series_key, chapter);
+                }
+                // The next top-up fetches it.
+            }
+            JfMsg::SetAskBigFetch(on) => {
+                self.settings.ask_before_big_fetch = on;
+                self.settings.save();
+            }
+            JfMsg::SkipWhole => {
+                if self.jf.blocked.as_ref().is_some_and(|b| b.first) {
+                    self.jf.blocked = None;
+                    return Task::done(cosmic::Action::App(Message::GoToLibrary));
+                }
+                if let Some(b) = self.jf.blocked.as_mut() {
+                    b.skipped = true;
+                }
+            }
             JfMsg::MoreLoaded(key, result) => {
                 let Some(r) = self.remote.as_mut().filter(|r| r.series_key == key) else { return Task::none() };
                 r.loading = false;
                 match result {
-                    Ok((sources, chapters)) => {
+                    Ok(Loaded { sources, chapters, blocked }) => {
+                        self.jf.blocked = blocked;
                         r.next = (r.next + chapters.len()).min(r.issues.len());
                         let offset = self.sources.len();
                         if let Some(db) = &self.db {
@@ -915,7 +1102,7 @@ impl App {
         } else {
             let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
             let item = match self.sources.get(self.current_page) {
-                Some(PageSource::Remote { .. }) => "This chapter: streamed from the server, not cached",
+                Some(PageSource::Remote { .. } | PageSource::RemoteRar { .. }) => "This chapter: streamed from the server, not cached",
                 Some(_) => "This chapter: downloaded to the cache on this computer",
                 None => "This chapter: loading…",
             };
@@ -1091,6 +1278,10 @@ impl App {
         }
 
         if !self.jellyfin.accounts.is_empty() {
+            section = section.add(widget::settings::item(
+                "Ask before downloading big chapters that can't be streamed",
+                widget::toggler(self.settings.ask_before_big_fetch).on_toggle(|on| Message::Jf(JfMsg::SetAskBigFetch(on))),
+            ));
             section = section.add(self.downloads_settings());
         }
 
@@ -1156,5 +1347,43 @@ impl App {
             section = section.add(widget::text::caption(status.clone()));
         }
         section.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reads a CBR from `tools/mock-jellyfin.py` the way the reader does:
+    /// `NEBULA_MOCK_ITEM=<item id> cargo test loads_a_cbr_from_the_mock --
+    /// --ignored --nocapture` with the mock on port 8097.
+    #[test]
+    #[ignore]
+    fn loads_a_cbr_from_the_mock() {
+        let item = std::env::var("NEBULA_MOCK_ITEM").expect("set NEBULA_MOCK_ITEM");
+        let account = Account {
+            url: "http://localhost:8097".into(),
+            server_id: "mockserver".into(),
+            server_name: "mockfin".into(),
+            user_id: "mockuser".into(),
+            user_name: "tester".into(),
+            token: "mock-token".into(),
+        };
+        let key = account.item_key(&item);
+        let extensions = HashMap::from([(item.clone(), "cbr".to_string())]);
+        let t = Instant::now();
+        let loaded = load_issues(&account, "series", &[(key, "Chapter".into())], &extensions, &HashMap::new(), Some(BIG_FETCH)).unwrap();
+        println!("{} pages in {:?}, blocked: {}", loaded.sources.len(), t.elapsed(), loaded.blocked.is_some());
+        let t = Instant::now();
+        let page = comic::decode_source(&loaded.sources[0]).unwrap();
+        println!("page 1: {}x{} in {:?}", page.width, page.height, t.elapsed());
+        // Something that can't be read in parts: asked about, not fetched.
+        if let Ok(junk) = std::env::var("NEBULA_MOCK_JUNK") {
+            let key = account.item_key(&junk);
+            let extensions = HashMap::from([(junk, "cbr".to_string())]);
+            let loaded = load_issues(&account, "series", &[(key, "Junk".into())], &extensions, &HashMap::new(), Some(BIG_FETCH)).unwrap();
+            let b = loaded.blocked.expect("should ask first");
+            println!("asked first: {} bytes, nothing fetched: {}", b.size, loaded.sources.is_empty());
+        }
     }
 }

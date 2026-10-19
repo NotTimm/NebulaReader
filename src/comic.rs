@@ -45,6 +45,8 @@ pub enum PageSource {
     /// A page of a RAR archive: extracted with the rest of its archive in
     /// the background the first time any of its pages is wanted.
     Rar { archive: PathBuf, entry: String },
+    /// A page of a (non-solid) RAR archive on a server.
+    RemoteRar { archive: std::sync::Arc<crate::remote_rar::RemoteRar>, index: usize },
 }
 
 /// The page range one chapter occupies in the flat [`PageSource`] list.
@@ -386,6 +388,10 @@ pub fn decode_source(source: &PageSource) -> Result<Page, String> {
         PageSource::Zip { archive, entry } => decode_zip_entry(archive, entry),
         PageSource::Remote { archive, index } => {
             let name = archive.entries.get(*index).map(|e| e.name.clone()).unwrap_or_default();
+            decode_image(&name, &archive.read(*index)?)
+        }
+        PageSource::RemoteRar { archive, index } => {
+            let name = archive.entries().get(*index).map(|e| e.name.clone()).unwrap_or_default();
             decode_image(&name, &archive.read(*index)?)
         }
         PageSource::Rar { archive, entry } => {
