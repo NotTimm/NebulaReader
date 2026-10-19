@@ -69,6 +69,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.5" date="2026-10-18" type="stable">
+      <description>
+        <ul>
+          <li>Jellyfin downloads: download whole series or single chapters and books to read when the server can't be reached</li>
+          <li>Progress made while the server is offline is sent once it's back</li>
+          <li>Full screen shows the time and battery in a corner</li>
+          <li>When zoomed in, a two-page spread is shown whole and the zoom comes back on the next page</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.4" date="2026-10-18" type="stable">
       <description>
         <p>Fixes the comic reader's chapter list and error messages showing through to the desktop in theater mode when the window isn't maximized.</p>

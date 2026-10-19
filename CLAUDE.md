@@ -101,7 +101,8 @@ the owner's laptop).
   in `res/themes/`), live system colours, creators and release dates,
   wheel zoom without Ctrl, libcosmic synced with upstream, new screenshots.
   0.1.4: theater mode no longer shows the desktop through the comic
-  reader's chapter panel and error banner.
+  reader's chapter panel and error banner. 0.1.5: Jellyfin downloads and
+  offline reading, full-screen clock and battery, spreads zoomed out to fit.
   The winget job fails until #454452 is merged (the package doesn't exist
   in winget yet).
 - macOS (Apple Silicon): `packaging/build-macos.sh` builds the .app and
