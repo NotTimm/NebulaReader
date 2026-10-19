@@ -44,7 +44,11 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ; Close a running copy before upgrading files, and reopen it afterwards.
-CloseApplications=yes
+; "force" ends it when it doesn't close on Windows' request (winit apps
+; ignore the shutdown message), which a silent install (the in-app updater,
+; winget) otherwise answers by cancelling. Reading progress is saved as you
+; go, so nothing is lost.
+CloseApplications=force
 RestartApplications=yes
 ChangesAssociations=yes
 
