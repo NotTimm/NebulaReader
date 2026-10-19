@@ -355,6 +355,15 @@ pub fn title_for_file(path: &std::path::Path, is_root: impl Fn(&std::path::Path)
 }
 
 /// "Chapter 0 · Oneshot", or just "Chapter 12".
+/// The volume a chapter file says it's in: "Ch 12 Vol 2 …",
+/// "Berserk Vol. 03 Ch 21", "[Volume 4] …". `None` when there isn't one
+/// (or it's manga-tui's "Vol none").
+pub fn volume_of(name: &str) -> Option<u32> {
+    static VOL: OnceLock<Regex> = OnceLock::new();
+    let caps = re(&VOL, r"(?i)(?:^|[\s_\-\[(.])vol(?:ume)?\.?\s*(\d{1,3})(?:\b|_)").captures(name)?;
+    caps[1].parse().ok()
+}
+
 pub fn chapter_title(issue: &IssueName) -> String {
     let number = issue.number.as_deref().unwrap_or("?");
     match &issue.subtitle {
@@ -432,6 +441,17 @@ pub fn similarity(a: &str, b: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chapter_volumes() {
+        assert_eq!(volume_of("Ch 12 Vol 2 Dog And Chainsaw.cbz"), Some(2));
+        assert_eq!(volume_of("Berserk Vol. 03 Ch 21"), Some(3));
+        assert_eq!(volume_of("[Volume 4] Chapter 30"), Some(4));
+        assert_eq!(volume_of("One_Piece_v12_c101"), None);
+        assert_eq!(volume_of("Ch 0 Vol none Oneshot"), None);
+        assert_eq!(volume_of("Chainsaw Man #001 (2019)"), None);
+        assert_eq!(volume_of("Revolver 2"), None);
+    }
 
     #[test]
     fn cleans_real_folder_names() {

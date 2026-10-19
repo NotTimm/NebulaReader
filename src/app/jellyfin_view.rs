@@ -148,7 +148,7 @@ struct Live {
 /// The Jellyfin series open in the reader.
 pub struct RemoteReading {
     account: Account,
-    series_key: String,
+    pub(super) series_key: String,
     /// Issue keys in reading order.
     issues: Vec<(String, String)>,
     /// Index of the next issue not yet loaded.

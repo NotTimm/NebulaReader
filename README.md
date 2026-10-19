@@ -93,6 +93,9 @@ the way so you can read.
   shows whole, and your zoom comes back on the page after it.
 - Fast CBR: archives are unpacked in one pass and cached, so page turns
   stay instant.
+- A chapter list (C) with the whole series, grouped by volume when the
+  file names say so (or in blocks of 25), with a dropdown to jump between
+  them.
 - An info panel with the issue's `ComicInfo.xml` and what was matched
   online.
 

@@ -34,6 +34,7 @@ mod library_view;
 mod window_icon;
 mod jellyfin_view;
 mod downloads;
+mod chapter_list;
 
 use book_view::{BookMsg, BookScroll};
 use jellyfin_view::{JfMsg, JfState, RemoteReading};
@@ -105,6 +106,8 @@ pub enum Message {
     ToggleZoom,
     ToggleInfo,
     ToggleChapterSelect,
+    /// Jump the chapter panel to a volume or block of chapters.
+    ChapterGroup(usize),
     SelectChapter(usize),
     // Copy
     CopyPage,
@@ -229,6 +232,8 @@ pub struct App {
     zoom_active: bool,
     zoom: f32,
     show_chapter_select: bool,
+    /// The volume or block picked in the chapter panel's jump list.
+    chapter_group: Option<usize>,
     comic_info: Option<ComicInfo>,
     /// The DB view of what's open in the reader (series + its issues).
     reader_entry: Option<SeriesEntry>,
@@ -1170,6 +1175,7 @@ impl Application for App {
             zoom_active: false,
             zoom: 1.0,
             show_chapter_select: false,
+            chapter_group: None,
             comic_info: None,
             reader_entry: None,
             reader_issues: Vec::new(),
@@ -1416,7 +1422,7 @@ impl Application for App {
                     els.push(widget::divider::vertical::light().into());
 
                     // Chapter select (only for multi-chapter series)
-                    if self.chapters.len() > 1 {
+                    if self.chapters.len() > 1 || self.reader_issues.len() > 1 {
                         els.push(tip(
                             widget::button::icon(icon::from_name("view-list-symbolic"))
                                 .selected(self.show_chapter_select)
@@ -1650,11 +1656,8 @@ impl App {
                 "m" | "M" => { self.zoom_active = !self.zoom_active; self.zoom = 1.0; }
                 "i" | "I" => return self.update(Message::ToggleInfo),
                 "s" | "S" => return self.update(Message::ToggleSettings),
-                "c" | "C" if self.chapters.len() > 1 => {
-                    self.show_chapter_select = !self.show_chapter_select;
-                    if self.show_chapter_select {
-                        return self.queue_missing_covers();
-                    }
+                "c" | "C" if self.chapters.len() > 1 || self.reader_issues.len() > 1 => {
+                    return self.toggle_chapter_list();
                 }
                 "p" | "P" => {
                     if let Some(page) = self.page_data(self.current_page) {
@@ -1816,102 +1819,6 @@ impl App {
         // show the window through.
         widget::container(col.push(main_row))
             .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|theme: &cosmic::Theme| widget::container::Style {
-                background: Some(Background::Color(theme.cosmic().bg_color().into())),
-                ..Default::default()
-            })
-            .into()
-    }
-
-    fn build_chapter_select(&self) -> Element<'_, Message> {
-        let mut col = widget::Column::new().spacing(0);
-
-        // Header
-        col = col.push(
-            widget::Row::new()
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .padding(12)
-                .push(widget::text::title4("Chapters").width(Length::Fill))
-                .push(
-                    widget::button::icon(icon::from_name("window-close-symbolic"))
-                        .on_press(Message::ToggleChapterSelect),
-                ),
-        );
-        col = col.push(widget::divider::horizontal::light());
-
-        // Chapter list
-        let current_ch = self.current_chapter().map(|(i, _, _)| i);
-        let mut list = widget::Column::new().spacing(2).padding(8);
-
-        for (ch_idx, ch) in self.chapters.iter().enumerate() {
-            let is_current = current_ch == Some(ch_idx);
-
-            let cover: Element<'_, Message> = if let Some(h) = self.chapter_covers.get(&ch_idx) {
-                widget::image(h.clone())
-                    .width(Length::Fixed(60.0))
-                    .height(Length::Fixed(85.0))
-                    .content_fit(ContentFit::Cover)
-                    .into()
-            } else {
-                widget::container(
-                    widget::text("…").size(20),
-                )
-                .width(Length::Fixed(60.0))
-                .height(Length::Fixed(85.0))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .style(|_: &cosmic::Theme| widget::container::Style {
-                    background: Some(Background::Color(Color::from_rgba(0.5, 0.5, 0.5, 0.2))),
-                    ..Default::default()
-                })
-                .into()
-            };
-
-            let label_size: u16 = if is_current { 14 } else { 13 };
-            let ch_name = if ch.name.chars().count() > 30 {
-                format!("{}…", ch.name.chars().take(28).collect::<String>())
-            } else {
-                ch.name.clone()
-            };
-
-            let entry_content = widget::Row::new()
-                .spacing(8)
-                .align_y(Alignment::Center)
-                .push(cover)
-                .push(
-                    widget::Column::new()
-                        .spacing(2)
-                        .push(widget::text(format!("Chapter {}", ch_idx + 1)).size(11))
-                        .push(widget::text(ch_name).size(label_size))
-                        .push(widget::text(format!("{} pages", ch.page_count)).size(11)),
-                );
-
-            let row_el: Element<'_, Message> = if is_current {
-                widget::container(entry_content)
-                    .padding(6)
-                    .width(Length::Fill)
-                    .style(|_: &cosmic::Theme| widget::container::Style {
-                        background: Some(Background::Color(Color::from_rgba(0.3, 0.5, 1.0, 0.15))),
-                        ..Default::default()
-                    })
-                    .into()
-            } else {
-                mouse_area(entry_content)
-                    .on_press(Message::SelectChapter(ch_idx))
-                    .into()
-            };
-
-            list = list.push(row_el);
-        }
-
-        col = col.push(widget::scrollable::scrollable(list).height(Length::Fill));
-
-        // Its own background: in theater mode libcosmic's content frame is
-        // off, and without this the window shows through the panel.
-        widget::container(col)
-            .width(Length::Fixed(300.0))
             .height(Length::Fill)
             .style(|theme: &cosmic::Theme| widget::container::Style {
                 background: Some(Background::Color(theme.cosmic().bg_color().into())),
@@ -3107,12 +3014,13 @@ impl App {
                 }
             }
             Message::ToggleChapterSelect => {
-                self.show_chapter_select = !self.show_chapter_select;
-                if self.show_chapter_select {
-
-                    return self.queue_missing_covers();
+                if self.epub_book.is_some() {
+                    self.show_chapter_select = !self.show_chapter_select;
+                } else {
+                    return self.toggle_chapter_list();
                 }
             }
+            Message::ChapterGroup(group) => return self.jump_to_chapter_group(group),
             Message::SelectChapter(ch_idx) => {
                 if self.epub_book.is_some() {
                     return self.update_book(BookMsg::GoToChapter(ch_idx));
