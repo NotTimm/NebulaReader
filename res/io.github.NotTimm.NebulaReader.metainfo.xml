@@ -69,6 +69,19 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.8" date="2026-10-19" type="stable">
+      <description>
+        <ul>
+          <li>CBR comics open right away: pages are unpacked as they are needed instead of the whole series first</li>
+          <li>CBR comics from Jellyfin stream page by page instead of downloading whole; files that can't be read a page at a time ask before a big download</li>
+          <li>Convert to CBZ: repack CBR files unchanged into faster CBZs, with reading progress kept and the originals moved to the Trash</li>
+          <li>Every series and one-shot opens its own page with the description and details; Continue Reading goes straight to the reader</li>
+          <li>Right-click a cover to read, download, mark it read, show it in its folder, convert it or see its properties</li>
+          <li>A Downloads page lists Jellyfin downloads with their sizes and free space, removes them, and can move them to another folder or a USB drive</li>
+          <li>The page and download caches trim themselves to 2 GB</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.7" date="2026-10-19" type="stable">
       <description>
         <ul>

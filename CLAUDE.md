@@ -123,7 +123,7 @@ the owner's laptop). Last updated 2026-10-19.
   shutdown message, so silent installs over a running copy cancelled.
 - Not verified in the GUI: Jellyfin downloads/offline reading (0.1.5) are
   unit-tested only. Unfetched remote chapter covers show a placeholder.
-- Unreleased on master (owner testing, don't release): library cards open
+- Released 0.1.8 (2026-10-19) with everything below. Library cards open
   the series/details page (one-shots get a page without the chapter list,
   with a Download button); Continue Reading opens the reader. Downloads
   page with a choosable folder (USB-safe, see Jellyfin downloads above).
