@@ -84,8 +84,9 @@ the way so you can read.
 - CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.
 - Single or two pages at a time (a two-page spread shows on its own),
   theater mode, and Fit Page, which sizes the window to the page.
-- Full screen hides everything but the page; move the pointer to the top
-  to bring the header bar back.
+- Full screen hides everything but the page, with the time and battery
+  in a corner like an e-reader; move the pointer to the top to bring the
+  header bar back.
 - Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
   on a trackpad, or a pinch, and pan by dragging. The zoom stays as you
   turn pages, and each new page starts at its top.

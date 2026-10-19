@@ -25,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # COSMIC theme files; the same ron libcosmic uses.
 ron = "0.12"
+# Local time for the full-screen clock.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 quick-xml = "0.37"
@@ -75,10 +77,12 @@ winresource = "0.1"
 [target.'cfg(windows)'.dependencies]
 # Dark mode and accent colour for the Windows 11 look.
 windows-registry = "0.6"
-# Sets the title bar / taskbar icon (see src/app/window_icon.rs).
+# Sets the title bar / taskbar icon (see src/app/window_icon.rs) and reads
+# the battery (src/platform/status.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
+    "Win32_System_Power",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

@@ -163,6 +163,8 @@ pub struct Settings {
     pub library_source: LibrarySource,
     /// Ask GitHub for a newer release when the app starts.
     pub check_for_updates: bool,
+    /// Show the time and battery in a corner while reading in full screen.
+    pub fullscreen_status: bool,
 }
 
 impl Default for Settings {
@@ -179,6 +181,7 @@ impl Default for Settings {
             theme: None,
             library_source: LibrarySource::All,
             check_for_updates: true,
+            fullscreen_status: true,
         }
     }
 }

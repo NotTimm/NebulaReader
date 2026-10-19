@@ -3,6 +3,7 @@
 //! the UI can take on its look, see [`look`]).
 
 pub mod look;
+pub mod status;
 
 use std::path::PathBuf;
 

@@ -643,12 +643,18 @@ const LOCAL_ICON: &[u8] = include_bytes!("../../res/icons/ui/local.svg");
 const JELLYFIN_ICON: &[u8] = include_bytes!("../../res/icons/ui/jellyfin.svg");
 const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg");
 const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
+const BOLT: &[u8] = include_bytes!("../../res/icons/ui/bolt.svg");
 
 /// A single-colour icon of ours, drawn in the theme's text colour.
 fn ui_icon(svg: &'static [u8]) -> widget::icon::Handle {
     let mut handle = widget::icon::from_svg_bytes(svg);
     handle.symbolic = true;
     handle
+}
+
+/// A lightning bolt (battery charging), in the theme's text colour.
+pub(super) fn bolt_icon() -> widget::icon::Handle {
+    ui_icon(BOLT)
 }
 
 /// The Jellyfin logo, in the theme's text colour.

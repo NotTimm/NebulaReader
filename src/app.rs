@@ -150,6 +150,10 @@ pub enum Message {
     ImportTheme,
     ThemeFileSelected(Url),
     OpenThemesFolder,
+    /// Time to refresh the full-screen clock and battery.
+    StatusTick,
+    StatusRead(String, Option<crate::platform::status::Battery>),
+    SetFullscreenStatus(bool),
     /// Time to look for a changed system dark mode or accent colour.
     CheckSystemColors,
     /// Whether that check found a change.
@@ -208,6 +212,9 @@ pub struct App {
     fullscreen: bool,
     /// The header bar is revealed in full screen (pointer at the top edge).
     fullscreen_header: bool,
+    /// The clock and battery shown in a corner while reading in full screen.
+    status_clock: Option<String>,
+    battery: Option<crate::platform::status::Battery>,
     /// Colour themes on offer, and the picked one's colours.
     themes: Vec<themes::Entry>,
     theme_labels: Vec<String>,
@@ -569,6 +576,38 @@ fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> T
 
 /// The Open File dialog's filter. The XDG portal (Linux) takes globs;
 /// native dialogs on Windows/macOS (rfd) take bare extensions.
+/// A small battery outline that fills with the charge, drawn in the text
+/// colour (red when low and not charging), so it looks the same on every
+/// platform and icon theme.
+fn battery_glyph<'a>(b: crate::platform::status::Battery) -> Element<'a, Message> {
+    let low = b.percent <= 15 && !b.charging;
+    let fill = (16.0 * f32::from(b.percent) / 100.0).max(1.5);
+    let color = move |theme: &cosmic::Theme| -> Color {
+        if low { theme.cosmic().destructive_color().into() } else { theme.cosmic().on_bg_color().into() }
+    };
+    let level = widget::container(widget::Space::new().width(Length::Fixed(fill)).height(Length::Fill))
+        .style(move |theme: &cosmic::Theme| widget::container::Style {
+            background: Some(Background::Color(color(theme))),
+            border: cosmic::iced::Border { radius: 1.0.into(), ..Default::default() },
+            ..Default::default()
+        });
+    let body = widget::container(level)
+        .padding(2)
+        .width(Length::Fixed(22.0))
+        .height(Length::Fixed(11.0))
+        .style(move |theme: &cosmic::Theme| widget::container::Style {
+            border: cosmic::iced::Border { color: color(theme), width: 1.2, radius: 2.5.into() },
+            ..Default::default()
+        });
+    let nub = widget::container(widget::Space::new().width(Length::Fixed(2.0)).height(Length::Fixed(5.0)))
+        .style(move |theme: &cosmic::Theme| widget::container::Style {
+            background: Some(Background::Color(color(theme))),
+            border: cosmic::iced::Border { radius: [0.0, 1.0, 1.0, 0.0].into(), ..Default::default() },
+            ..Default::default()
+        });
+    widget::row::with_capacity(2).spacing(1).align_y(Alignment::Center).push(body).push(nub).into()
+}
+
 fn comic_file_filter() -> FileFilter {
     const EXTENSIONS: [&str; 5] = ["cbz", "cbr", "zip", "rar", "epub"];
     let mut filter = FileFilter::new("Comics & Books");
@@ -623,6 +662,44 @@ impl App {
     /// The look in use, with `Auto` resolved for this desktop.
     fn look(&self) -> Look {
         self.settings.look.resolve(Desktop::detect())
+    }
+
+    /// Whether the full-screen clock and battery are on screen.
+    fn status_shown(&self) -> bool {
+        self.fullscreen && self.app_view == AppView::Reader && self.settings.fullscreen_status
+    }
+
+    /// A small pill with the battery and the time.
+    fn status_overlay(&self) -> Option<Element<'_, Message>> {
+        if !self.status_shown() {
+            return None;
+        }
+        let clock = self.status_clock.clone()?;
+        let mut row = widget::row::with_capacity(4).spacing(6).align_y(Alignment::Center);
+        if let Some(b) = self.battery {
+            row = row.push(battery_glyph(b));
+            if b.charging {
+                row = row.push(widget::icon::icon(library_view::bolt_icon()).size(12));
+            }
+            row = row.push(widget::text::caption(format!("{}%", b.percent)));
+            row = row.push(widget::Space::new().width(Length::Fixed(4.0)));
+        }
+        row = row.push(widget::text::caption(clock));
+        Some(
+            widget::container(row)
+                .padding([4, 10])
+                .style(|theme: &cosmic::Theme| {
+                    let mut bg: Color = theme.cosmic().bg_color().into();
+                    bg.a = 0.7;
+                    widget::container::Style {
+                        background: Some(Background::Color(bg)),
+                        text_color: Some(theme.cosmic().on_bg_color().into()),
+                        border: cosmic::iced::Border { radius: 12.0.into(), ..Default::default() },
+                        ..Default::default()
+                    }
+                })
+                .into(),
+        )
     }
 
     /// Rebuilds the theme from the style, corners and colour theme.
@@ -1059,6 +1136,8 @@ impl Application for App {
             error: None,
             fullscreen: false,
             fullscreen_header: false,
+            status_clock: None,
+            battery: None,
             themes: Vec::new(),
             theme_labels: Vec::new(),
             theme_colors: settings.theme.as_deref().and_then(|id| themes::load(id).ok()),
@@ -1400,7 +1479,14 @@ impl Application for App {
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), pointer, system_colors])
+        // The full-screen clock: often enough that the minute is never far
+        // behind.
+        let status = if self.status_shown() {
+            cosmic::iced::time::every(std::time::Duration::from_secs(10)).map(|_| Message::StatusTick)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([events, self.jellyfin_subscription(), pointer, system_colors, status])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1441,6 +1527,19 @@ impl Application for App {
             .into()
         } else {
             content
+        };
+
+        // The time and battery in the top-right corner while reading in full
+        // screen, like an e-reader; hidden while the header bar is showing.
+        let content: Element<'_, Message> = match self.status_overlay() {
+            Some(status) if !self.fullscreen_header && !self.core.window.show_context => {
+                cosmic::iced::widget::stack![
+                    content,
+                    widget::container(status).width(Length::Fill).align_right(Length::Fill).padding([10, 14]),
+                ]
+                .into()
+            }
+            _ => content,
         };
 
         widget::dnd_destination(content, vec![Cow::Borrowed("text/uri-list")])
@@ -1926,7 +2025,10 @@ impl App {
                 widget::toggler(self.layout == Layout::Dual)
                     .on_toggle(|_| Message::ToggleLayout),
             ))
-            ;
+            .add(widget::settings::item(
+                "Clock and battery in full screen",
+                widget::toggler(s.fullscreen_status).on_toggle(Message::SetFullscreenStatus),
+            ));
 
         let has_key = comicvine::api_key().is_some();
         let metadata_section = widget::settings::section()
@@ -2916,8 +3018,33 @@ impl App {
             Message::ToggleFullscreen => {
                 self.fullscreen = !self.fullscreen;
                 let mode = if self.fullscreen { window::Mode::Fullscreen } else { window::Mode::Windowed };
+                // Fresh time and battery right away, not at the next tick.
+                let status = if self.status_shown() { self.update(Message::StatusTick) } else { Task::none() };
                 if let Some(id) = self.core.main_window_id() {
-                    return window::set_mode(id, mode);
+                    return Task::batch([window::set_mode(id, mode), status]);
+                }
+                return status;
+            }
+            Message::StatusTick => {
+                return cosmic::task::future(async {
+                    let read = tokio::task::spawn_blocking(|| {
+                        (crate::platform::status::clock(), crate::platform::status::battery())
+                    });
+                    match read.await {
+                        Ok((clock, battery)) => Message::StatusRead(clock, battery),
+                        Err(_) => Message::StatusRead(String::new(), None),
+                    }
+                });
+            }
+            Message::StatusRead(clock, battery) => {
+                self.status_clock = (!clock.is_empty()).then_some(clock);
+                self.battery = battery;
+            }
+            Message::SetFullscreenStatus(on) => {
+                self.settings.fullscreen_status = on;
+                self.settings.save();
+                if on && self.status_shown() {
+                    return self.update(Message::StatusTick);
                 }
             }
             Message::ToggleTheater => {
