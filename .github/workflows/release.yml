@@ -1,6 +1,7 @@
 # Builds every package: .deb (Ubuntu 24.04), .rpm (Fedora), AppImage,
 # .flatpak bundle, for Windows a portable .zip and a setup .exe, and for
-# Apple Silicon Macs a .dmg.
+# Apple Silicon Macs a .dmg; plus the crates vendored for the Fedora spec
+# (packaging/fedora/), which the `fedora` job test-builds.
 #
 # - Pull requests / manual runs: build them all and upload them as workflow
 #   artifacts (downloadable from the run's summary page).
@@ -213,6 +214,60 @@ jobs:
           path: packaging/cargo-sources.json
           if-no-files-found: error
 
+  vendor:
+    name: Vendor crates (Fedora/COPR)
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check the Fedora spec's version
+        run: |
+          spec="$(sed -n 's/^Version: *//p' packaging/fedora/nebula-reader.spec)"
+          native="$(bash -c 'source packaging/common.sh && version_native')"
+          if [ "$spec" != "$native" ]; then
+            echo "::error::packaging/fedora/nebula-reader.spec says Version $spec, Cargo.toml $native"; exit 1
+          fi
+
+      - name: Vendor
+        run: bash packaging/fedora/make-vendor.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nebula-reader-vendor
+          path: dist/*-vendor.tar.xz
+          if-no-files-found: error
+
+  # Builds packaging/fedora/nebula-reader.spec the way COPR or Fedora
+  # would: offline, from a source tarball and the vendor tarball. Its rpm
+  # isn't published (the GitHub .rpm comes from the rpm job).
+  fedora:
+    name: Build Fedora spec
+    needs: vendor
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    steps:
+      - name: Install tools
+        run: dnf install -y --setopt=install_weak_deps=False git tar rpm-build dnf-plugins-core
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nebula-reader-vendor
+          path: rpmbuild/SOURCES
+
+      - name: Build
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          spec=packaging/fedora/nebula-reader.spec
+          v="$(sed -n 's/^Version: *//p' "$spec")"
+          git archive --prefix="NebulaReader-$v/" -o "rpmbuild/SOURCES/NebulaReader-$v.tar.gz" HEAD
+          dnf builddep -y "$spec"
+          rpmbuild --define "_topdir $PWD/rpmbuild" -ba "$spec"
+
   flatpak:
     name: Build .flatpak
     needs: [version, cargo-sources]
@@ -414,7 +469,7 @@ jobs:
 
   sign:
     name: Sign packages
-    needs: [deb, rpm, appimage, flatpak, windows, macos]
+    needs: [deb, rpm, appimage, flatpak, windows, macos, vendor]
     runs-on: ubuntu-24.04
     steps:
       # Only for the public key the app checks against.
@@ -452,7 +507,7 @@ jobs:
           [ -n "$public" ] || { echo "no PUBLIC_KEY in src/updater.rs"; exit 1; }
           cd dist
           shopt -s nullglob
-          files=(*.deb *.rpm *.AppImage *.flatpak *.zip *-setup.exe *.dmg *.app.tar.gz)
+          files=(*.deb *.rpm *.AppImage *.flatpak *.zip *-setup.exe *.dmg *.app.tar.gz *-vendor.tar.xz)
           [ "${#files[@]}" -gt 0 ] || { echo "nothing to sign"; exit 1; }
           for f in "${files[@]}"; do
             printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m "$f" -t "file:$f" > /dev/null
@@ -469,7 +524,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
-    needs: [version, deb, rpm, appimage, flatpak, windows, macos, sign]
+    needs: [version, deb, rpm, appimage, flatpak, windows, macos, vendor, sign]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -503,6 +558,7 @@ jobs:
             dist/*-setup.exe
             dist/*.dmg
             dist/*.app.tar.gz
+            dist/*-vendor.tar.xz
             dist/*.minisig
 
   winget:

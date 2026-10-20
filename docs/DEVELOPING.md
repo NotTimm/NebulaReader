@@ -111,7 +111,9 @@ touches the code or packaging, and on manual runs, uploading them as
 workflow artifacts. To publish:
 
 1. Bump `version` in `Cargo.toml` (and add a `<release>` entry to
-   `res/io.github.NotTimm.NebulaReader.metainfo.xml`), commit, push.
+   `res/io.github.NotTimm.NebulaReader.metainfo.xml`, and set `Version`
+   and a `%changelog` entry in `packaging/fedora/nebula-reader.spec`; the
+   workflow fails if the spec's version differs), commit, push.
 2. Tag that commit with the same version prefixed by `v` and push the tag:
 
    ```
@@ -128,6 +130,38 @@ The workflow refuses to publish if a pushed tag doesn't match
 when the version has a `-suffix`) with every package attached. Re-running it updates the
 same release. `.github/workflows/ci.yml` runs `cargo test --release` on
 pushes to `master` and on pull requests.
+
+### Fedora and COPR
+
+`packaging/fedora/nebula-reader.spec` builds the app the way Fedora's
+build servers do: from the release's source tarball and its
+`nebula-reader-<version>-vendor.tar.xz`, offline, with Fedora's Rust
+macros (`cargo-rpm-macros`). The vendor tarball
+(`packaging/fedora/make-vendor.sh`) holds every crate, the libcosmic
+fork and its git dependencies included; `%cargo_prep` only redirects
+crates.io, so `%prep` appends the git sources from
+`cargo-vendor-git.toml`. The `vendor` job attaches it to each release and
+the `fedora` job test-builds the spec (its rpm isn't published).
+
+The build sets `NEBULA_DISTRO="Fedora package"`: the app then skips the
+GitHub update check and About says updates come from the package manager
+(`updates::distro`). Other distros can set their own label.
+
+For COPR: create a project, add a package with source type **SCM**, clone
+URL `https://github.com/NotTimm/NebulaReader`, spec
+`packaging/fedora/nebula-reader.spec`, build method **make srpm**
+(`.copr/Makefile`, which downloads the release tarballs). Build it after
+each release is published. To try the spec locally without root:
+
+```
+podman run --rm -it -v .:/src:Z fedora:44
+dnf -y install rpm-build dnf-plugins-core && dnf -y builddep /src/packaging/fedora/nebula-reader.spec
+```
+
+then put both tarballs in `~/rpmbuild/SOURCES` and `rpmbuild -ba` the spec.
+The `License:` line lists the crates' licenses
+(`%cargo_license_summary` prints it in the build log); refresh it when
+dependencies change.
 
 ### Signing and in-app updates
 
