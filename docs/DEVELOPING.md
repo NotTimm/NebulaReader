@@ -153,8 +153,11 @@ rawhide, x86_64, following Fedora branching; auto-rebuild off). Users run
 nebula-reader`. To set one up again: create a project, add a package with source type **SCM**, clone
 URL `https://github.com/NotTimm/NebulaReader`, spec
 `packaging/fedora/nebula-reader.spec`, build method **make srpm**
-(`.copr/Makefile`, which downloads the release tarballs). Build it after
-each release is published. To try the spec locally without root:
+(`.copr/Makefile`, which downloads the release tarballs). The release workflow's
+`copr` job starts that build after each publish, using the `COPR_CONFIG`
+secret (the whole config block from copr.fedorainfracloud.org/api, which
+expires after 180 days; renew it and paste it over the secret). Without
+the secret, build it by hand once the release is published. To try the spec locally without root:
 
 ```
 podman run --rm -it -v .:/src:Z fedora:44

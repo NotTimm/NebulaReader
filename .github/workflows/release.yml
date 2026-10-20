@@ -14,6 +14,8 @@
 #   MINISIGN_PASSWORD secrets) and published with its `<name>.minisig`; the
 #   app checks those before installing an in-app update (src/updater.rs).
 #   Without the secrets, builds skip signing and a publish fails.
+# - After a publish, the `copr` job starts the Fedora COPR build (the
+#   COPR_CONFIG secret; skipped without it).
 # - After a publish, the `winget` job opens a PR updating the package in
 #   microsoft/winget-pkgs. It does nothing until the WINGET_TOKEN secret is
 #   set (a classic token with `public_repo` scope), and it needs the
@@ -560,6 +562,28 @@ jobs:
             dist/*.app.tar.gz
             dist/*-vendor.tar.xz
             dist/*.minisig
+
+  # Starts the COPR build (timbo-slice/nebula-reader) once the release's
+  # tarballs are up; COPR's spec downloads them. COPR_CONFIG is the config
+  # block from copr.fedorainfracloud.org/api, which expires after 180 days.
+  copr:
+    name: Build on COPR
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    env:
+      COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+    steps:
+      - name: Skip (no COPR_CONFIG secret)
+        if: env.COPR_CONFIG == ''
+        run: echo "::warning::COPR_CONFIG isn't set; start the COPR build by hand."
+
+      - name: Start the build
+        if: env.COPR_CONFIG != ''
+        run: |
+          pipx install copr-cli
+          mkdir -p ~/.config
+          (umask 077; printf '%s\n' "$COPR_CONFIG" > ~/.config/copr)
+          copr-cli build-package timbo-slice/nebula-reader --name nebula-reader --nowait
 
   winget:
     name: Submit to winget
