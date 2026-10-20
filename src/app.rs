@@ -182,7 +182,7 @@ pub enum Message {
     ZoomBootstrap,
     /// A wheel tick outside the zoom viewer; true for a physical mouse
     /// wheel (line steps), false for a trackpad (pixels).
-    ZoomBootstrapWheel(bool),
+    ZoomBootstrapWheel(mouse::ScrollDelta),
     ZoomChanged(f32),
     Touch(touch::Event),
     // Drag and drop
@@ -242,6 +242,8 @@ pub struct App {
     theater_mode: bool,
     layout: Layout,
     zoom_active: bool,
+    /// Tells a mouse wheel from a touchpad scroll, for entering zoom.
+    wheel: cosmic::iced::widget::image::viewer::WheelSource,
     zoom: f32,
     show_chapter_select: bool,
     /// The volume or block picked in the chapter panel's jump list.
@@ -1216,6 +1218,7 @@ impl Application for App {
             theater_mode: settings.theater_mode,
             layout: if settings.dual_page { Layout::Dual } else { Layout::Single },
             zoom_active: false,
+            wheel: Default::default(),
             zoom: 1.0,
             show_chapter_select: false,
             chapter_group: None,
@@ -1546,9 +1549,7 @@ impl Application for App {
             // scroll (no Ctrl) is filtered in `update` so it never
             // bootstraps zoom.
             event::Event::Mouse(mouse::Event::WheelScrolled { delta }) => match status {
-                event::Status::Ignored => {
-                    Some(Message::ZoomBootstrapWheel(matches!(delta, mouse::ScrollDelta::Lines { .. })))
-                }
+                event::Status::Ignored => Some(Message::ZoomBootstrapWheel(delta)),
                 event::Status::Captured => None,
             },
             event::Event::Mouse(mouse::Event::WheelZoomed { .. }) => match status {
@@ -3284,7 +3285,10 @@ impl App {
             Message::ModifiersChanged(m) => {
                 self.modifiers = m;
             }
-            Message::ZoomBootstrapWheel(physical) => {
+            Message::ZoomBootstrapWheel(delta) => {
+                // Same mouse-or-touchpad call as the viewer (Windows reports
+                // touchpads as fractional lines).
+                let physical = self.wheel.is_physical_wheel(&delta, cosmic::iced::time::Instant::now());
                 if self.app_view == AppView::Reader
                     && (physical || self.modifiers.control())
                     && !self.sources.is_empty()

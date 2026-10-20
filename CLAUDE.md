@@ -143,7 +143,10 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
-- libcosmic: fork pinned at `d0bd23f` (patches 1–10, see Cargo.toml),
+- Windows touchpad: winit reports it as fractional `Lines`, like a wheel;
+  libcosmic patch 11 (`WheelSource`) pans on those instead of zooming.
+  Unit-tested only: the owner is to try it on a Windows laptop.
+- libcosmic: fork pinned at `6a574db` (patches 1–11, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
