@@ -73,6 +73,7 @@ impl App {
     /// indexing, not while drawing.
     pub(super) fn refresh_unindexed(&mut self) {
         self.unindexed.clear();
+        self.indexed.clear();
         let Some(db) = &self.db else { return };
         if self.jf.extensions.is_empty() {
             return;
@@ -80,16 +81,60 @@ impl App {
         let downloaded = self.dl.files();
         let series: Vec<String> =
             library::all_series(db).into_iter().map(|s| s.path).filter(|p| jellyfin::is_key(p)).collect();
+        let mut indexed = HashMap::new();
         for key in series {
-            let missing: Vec<String> = library::issues_for(db, &key)
-                .into_iter()
-                .map(|i| i.path)
-                .filter(|p| self.needs_index(p, &downloaded))
-                .collect();
+            let mut missing = Vec::new();
+            for issue in library::issues_for(db, &key) {
+                if self.needs_index(&issue.path, &downloaded) {
+                    missing.push(issue.path);
+                } else if let Some(solid) = self.index_solid(&issue.path, &downloaded) {
+                    indexed.insert(issue.path, solid);
+                }
+            }
             if !missing.is_empty() {
                 self.unindexed.insert(key, missing);
             }
         }
+        self.indexed = indexed;
+    }
+
+    /// For a streamed Jellyfin CBR with a page index: whether it's solid.
+    /// `None` when it has no index or is read from a local copy anyway.
+    fn index_solid(&self, key: &str, downloaded: &HashMap<String, PathBuf>) -> Option<bool> {
+        #[derive(serde::Deserialize)]
+        struct Flags {
+            solid: bool,
+        }
+        let (_, item_id) = jellyfin::parse_key(key)?;
+        let ext = self.jf.extensions.get(item_id).filter(|e| matches!(e.as_str(), "cbr" | "rar"))?;
+        if downloaded.get(key).is_some_and(|f| f.exists())
+            || library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}")).exists()
+        {
+            return None;
+        }
+        let bytes = std::fs::read(index_path(item_id)).ok()?;
+        serde_json::from_slice::<Flags>(&bytes).ok().map(|f| f.solid)
+    }
+
+    /// The mark on a chapter row for a CBR whose page index is built.
+    pub(super) fn index_mark(&self, issue: &str) -> Option<Element<'_, Message>> {
+        let solid = *self.indexed.get(issue)?;
+        let (name, hint) = if solid {
+            (
+                "package-x-generic-symbolic",
+                "Packed as one block (solid): downloaded whole when you read it",
+            )
+        } else {
+            ("emblem-documents-symbolic", "Page index built: opens right away and streams page by page")
+        };
+        Some(
+            widget::tooltip(
+                widget::container(icon::from_name(name).size(16)).padding(8),
+                widget::text(hint),
+                widget::tooltip::Position::Left,
+            )
+            .into(),
+        )
     }
 
     /// Whether a chapter on the series page can have its index built.

@@ -723,6 +723,7 @@ impl App {
             .push(thumb)
             .push(info)
             .push(status)
+            .push_maybe(self.index_mark(&issue.path))
             .push_maybe(download)
             .push(toggle);
 

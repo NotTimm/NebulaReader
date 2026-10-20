@@ -273,6 +273,8 @@ pub struct App {
     index_note: Option<String>,
     /// Jellyfin series -> their CBR chapters without a page index.
     unindexed: HashMap<String, Vec<String>>,
+    /// Streamed Jellyfin CBRs with a page index -> whether they're solid.
+    indexed: HashMap<String, bool>,
     /// The chapter whose right-click menu is open on the series page.
     issue_menu_target: Option<String>,
     // epub
@@ -1247,6 +1249,7 @@ impl Application for App {
             indexing: None,
             index_note: None,
             unindexed: HashMap::new(),
+            indexed: HashMap::new(),
             issue_menu_target: None,
             epub_book: None,
             epub_chapter: 0,
@@ -2476,6 +2479,10 @@ impl App {
         match message {
             Message::GoToLibrary => {
                 self.show_chapter_select = false;
+                // Reading a Jellyfin CBR built its page index.
+                if self.app_view == AppView::Reader && self.jellyfin_source().is_some() {
+                    self.refresh_unindexed();
+                }
                 // Leaving the reader also leaves full screen, so the library
                 // is a normal window again.
                 let windowed = match self.core.main_window_id() {

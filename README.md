@@ -257,7 +257,8 @@ How it works:
   per page, then saves the result so a chapter is only walked once.
   Right-click a series (or a chapter on its page) and choose **Build Page
   Indexes** to do that ahead of time, which also tells you which chapters
-  are solid. What can't be read a page at a time (a "solid" CBR, other
+  are solid. Indexed chapters get a pages symbol on the series page, solid
+  ones a box; hover it for what it means. What can't be read a page at a time (a "solid" CBR, other
   formats) is fetched whole into the cache, one chapter at a time as you
   reach it; above 100 MB Nebula asks first and shows the size (turn that
   off in **Settings → Jellyfin**). The cache trims itself to 2 GB.
