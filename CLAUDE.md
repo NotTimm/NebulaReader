@@ -5,7 +5,7 @@ app ID `io.github.NotTimm.NebulaReader`, binary `nebula-reader`, repo
 `NotTimm/NebulaReader` (renamed from `nebula-reader` for Flathub's app ID
 check; old URLs redirect). It was
 Cosmic Comic up to 0.1.0-beta.4; data folders are moved over on first
-start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #454452); the old `NotTimm.CosmicComic` PR #454352 was closed unmerged.
+start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #457241, which replaced the auto-closed #454452); the old `NotTimm.CosmicComic` PR #454352 was closed unmerged.
 
 ## Workflow
 
@@ -135,11 +135,12 @@ the owner's laptop). Last updated 2026-10-19.
   fetched whole after asking above 100 MB (`jf.blocked`). Caches trimmed
   to 2 GB at startup. Convert to CBZ: `src/convert.rs` +
   `src/app/convert_view.rs` (CBRs to the Trash via the `trash` crate).
-- winget: microsoft/winget-pkgs#454452 (`NotTimm.NebulaReader` 0.1.1) has
-  passed validation and waits for a moderator. Decision: keep it at 0.1.1
-  (changing it re-runs validation). Once merged, re-run the release
-  workflow's `winget` job from the newest release to file the update; until
-  then that job fails, which is expected.
+- winget: microsoft/winget-pkgs#457241 (`NotTimm.NebulaReader` 0.1.9, opened
+  2026-10-20) replaces #454452 (0.1.1, validated), which a bot closed when a
+  push removed 0.1.1 before adding 0.1.9. Branch `NotTimm.NebulaReader-0.1.0`
+  in `~/Projects/winget-pkgs`. Once merged, re-run the release workflow's
+  `winget` job from the newest release to file updates; until then that job
+  fails, which is expected.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
