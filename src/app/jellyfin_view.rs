@@ -919,8 +919,7 @@ impl App {
                         self.jf.offline.remove(&key);
                         let task = self.apply_jellyfin_library(&key, series);
                         // Which CBRs can have their page index built ahead.
-                        self.refresh_unindexed();
-                        return task;
+                        return Task::batch([task, self.refresh_unindexed()]);
                     }
                     Err(e) => {
                         let server = self.jellyfin.find(&key).map(|a| a.server_name.clone()).unwrap_or_default();

@@ -2480,9 +2480,11 @@ impl App {
             Message::GoToLibrary => {
                 self.show_chapter_select = false;
                 // Reading a Jellyfin CBR built its page index.
-                if self.app_view == AppView::Reader && self.jellyfin_source().is_some() {
-                    self.refresh_unindexed();
-                }
+                let reindexed = if self.app_view == AppView::Reader && self.jellyfin_source().is_some() {
+                    self.refresh_unindexed()
+                } else {
+                    Task::none()
+                };
                 // Leaving the reader also leaves full screen, so the library
                 // is a normal window again.
                 let windowed = match self.core.main_window_id() {
@@ -2492,6 +2494,7 @@ impl App {
                     }
                     _ => Task::none(),
                 };
+                let windowed = Task::batch([windowed, reindexed]);
                 if self.app_view == AppView::Reader && self.epub_book.is_some() {
                     self.persist_book_position();
                 }

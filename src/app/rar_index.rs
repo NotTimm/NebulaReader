@@ -24,6 +24,8 @@ pub enum IdxMsg {
     Done(String, Result<bool, String>),
     Stop,
     DismissNote,
+    /// A background check finished (see `App::refresh_unindexed`).
+    Refreshed(HashMap<String, Vec<String>>, HashMap<String, bool>),
 }
 
 /// The series page's right-click menu on a chapter; it acts on
@@ -55,65 +57,100 @@ pub fn index_path(item_id: &str) -> PathBuf {
     library::cache_dir().join("jellyfin-index").join(format!("{item_id}.json"))
 }
 
-impl App {
-    /// Whether this Jellyfin chapter is a CBR that would be walked when
-    /// opened: not downloaded, not fetched whole, no index yet.
-    fn needs_index(&self, key: &str, downloaded: &HashMap<String, PathBuf>) -> bool {
-        let Some((_, item_id)) = jellyfin::parse_key(key) else { return false };
-        let Some(ext) = self.jf.extensions.get(item_id).filter(|e| matches!(e.as_str(), "cbr" | "rar")) else {
-            return false;
-        };
-        !downloaded.get(key).is_some_and(|f| f.exists())
-            && !library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}")).exists()
-            && !index_path(item_id).exists()
-    }
+enum IndexState {
+    /// Not a streamed CBR (another format, downloaded, or fetched whole).
+    NotApplicable,
+    Missing,
+    Built { solid: bool },
+}
 
-    /// Works out which Jellyfin series have CBR chapters without an index,
-    /// for the right-click menus. Called when the library reloads and after
-    /// indexing, not while drawing.
-    pub(super) fn refresh_unindexed(&mut self) {
-        self.unindexed.clear();
-        self.indexed.clear();
-        let Some(db) = &self.db else { return };
-        if self.jf.extensions.is_empty() {
-            return;
-        }
-        let downloaded = self.dl.files();
-        let series: Vec<String> =
-            library::all_series(db).into_iter().map(|s| s.path).filter(|p| jellyfin::is_key(p)).collect();
-        let mut indexed = HashMap::new();
-        for key in series {
-            let mut missing = Vec::new();
-            for issue in library::issues_for(db, &key) {
-                if self.needs_index(&issue.path, &downloaded) {
-                    missing.push(issue.path);
-                } else if let Some(solid) = self.index_solid(&issue.path, &downloaded) {
-                    indexed.insert(issue.path, solid);
+/// Where a Jellyfin chapter stands. Touches the disk, so not for drawing.
+fn index_state(key: &str, extensions: &HashMap<String, String>, downloaded: &HashMap<String, PathBuf>) -> IndexState {
+    #[derive(serde::Deserialize)]
+    struct Flags {
+        solid: bool,
+    }
+    let Some((_, item_id)) = jellyfin::parse_key(key) else { return IndexState::NotApplicable };
+    let Some(ext) = extensions.get(item_id).filter(|e| matches!(e.as_str(), "cbr" | "rar")) else {
+        return IndexState::NotApplicable;
+    };
+    if downloaded.get(key).is_some_and(|f| f.exists())
+        || library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}")).exists()
+    {
+        return IndexState::NotApplicable;
+    }
+    match std::fs::read(index_path(item_id)) {
+        Err(_) => IndexState::Missing,
+        Ok(bytes) => match serde_json::from_slice::<Flags>(&bytes) {
+            Ok(f) => IndexState::Built { solid: f.solid },
+            // Damaged: the reader would walk it again.
+            Err(_) => IndexState::Missing,
+        },
+    }
+}
+
+/// Series -> chapters without an index, and chapter -> solid for those with one.
+type Scan = (HashMap<String, Vec<String>>, HashMap<String, bool>);
+
+fn scan(
+    series: Vec<(String, Vec<String>)>,
+    extensions: &HashMap<String, String>,
+    downloaded: &HashMap<String, PathBuf>,
+) -> Scan {
+    let mut unindexed = HashMap::new();
+    let mut indexed = HashMap::new();
+    for (key, issues) in series {
+        let mut missing = Vec::new();
+        for issue in issues {
+            match index_state(&issue, extensions, downloaded) {
+                IndexState::Missing => missing.push(issue),
+                IndexState::Built { solid } => {
+                    indexed.insert(issue, solid);
                 }
-            }
-            if !missing.is_empty() {
-                self.unindexed.insert(key, missing);
+                IndexState::NotApplicable => {}
             }
         }
-        self.indexed = indexed;
+        if !missing.is_empty() {
+            unindexed.insert(key, missing);
+        }
+    }
+    (unindexed, indexed)
+}
+
+impl App {
+    fn needs_index(&self, key: &str, downloaded: &HashMap<String, PathBuf>) -> bool {
+        matches!(index_state(key, &self.jf.extensions, downloaded), IndexState::Missing)
     }
 
-    /// For a streamed Jellyfin CBR with a page index: whether it's solid.
-    /// `None` when it has no index or is read from a local copy anyway.
-    fn index_solid(&self, key: &str, downloaded: &HashMap<String, PathBuf>) -> Option<bool> {
-        #[derive(serde::Deserialize)]
-        struct Flags {
-            solid: bool,
+    /// Works out, in the background, which Jellyfin CBR chapters have no
+    /// page index (for the right-click menus) and which have one (for the
+    /// marks), so the interface never waits on the file checks. Run after a
+    /// server sync, after indexing and after reading, not while drawing.
+    pub(super) fn refresh_unindexed(&mut self) -> Task<Message> {
+        let Some(db) = &self.db else { return Task::none() };
+        if self.jf.extensions.is_empty() {
+            self.unindexed.clear();
+            self.indexed.clear();
+            return Task::none();
         }
-        let (_, item_id) = jellyfin::parse_key(key)?;
-        let ext = self.jf.extensions.get(item_id).filter(|e| matches!(e.as_str(), "cbr" | "rar"))?;
-        if downloaded.get(key).is_some_and(|f| f.exists())
-            || library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}")).exists()
-        {
-            return None;
-        }
-        let bytes = std::fs::read(index_path(item_id)).ok()?;
-        serde_json::from_slice::<Flags>(&bytes).ok().map(|f| f.solid)
+        let series: Vec<(String, Vec<String>)> = library::all_series(db)
+            .into_iter()
+            .map(|s| s.path)
+            .filter(|p| jellyfin::is_key(p))
+            .map(|key| {
+                let issues = library::issues_for(db, &key).into_iter().map(|i| i.path).collect();
+                (key, issues)
+            })
+            .collect();
+        let extensions = self.jf.extensions.clone();
+        let downloaded = self.dl.files();
+        cosmic::task::future(async move {
+            let (unindexed, indexed) =
+                tokio::task::spawn_blocking(move || scan(series, &extensions, &downloaded))
+                    .await
+                    .unwrap_or_default();
+            Message::Index(IdxMsg::Refreshed(unindexed, indexed))
+        })
     }
 
     /// The mark on a chapter row for a CBR whose page index is built.
@@ -152,8 +189,7 @@ impl App {
                 let keys: Vec<String> = keys.into_iter().filter(|k| self.needs_index(k, &downloaded)).collect();
                 if keys.is_empty() {
                     self.index_note = Some("Those chapters already have their page index.".into());
-                    self.refresh_unindexed();
-                    return Task::none();
+                    return self.refresh_unindexed();
                 }
                 match self.indexing.as_mut() {
                     // Already running: add to the queue.
@@ -200,6 +236,10 @@ impl App {
                 }
             }
             IdxMsg::DismissNote => self.index_note = None,
+            IdxMsg::Refreshed(unindexed, indexed) => {
+                self.unindexed = unindexed;
+                self.indexed = indexed;
+            }
         }
         Task::none()
     }
@@ -210,8 +250,7 @@ impl App {
             let Some(job) = self.indexing.as_mut() else { return Task::none() };
             let next = if job.stopped { None } else { job.queue.pop_front() };
             let Some(key) = next else {
-                self.finish_index();
-                return Task::none();
+                return self.finish_index();
             };
             let Some(account) = self.account_for(&key) else {
                 if let Some(job) = self.indexing.as_mut() {
@@ -233,8 +272,8 @@ impl App {
         }
     }
 
-    fn finish_index(&mut self) {
-        let Some(job) = self.indexing.take() else { return };
+    fn finish_index(&mut self) -> Task<Message> {
+        let Some(job) = self.indexing.take() else { return Task::none() };
         let built = job.done - job.failed;
         let mut note = if job.stopped {
             format!("Stopped after {built} of {} page indexes.", job.total)
@@ -254,7 +293,7 @@ impl App {
             note.push_str(&format!(" {} couldn't be read from the server.", job.failed));
         }
         self.index_note = Some(note);
-        self.refresh_unindexed();
+        self.refresh_unindexed()
     }
 
     /// The progress line, or the note when it's done.
