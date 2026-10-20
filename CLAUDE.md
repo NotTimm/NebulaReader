@@ -145,10 +145,12 @@ the owner's laptop). Last updated 2026-10-20.
   the release + vendor tarballs, `NEBULA_DISTRO` turns off the GitHub
   update check), CI-built cleanly. COPR project `timbo-slice/nebula-reader`
   (owner's account), SCM + make srpm, built by hand after each release;
-  0.1.10 has no vendor tarball, so the first COPR build is 0.1.11.
+  0.1.11 is the first release it can build.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
+- Released 0.1.11 (2026-10-20): packaging only, the first release with a
+  vendor tarball, so the first COPR build.
 - Released 0.1.10 (2026-10-20): theater mode on by default
   (`Settings::default`), switched on once for settings saved before
   0.1.10 (`init` in `src/app.rs`), plus one-finger touch panning.

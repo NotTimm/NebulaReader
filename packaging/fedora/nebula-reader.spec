@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.1.10
+Version:        0.1.11
 Release:        1%{?dist}
 Summary:        Comic, manga and ebook reader with Jellyfin support
 
@@ -114,5 +114,8 @@ export NEBULA_DISTRO="Fedora package"
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Tue Oct 20 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.11-1
+- First COPR build: no GitHub update check, updates come through dnf
+
 * Tue Oct 20 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.10-1
 - First Fedora spec

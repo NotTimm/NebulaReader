@@ -69,6 +69,13 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.11" date="2026-10-20" type="stable">
+      <description>
+        <ul>
+          <li>Fedora: install with dnf from the COPR repository timbo-slice/nebula-reader, and get updates with dnf upgrade</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.10" date="2026-10-20" type="stable">
       <description>
         <ul>
