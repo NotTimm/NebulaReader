@@ -90,7 +90,8 @@ the way so you can read.
 
 - CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.
 - Single or two pages at a time (a two-page spread shows on its own),
-  theater mode, and Fit Page, which sizes the window to the page.
+  theater mode (a black backdrop, on by default), and Fit Page, which
+  sizes the window to the page.
 - Full screen hides everything but the page, with the time and battery
   in a corner like an e-reader; move the pointer to the top to bring the
   header bar back.

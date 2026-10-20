@@ -182,7 +182,8 @@ impl Default for Settings {
             background_opacity: 1.0,
             background: Background::Theme,
             dual_page: false,
-            theater_mode: false,
+            // A black backdrop suits comics, and saves power on OLED screens.
+            theater_mode: true,
             fetch_metadata: true,
             book: BookSettings::default(),
             look: crate::platform::look::Look::Auto,
