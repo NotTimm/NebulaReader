@@ -69,6 +69,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.9" date="2026-10-20" type="stable">
+      <description>
+        <ul>
+          <li>Windows: two-finger touchpad scrolling pans a zoomed page instead of zooming</li>
+          <li>Jellyfin CBRs: right-click a series or chapter to build its page index ahead of time; indexed and solid chapters are marked on the series page</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.8" date="2026-10-19" type="stable">
       <description>
         <ul>

@@ -143,10 +143,12 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
+- Released 0.1.9 (2026-10-20): the Windows touchpad fix and Build Page
+  Indexes below, both untried on the owner's machines so far.
 - Build Page Indexes (`src/app/rar_index.rs`): right-click a Jellyfin
   series card or a chapter row to walk its CBRs' headers ahead of time
   (same `remote_rar` index file the reader uses). `App::unindexed` is
-  worked out after each server sync and after a run, not while drawing.
+  worked out in the background (after a sync, a run, or leaving the reader).
   Tested against the mock with hand-built RAR5 files; solid detection is
   covered by `remote_rar`'s tests only.
 - Windows touchpad: winit reports it as fractional `Lines`, like a wheel;
