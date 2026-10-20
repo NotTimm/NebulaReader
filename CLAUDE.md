@@ -141,6 +141,11 @@ the owner's laptop). Last updated 2026-10-20.
   in `~/Projects/winget-pkgs`. Once merged, re-run the release workflow's
   `winget` job from the newest release to file updates; until then that job
   fails, which is expected.
+- Fedora/COPR: `packaging/fedora/nebula-reader.spec` (offline build from
+  the release + vendor tarballs, `NEBULA_DISTRO` turns off the GitHub
+  update check), CI-built cleanly. COPR project `timbo-slice/nebula-reader`
+  (owner's account), SCM + make srpm, built by hand after each release;
+  0.1.10 has no vendor tarball, so the first COPR build is 0.1.11.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
