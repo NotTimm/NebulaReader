@@ -26,6 +26,7 @@ pub enum CardAction {
     MarkUnread,
     ShowInFolder,
     ConvertToCbz,
+    BuildIndex,
     Properties,
 }
 
@@ -90,6 +91,14 @@ impl App {
         if self.rar_series.contains(&e.path) && !crate::jellyfin::is_key(&e.path) {
             items.push(Item::Button("Convert to CBZ…", None, CardAction::ConvertToCbz));
         }
+        // Jellyfin CBRs whose pages haven't been indexed yet.
+        if self.unindexed.contains_key(&e.path) {
+            items.push(Item::Button(
+                if one_shot { "Build Page Index" } else { "Build Page Indexes" },
+                None,
+                CardAction::BuildIndex,
+            ));
+        }
         items.push(Item::Divider);
         items.push(Item::Button("Properties", None, CardAction::Properties));
         menu::items(&HashMap::new(), items)
@@ -117,6 +126,10 @@ impl App {
                 }
             }
             CardAction::ConvertToCbz => return self.update_convert(super::convert_view::ConvMsg::Ask(key)),
+            CardAction::BuildIndex => {
+                let keys = self.unindexed.get(&key).cloned().unwrap_or_default();
+                return self.update_index(super::rar_index::IdxMsg::Build(keys));
+            }
             CardAction::Properties => return self.open_properties(&entry),
         }
         Task::none()

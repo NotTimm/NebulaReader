@@ -36,6 +36,7 @@ mod jellyfin_view;
 mod downloads;
 mod properties;
 mod convert_view;
+mod rar_index;
 mod chapter_list;
 
 use book_view::{BookMsg, BookScroll};
@@ -197,6 +198,9 @@ pub enum Message {
     CardMenuOpened(String),
     CardMenu(properties::CardAction),
     Convert(convert_view::ConvMsg),
+    Index(rar_index::IdxMsg),
+    IssueMenuOpened(String),
+    IssueMenu(rar_index::IssueAction),
     PageSizeRead(String, Option<(u32, u32)>),
     // Fit page
     FitPage,
@@ -264,6 +268,13 @@ pub struct App {
     convert_ask: Option<convert_view::ConvertPlan>,
     converting: Option<convert_view::Converting>,
     convert_note: Option<String>,
+    /// Building Jellyfin CBR page indexes ahead of time.
+    indexing: Option<rar_index::Indexing>,
+    index_note: Option<String>,
+    /// Jellyfin series -> their CBR chapters without a page index.
+    unindexed: HashMap<String, Vec<String>>,
+    /// The chapter whose right-click menu is open on the series page.
+    issue_menu_target: Option<String>,
     // epub
     epub_book: Option<epub::EpubBook>,
     epub_chapter: usize,
@@ -1233,6 +1244,10 @@ impl Application for App {
             convert_ask: None,
             converting: None,
             convert_note: None,
+            indexing: None,
+            index_note: None,
+            unindexed: HashMap::new(),
+            issue_menu_target: None,
             epub_book: None,
             epub_chapter: 0,
             epub_cover: None,
@@ -2851,6 +2866,13 @@ impl App {
             Message::CardMenuOpened(key) => self.menu_target = Some(key),
             Message::CardMenu(action) => return self.card_action(action),
             Message::Convert(msg) => return self.update_convert(msg),
+            Message::Index(msg) => return self.update_index(msg),
+            Message::IssueMenuOpened(key) => self.issue_menu_target = Some(key),
+            Message::IssueMenu(rar_index::IssueAction::BuildIndex) => {
+                if let Some(key) = self.issue_menu_target.clone() {
+                    return self.update_index(rar_index::IdxMsg::Build(vec![key]));
+                }
+            }
             Message::PageSizeRead(key, size) => self.page_size_read(key, size),
             Message::ChapterCoverReady { chapter_idx, result } => {
                 self.covers_pending.remove(&chapter_idx);

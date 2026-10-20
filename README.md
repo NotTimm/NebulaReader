@@ -254,7 +254,10 @@ How it works:
   HTTP range requests as you read, a few ahead. A CBZ (zip) has an index
   at its end, so one request finds every page. A CBR (RAR) has no index,
   so Nebula builds one: it hops from header to header with a small request
-  per page, then saves the result so a chapter is only walked once. What can't be read a page at a time (a "solid" CBR, other
+  per page, then saves the result so a chapter is only walked once.
+  Right-click a series (or a chapter on its page) and choose **Build Page
+  Indexes** to do that ahead of time, which also tells you which chapters
+  are solid. What can't be read a page at a time (a "solid" CBR, other
   formats) is fetched whole into the cache, one chapter at a time as you
   reach it; above 100 MB Nebula asks first and shows the size (turn that
   off in **Settings → Jellyfin**). The cache trims itself to 2 GB.

@@ -143,6 +143,12 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
+- Build Page Indexes (`src/app/rar_index.rs`): right-click a Jellyfin
+  series card or a chapter row to walk its CBRs' headers ahead of time
+  (same `remote_rar` index file the reader uses). `App::unindexed` is
+  worked out after each server sync and after a run, not while drawing.
+  Tested against the mock with hand-built RAR5 files; solid detection is
+  covered by `remote_rar`'s tests only.
 - Windows touchpad: winit reports it as fractional `Lines`, like a wheel;
   libcosmic patch 11 (`WheelSource`) pans on those instead of zooming.
   Unit-tested only: the owner is to try it on a Windows laptop.
