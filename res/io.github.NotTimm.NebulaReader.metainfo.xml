@@ -69,6 +69,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.10" date="2026-10-20" type="stable">
+      <description>
+        <ul>
+          <li>Theater mode (a black backdrop around the page) is on by default, and turns on once when updating; press T to switch it off</li>
+          <li>Touchscreens: drag a zoomed page with one finger, and flick to let it glide</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.9" date="2026-10-20" type="stable">
       <description>
         <ul>

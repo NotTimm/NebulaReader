@@ -144,6 +144,9 @@ the owner's laptop). Last updated 2026-10-20.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
+- Released 0.1.10 (2026-10-20): theater mode on by default
+  (`Settings::default`), switched on once for settings saved before
+  0.1.10 (`init` in `src/app.rs`), plus one-finger touch panning.
 - Released 0.1.9 (2026-10-20): the Windows touchpad fix and Build Page
   Indexes below, both untried on the owner's machines so far.
 - Build Page Indexes (`src/app/rar_index.rs`): right-click a Jellyfin
