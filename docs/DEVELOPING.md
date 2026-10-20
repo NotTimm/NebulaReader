@@ -147,7 +147,10 @@ The build sets `NEBULA_DISTRO="Fedora package"`: the app then skips the
 GitHub update check and About says updates come from the package manager
 (`updates::distro`). Other distros can set their own label.
 
-For COPR: create a project, add a package with source type **SCM**, clone
+COPR project: `timbo-slice/nebula-reader` (chroots Fedora 43, 44, 45 and
+rawhide, x86_64, following Fedora branching; auto-rebuild off). Users run
+`sudo dnf copr enable timbo-slice/nebula-reader` then `sudo dnf install
+nebula-reader`. To set one up again: create a project, add a package with source type **SCM**, clone
 URL `https://github.com/NotTimm/NebulaReader`, spec
 `packaging/fedora/nebula-reader.spec`, build method **make srpm**
 (`.copr/Makefile`, which downloads the release tarballs). Build it after
