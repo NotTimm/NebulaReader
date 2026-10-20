@@ -105,7 +105,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-19.
+the owner's laptop). Last updated 2026-10-20.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -154,7 +154,11 @@ the owner's laptop). Last updated 2026-10-19.
 - Windows touchpad: winit reports it as fractional `Lines`, like a wheel;
   libcosmic patch 11 (`WheelSource`) pans on those instead of zooming.
   Unit-tested only: the owner is to try it on a Windows laptop.
-- libcosmic: fork pinned at `6a574db` (patches 1–11, see Cargo.toml),
+- Touchscreen (patch 12, after 0.1.9): one-finger drag pans a zoomed page
+  on both axes with a flick glide, two fingers pan while pinching, and a
+  pinch that starts zoom mode works at once. Unit-tested with simulated
+  fingers only (no touchscreen here); the owner is to try it.
+- libcosmic: fork pinned at `f8d6187` (patches 1–12, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently

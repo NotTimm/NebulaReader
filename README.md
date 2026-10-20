@@ -95,7 +95,9 @@ the way so you can read.
   in a corner like an e-reader; move the pointer to the top to bring the
   header bar back.
 - Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
-  on a trackpad, or a pinch, and pan by dragging. The zoom stays as you
+  on a trackpad, or a pinch, and pan by dragging. On a touchscreen,
+  pinch to zoom and drag with one finger to move around; a flick glides
+  on. The zoom stays as you
   turn pages, and each new page starts at its top; a two-page spread
   shows whole, and your zoom comes back on the page after it.
 - CBRs open right away: the pages are listed from the archive's headers,
