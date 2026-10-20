@@ -182,6 +182,9 @@ impl App {
         if let Some(conv) = self.convert_status() {
             col = col.push(conv);
         }
+        if let Some(idx) = self.index_status() {
+            col = col.push(idx);
+        }
         if let Some(e) = self.dl.error.as_deref() {
             col = col.push(
                 widget::row::with_capacity(3)
@@ -481,6 +484,9 @@ impl App {
         if let Some(err) = self.error.as_deref() {
             col = col.push(error_banner(err));
         }
+        if let Some(idx) = self.index_status() {
+            col = col.push(idx);
+        }
 
         // ── Header: cover + details + actions ─────────────────────────────
         let cover = self.series_page_covers.get(&0).or_else(|| self.library_covers.get(&series.id));
@@ -717,6 +723,7 @@ impl App {
             .push(thumb)
             .push(info)
             .push(status)
+            .push_maybe(self.index_mark(&issue.path))
             .push_maybe(download)
             .push(toggle);
 
@@ -726,10 +733,23 @@ impl App {
             row.into()
         };
 
-        mouse_area(row)
+        let row = mouse_area(row)
             .on_press(Message::OpenEntry { key: series.path.clone(), chapter: Some(issue.idx) })
-            .interaction(cosmic::iced::mouse::Interaction::Pointer)
-            .into()
+            .interaction(cosmic::iced::mouse::Interaction::Pointer);
+        // A Jellyfin CBR without a page index: right-click to build it now.
+        if self.issue_unindexed(&series.path, &issue.path) {
+            let items = widget::menu::items(
+                &std::collections::HashMap::new(),
+                vec![widget::menu::Item::Button(
+                    "Build Page Index",
+                    None,
+                    super::rar_index::IssueAction::BuildIndex,
+                )],
+            );
+            widget::context_menu(row, Some(items)).on_open(Message::IssueMenuOpened(issue.path.clone())).into()
+        } else {
+            row.into()
+        }
     }
 }
 

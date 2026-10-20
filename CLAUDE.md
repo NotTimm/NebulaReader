@@ -105,7 +105,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-19.
+the owner's laptop). Last updated 2026-10-20.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -144,7 +144,22 @@ the owner's laptop). Last updated 2026-10-19.
 - awesome-jellyfin: listing PR jellyfin/awesome-jellyfin#707 is open.
 - Flathub: owner's call only, see "Flathub: hands off". The manifest in
   `packaging/flathub/` tracks the latest release (v0.1.5).
-- libcosmic: fork pinned at `d0bd23f` (patches 1–10, see Cargo.toml),
+- Released 0.1.9 (2026-10-20): the Windows touchpad fix and Build Page
+  Indexes below, both untried on the owner's machines so far.
+- Build Page Indexes (`src/app/rar_index.rs`): right-click a Jellyfin
+  series card or a chapter row to walk its CBRs' headers ahead of time
+  (same `remote_rar` index file the reader uses). `App::unindexed` is
+  worked out in the background (after a sync, a run, or leaving the reader).
+  Tested against the mock with hand-built RAR5 files; solid detection is
+  covered by `remote_rar`'s tests only.
+- Windows touchpad: winit reports it as fractional `Lines`, like a wheel;
+  libcosmic patch 11 (`WheelSource`) pans on those instead of zooming.
+  Unit-tested only: the owner is to try it on a Windows laptop.
+- Touchscreen (patch 12, after 0.1.9): one-finger drag pans a zoomed page
+  on both axes with a flick glide, two fingers pan while pinching, and a
+  pinch that starts zoom mode works at once. Unit-tested with simulated
+  fingers only (no touchscreen here); the owner is to try it.
+- libcosmic: fork pinned at `f8d6187` (patches 1–12, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently

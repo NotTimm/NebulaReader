@@ -287,7 +287,7 @@ fn load_issues(
                 .map(|zip| (0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }).collect())
         } else if matches!(ext, "cbr" | "rar") {
             // Pages are read one by one unless the archive is solid.
-            let index = library::cache_dir().join("jellyfin-index").join(format!("{item_id}.json"));
+            let index = super::rar_index::index_path(item_id);
             match RemoteRar::open(Box::new(account.range_source(item_id)), Some(&index)) {
                 Ok(rar) if !rar.solid() && !rar.entries().is_empty() => Some(
                     (0..rar.entries().len()).map(|index| PageSource::RemoteRar { archive: rar.clone(), index }).collect(),
@@ -433,7 +433,7 @@ impl App {
         }))
     }
 
-    fn account_for(&self, key: &str) -> Option<Account> {
+    pub(super) fn account_for(&self, key: &str) -> Option<Account> {
         let (account_key, _) = jellyfin::parse_key(key)?;
         self.jellyfin.find(account_key).cloned()
     }
@@ -917,7 +917,9 @@ impl App {
                 match result {
                     Ok(series) => {
                         self.jf.offline.remove(&key);
-                        return self.apply_jellyfin_library(&key, series);
+                        let task = self.apply_jellyfin_library(&key, series);
+                        // Which CBRs can have their page index built ahead.
+                        return Task::batch([task, self.refresh_unindexed()]);
                     }
                     Err(e) => {
                         let server = self.jellyfin.find(&key).map(|a| a.server_name.clone()).unwrap_or_default();

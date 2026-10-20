@@ -36,6 +36,7 @@ mod jellyfin_view;
 mod downloads;
 mod properties;
 mod convert_view;
+mod rar_index;
 mod chapter_list;
 
 use book_view::{BookMsg, BookScroll};
@@ -182,7 +183,7 @@ pub enum Message {
     ZoomBootstrap,
     /// A wheel tick outside the zoom viewer; true for a physical mouse
     /// wheel (line steps), false for a trackpad (pixels).
-    ZoomBootstrapWheel(bool),
+    ZoomBootstrapWheel(mouse::ScrollDelta),
     ZoomChanged(f32),
     Touch(touch::Event),
     // Drag and drop
@@ -197,6 +198,9 @@ pub enum Message {
     CardMenuOpened(String),
     CardMenu(properties::CardAction),
     Convert(convert_view::ConvMsg),
+    Index(rar_index::IdxMsg),
+    IssueMenuOpened(String),
+    IssueMenu(rar_index::IssueAction),
     PageSizeRead(String, Option<(u32, u32)>),
     // Fit page
     FitPage,
@@ -242,6 +246,8 @@ pub struct App {
     theater_mode: bool,
     layout: Layout,
     zoom_active: bool,
+    /// Tells a mouse wheel from a touchpad scroll, for entering zoom.
+    wheel: cosmic::iced::widget::image::viewer::WheelSource,
     zoom: f32,
     show_chapter_select: bool,
     /// The volume or block picked in the chapter panel's jump list.
@@ -262,6 +268,15 @@ pub struct App {
     convert_ask: Option<convert_view::ConvertPlan>,
     converting: Option<convert_view::Converting>,
     convert_note: Option<String>,
+    /// Building Jellyfin CBR page indexes ahead of time.
+    indexing: Option<rar_index::Indexing>,
+    index_note: Option<String>,
+    /// Jellyfin series -> their CBR chapters without a page index.
+    unindexed: HashMap<String, Vec<String>>,
+    /// Streamed Jellyfin CBRs with a page index -> whether they're solid.
+    indexed: HashMap<String, bool>,
+    /// The chapter whose right-click menu is open on the series page.
+    issue_menu_target: Option<String>,
     // epub
     epub_book: Option<epub::EpubBook>,
     epub_chapter: usize,
@@ -1216,6 +1231,7 @@ impl Application for App {
             theater_mode: settings.theater_mode,
             layout: if settings.dual_page { Layout::Dual } else { Layout::Single },
             zoom_active: false,
+            wheel: Default::default(),
             zoom: 1.0,
             show_chapter_select: false,
             chapter_group: None,
@@ -1230,6 +1246,11 @@ impl Application for App {
             convert_ask: None,
             converting: None,
             convert_note: None,
+            indexing: None,
+            index_note: None,
+            unindexed: HashMap::new(),
+            indexed: HashMap::new(),
+            issue_menu_target: None,
             epub_book: None,
             epub_chapter: 0,
             epub_cover: None,
@@ -1546,9 +1567,7 @@ impl Application for App {
             // scroll (no Ctrl) is filtered in `update` so it never
             // bootstraps zoom.
             event::Event::Mouse(mouse::Event::WheelScrolled { delta }) => match status {
-                event::Status::Ignored => {
-                    Some(Message::ZoomBootstrapWheel(matches!(delta, mouse::ScrollDelta::Lines { .. })))
-                }
+                event::Status::Ignored => Some(Message::ZoomBootstrapWheel(delta)),
                 event::Status::Captured => None,
             },
             event::Event::Mouse(mouse::Event::WheelZoomed { .. }) => match status {
@@ -2460,6 +2479,12 @@ impl App {
         match message {
             Message::GoToLibrary => {
                 self.show_chapter_select = false;
+                // Reading a Jellyfin CBR built its page index.
+                let reindexed = if self.app_view == AppView::Reader && self.jellyfin_source().is_some() {
+                    self.refresh_unindexed()
+                } else {
+                    Task::none()
+                };
                 // Leaving the reader also leaves full screen, so the library
                 // is a normal window again.
                 let windowed = match self.core.main_window_id() {
@@ -2469,6 +2494,7 @@ impl App {
                     }
                     _ => Task::none(),
                 };
+                let windowed = Task::batch([windowed, reindexed]);
                 if self.app_view == AppView::Reader && self.epub_book.is_some() {
                     self.persist_book_position();
                 }
@@ -2850,6 +2876,13 @@ impl App {
             Message::CardMenuOpened(key) => self.menu_target = Some(key),
             Message::CardMenu(action) => return self.card_action(action),
             Message::Convert(msg) => return self.update_convert(msg),
+            Message::Index(msg) => return self.update_index(msg),
+            Message::IssueMenuOpened(key) => self.issue_menu_target = Some(key),
+            Message::IssueMenu(rar_index::IssueAction::BuildIndex) => {
+                if let Some(key) = self.issue_menu_target.clone() {
+                    return self.update_index(rar_index::IdxMsg::Build(vec![key]));
+                }
+            }
             Message::PageSizeRead(key, size) => self.page_size_read(key, size),
             Message::ChapterCoverReady { chapter_idx, result } => {
                 self.covers_pending.remove(&chapter_idx);
@@ -3284,7 +3317,10 @@ impl App {
             Message::ModifiersChanged(m) => {
                 self.modifiers = m;
             }
-            Message::ZoomBootstrapWheel(physical) => {
+            Message::ZoomBootstrapWheel(delta) => {
+                // Same mouse-or-touchpad call as the viewer (Windows reports
+                // touchpads as fractional lines).
+                let physical = self.wheel.is_physical_wheel(&delta, cosmic::iced::time::Instant::now());
                 if self.app_view == AppView::Reader
                     && (physical || self.modifiers.control())
                     && !self.sources.is_empty()

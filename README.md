@@ -95,11 +95,14 @@ the way so you can read.
   in a corner like an e-reader; move the pointer to the top to bring the
   header bar back.
 - Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
-  on a trackpad, or a pinch, and pan by dragging. The zoom stays as you
+  on a trackpad, or a pinch, and pan by dragging. On a touchscreen,
+  pinch to zoom and drag with one finger to move around; a flick glides
+  on. The zoom stays as you
   turn pages, and each new page starts at its top; a two-page spread
   shows whole, and your zoom comes back on the page after it.
-- Fast CBR: archives are unpacked in one pass and cached, so page turns
-  stay instant.
+- CBRs open right away: the pages are listed from the archive's headers,
+  and it's unpacked in the background as you reach it, then cached, so
+  page turns stay instant.
 - A chapter list (C) with the whole series, grouped by volume when the
   file names say so (or in blocks of 25), with a dropdown to jump between
   them.
@@ -139,7 +142,11 @@ when you change them:
 | GNOME, Budgie, ... | Adwaita | light/dark and accent (settings portal) | libcosmic's header bar |
 | macOS | Adwaita shapes | light/dark mode and accent colour | macOS's |
 
-Prefer another look? **Settings → Appearance → Style**.
+Prefer another look? **Settings → Appearance → Style** picks the shapes
+and the title bar (the title bar changes the next time Nebula starts);
+light/dark mode and the accent colour still come from your system unless
+you pick a colour theme below. **Buttons** makes any style round, slightly
+round or square (COSMIC takes that from COSMIC Settings).
 
 #### Themes
 
@@ -184,12 +191,15 @@ also how apps reach the COSMIC Store).
 - Use `dnf`/`apt` as above rather than `rpm -i`/`dpkg -i`, so the
   libraries it needs (`libarchive`, `libxkbcommon`, `openssl`, ...) come
   along. The `.rpm` and `.deb` also replace an old `cosmic-comic` package.
-- **Updates:** Nebula tells you when a new version is out. On Windows
-  (installer or zip) and on the Mac, **Update now** downloads it, checks
-  it's signed by the Nebula release key, and restarts into the new
-  version. On the Mac that needs the app in Applications, not opened from
-  the disk image. Every release file also has a `.minisig` signature you
-  can check yourself with
+- **Updates:** Nebula tells you when a new version is out (Settings →
+  About has a switch for the check). From 0.1.7 on, on Windows (installer
+  or zip) and on the Mac, **Update now** downloads it, checks it's signed
+  by the Nebula release key, and restarts into the new version. On the
+  Mac that needs the app in Applications, not opened from the disk image.
+  Other installs update the usual way for them (see below). The
+  `.app.tar.gz` on each release is what the Mac app downloads to update
+  itself; you don't need it. Every release file also has a `.minisig`
+  signature you can check yourself with
   `minisign -Vm <file> -P RWQxSx3YOrrlrxqPlxFEY6QXstC2sjcXdOCKJNHI1xtIKT1o8nN41ZIV`.
 - To upgrade a Linux package, install the newer one the same way. To remove,
   `sudo dnf remove nebula-reader` or `sudo apt remove nebula-reader`. Your
@@ -210,12 +220,14 @@ also how apps reach the COSMIC Store).
 
 | | Comics | Books |
 |---|---|---|
-| Next / previous page | `→` `←` | `→` `←` `Space`, mouse wheel, or click the page edge |
+| Next / previous page | `→` `←` `Page Down` `Page Up` | `→` `←` `Page Down` `Page Up` `Space` (`Shift Space` back), mouse wheel, or click the page edge |
+| Scroll a line | | `↓` `↑` |
 | Contents / chapters | `C` | `C` |
 | Full screen | `F` (`Esc` to leave) | `F` (`Esc` to leave) |
 | Reading settings | `S` | `A`; text size `Ctrl +` / `Ctrl −`, `Ctrl 0` to reset |
-| Dual page / zoom / theater | `L` / `M` / `T` | |
+| Dual page / zoom / theater | `L` / `M` / `T`; `Ctrl 0` resets the zoom | |
 | Info panel / copy the page | `I` / `P` | |
+| Back | `Esc` leaves full screen, then zoom or the chapter list, then goes back to the library | same |
 
 Every reader button also has a hover hint with its shortcut.
 
@@ -244,7 +256,11 @@ How it works:
   HTTP range requests as you read, a few ahead. A CBZ (zip) has an index
   at its end, so one request finds every page. A CBR (RAR) has no index,
   so Nebula builds one: it hops from header to header with a small request
-  per page, then saves the result so a chapter is only walked once. What can't be read a page at a time (a "solid" CBR, other
+  per page, then saves the result so a chapter is only walked once.
+  Right-click a series (or a chapter on its page) and choose **Build Page
+  Indexes** to do that ahead of time, which also tells you which chapters
+  are solid. Indexed chapters get a pages symbol on the series page, solid
+  ones a box; hover it for what it means. What can't be read a page at a time (a "solid" CBR, other
   formats) is fetched whole into the cache, one chapter at a time as you
   reach it; above 100 MB Nebula asks first and shows the size (turn that
   off in **Settings → Jellyfin**). The cache trims itself to 2 GB.
@@ -265,8 +281,8 @@ How it works:
   server can't be reached, its libraries show only what's downloaded,
   Nebula retries every minute, and progress made meanwhile is sent once
   it's back (unless the server has something newer).
-- The **Downloads** page (the download button at the top of the library,
-  or **Settings → Jellyfin → Manage Downloads**) lists everything by
+- The **Downloads** page (the download button at the top of the library
+  once you have downloads, or **Settings → Jellyfin → Manage Downloads**) lists everything by
   series with its size, the total and the free space, and removes single
   chapters, series or everything. **Change Folder…** puts downloads
   somewhere else, such as a USB drive or SD card, and moves the existing
@@ -302,11 +318,11 @@ Linux:
 | `~/.config/nebula-reader/themes/` | Your imported themes |
 | `~/.local/share/nebula-reader/jellyfin-downloads/` | Jellyfin chapters and books downloaded for offline reading (or a `Nebula Reader` folder in the download folder you picked) |
 | `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
-| `~/.cache/nebula-reader/` | Cover thumbnails, extracted archives; safe to delete |
+| `~/.cache/nebula-reader/` | Cover thumbnails, unpacked CBRs and Jellyfin chapters fetched whole (each kept under 2 GB), CBR page indexes; safe to delete |
 
-On Windows, `library.db` and `settings.json` are in
-`%APPDATA%\NebulaReader\` and the cache is
-`%LOCALAPPDATA%\NebulaReader\Cache\`. On macOS they're in
+On Windows everything except the cache (library, settings, themes,
+Jellyfin accounts and downloads) is in `%APPDATA%\NebulaReader\` and the
+cache is `%LOCALAPPDATA%\NebulaReader\Cache\`. On macOS it's
 `~/Library/Application Support/NebulaReader/` and the cache is
 `~/Library/Caches/NebulaReader/`. The Flatpak keeps its own copies under
 `~/.var/app/io.github.NotTimm.NebulaReader/`.
