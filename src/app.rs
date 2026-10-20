@@ -1194,6 +1194,13 @@ impl Application for App {
         // fresh install has none.
         let just_updated = settings.last_version.as_deref() != Some(crate::updates::VERSION)
             && (settings.last_version.is_some() || Settings::exists());
+        // Theater mode became the default in 0.1.10; turn it on once for
+        // settings saved before that, which all hold the old `false`.
+        if just_updated
+            && settings.last_version.as_deref().is_none_or(|v| crate::updates::is_newer("0.1.10", v))
+        {
+            settings.theater_mode = true;
+        }
         if settings.last_version.as_deref() != Some(crate::updates::VERSION) {
             settings.last_version = Some(crate::updates::VERSION.into());
             settings.save();
