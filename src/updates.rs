@@ -20,6 +20,13 @@ pub fn build_commit() -> Option<&'static str> {
     option_env!("NEBULA_COMMIT").filter(|c| !c.is_empty())
 }
 
+/// Set by a distribution's package build, for example
+/// `NEBULA_DISTRO="Fedora package"`: that distro's repositories bring new
+/// versions, so the app doesn't ask GitHub, and About shows this label.
+pub fn distro() -> Option<&'static str> {
+    option_env!("NEBULA_DISTRO").filter(|d| !d.is_empty())
+}
+
 /// How this copy was installed, as far as we can tell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Install {
@@ -27,6 +34,8 @@ pub enum Install {
     AppImage,
     Rpm,
     Deb,
+    /// Built by a distribution for its repositories (`distro`).
+    Distro,
     /// Under ~/.local, from install.sh.
     Source,
     /// Per-user install from the setup .exe or winget.
@@ -38,6 +47,9 @@ pub enum Install {
 
 impl Install {
     pub fn detect() -> Self {
+        if distro().is_some() {
+            return Install::Distro;
+        }
         if std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists() {
             return Install::Flatpak;
         }
@@ -87,6 +99,7 @@ impl Install {
             Install::AppImage => "Download the new AppImage from the release page and replace this one.",
             Install::Rpm => "Download the new .rpm from the release page and install it with `sudo dnf install ./nebula-reader-*.rpm`.",
             Install::Deb => "Download the new .deb from the release page and install it with `sudo apt install ./nebula-reader_*.deb`.",
+            Install::Distro => "Your system's package manager brings in new versions (`sudo dnf upgrade` on Fedora).",
             Install::Source => "Run ./install.sh again in your checkout; it pulls the latest code and rebuilds.",
             Install::WindowsInstaller => {
                 "Run `winget upgrade NotTimm.NebulaReader`, or download and run the new installer from the release page."
@@ -97,12 +110,19 @@ impl Install {
         }
     }
 
+    /// Whether this install looks for new releases on GitHub. A distro's
+    /// package waits for its repositories, which may lag behind.
+    pub fn checks_github(self) -> bool {
+        self != Install::Distro
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Install::Flatpak => "Flatpak",
             Install::AppImage => "AppImage",
             Install::Rpm => "RPM package",
             Install::Deb => "Debian package",
+            Install::Distro => distro().unwrap_or("Distribution package"),
             Install::Source => "Built from source",
             Install::WindowsInstaller => "Windows installer",
             Install::WindowsPortable => "Windows (portable)",

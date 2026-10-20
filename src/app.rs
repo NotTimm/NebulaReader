@@ -1321,7 +1321,7 @@ impl Application for App {
         // Files an earlier update left behind.
         std::thread::spawn(crate::updater::clean_up);
         tasks.push(app.sync_all_jellyfin());
-        if app.settings.check_for_updates {
+        if app.settings.check_for_updates && crate::updates::Install::detect().checks_github() {
             tasks.push(app.check_for_updates());
         }
         if let Some(path) = flags {
@@ -2202,6 +2202,10 @@ impl App {
                             .on_press(Message::OpenUrl(updates::RELEASES_URL.into())),
                     ),
             );
+
+        if !install.checks_github() {
+            return section.add(widget::text::caption(install.how_to_update())).into();
+        }
 
         let status: Element<'_, Message> = match &self.update {
             UpdateStatus::NotChecked => widget::text::body("Not checked yet").into(),
