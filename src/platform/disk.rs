@@ -74,7 +74,8 @@ pub fn copy_file(from: &Path, to: &Path) -> Result<u64, String> {
     let part = to.with_extension("part");
     let result = (|| {
         let size = std::fs::copy(from, &part).map_err(|e| e.to_string())?;
-        std::fs::File::open(&part).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
+        // Windows only flushes a file opened for writing.
+        std::fs::File::options().write(true).open(&part).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
         let expected = std::fs::metadata(from).map_err(|e| e.to_string())?.len();
         if size != expected {
             return Err(format!("copied {size} of {expected} bytes"));

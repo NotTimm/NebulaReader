@@ -79,6 +79,7 @@
           <li>Right-click a cover to read, download, mark it read, show it in its folder, convert it or see its properties</li>
           <li>A Downloads page lists Jellyfin downloads with their sizes and free space, removes them, and can move them to another folder or a USB drive</li>
           <li>The page and download caches trim themselves to 2 GB</li>
+          <li>Issues without a story title no longer show ComicVine's "[untitled]"</li>
         </ul>
       </description>
     </release>
