@@ -20,10 +20,12 @@ use crate::library::{self, SeriesEntry, SeriesKind};
 pub enum CardAction {
     OpenPage,
     Read,
+    /// The whole series.
     Download,
-    /// Just the chapter a Continue Reading card shows.
-    DownloadIssue,
     RemoveDownloads,
+    /// Just one: a one-shot, or the chapter a Continue Reading card shows.
+    DownloadIssue,
+    RemoveIssueDownload,
     MarkRead,
     MarkUnread,
     ShowInFolder,
@@ -70,21 +72,23 @@ impl App {
         ];
         if crate::jellyfin::is_key(&e.path) {
             items.push(Item::Divider);
-            let has = self.dl.has_series(&e.path);
-            let issue = (continuing && !one_shot && !e.last_issue_path.is_empty()).then_some(e.last_issue_path.as_str());
-            if let Some(issue) = issue {
-                if !self.dl.has(issue) {
-                    items.push(Item::Button("Download Issue", None, CardAction::DownloadIssue));
+            // A one-shot, or the chapter a Continue Reading card shows, is
+            // downloaded or removed on its own; the whole series only from
+            // its other cards (and the Downloads page).
+            let single = one_shot || (continuing && !e.last_issue_path.is_empty());
+            if single {
+                let downloaded = if one_shot { self.dl.has_series(&e.path) } else { self.dl.has(&e.last_issue_path) };
+                if downloaded {
+                    items.push(Item::Button("Remove Download", None, CardAction::RemoveIssueDownload));
+                } else {
+                    let label = if one_shot || e.is_epub { "Download Book" } else { "Download Issue" };
+                    items.push(Item::Button(label, None, CardAction::DownloadIssue));
                 }
-            } else if !(one_shot && has) {
-                items.push(Item::Button(if one_shot { "Download" } else { "Download All" }, None, CardAction::Download));
-            }
-            if has {
-                items.push(Item::Button(
-                    if one_shot { "Remove Download" } else { "Remove Downloads" },
-                    None,
-                    CardAction::RemoveDownloads,
-                ));
+            } else {
+                items.push(Item::Button("Download All", None, CardAction::Download));
+                if self.dl.has_series(&e.path) {
+                    items.push(Item::Button("Remove Downloads", None, CardAction::RemoveDownloads));
+                }
             }
         }
         items.push(Item::Divider);
@@ -124,9 +128,12 @@ impl App {
                 return self.update_downloads(DlMsg::Download(items));
             }
             CardAction::DownloadIssue => {
-                if !entry.last_issue_path.is_empty() {
-                    return self.update_downloads(DlMsg::Download(vec![(entry.last_issue_path.clone(), key)]));
-                }
+                let issues = self.card_issue(&entry).into_iter().map(|i| (i, key.clone())).collect();
+                return self.update_downloads(DlMsg::Download(issues));
+            }
+            CardAction::RemoveIssueDownload => {
+                let issues = self.card_issue(&entry);
+                return self.update_downloads(DlMsg::Remove(issues));
             }
             CardAction::RemoveDownloads => {
                 let issues = self.series_issues(&key).into_iter().map(|i| i.path).collect();
@@ -147,6 +154,18 @@ impl App {
             CardAction::Properties => return self.open_properties(&entry),
         }
         Task::none()
+    }
+
+    /// The one issue a card's Download Issue / Book stands for: a
+    /// one-shot's only issue, else the chapter being read.
+    fn card_issue(&self, entry: &SeriesEntry) -> Vec<String> {
+        if entry.issue_count <= 1 {
+            self.series_issues(&entry.path).into_iter().map(|i| i.path).collect()
+        } else if entry.last_issue_path.is_empty() {
+            Vec::new()
+        } else {
+            vec![entry.last_issue_path.clone()]
+        }
     }
 
     /// Marks a whole series (or a one-shot) read or unread, on its

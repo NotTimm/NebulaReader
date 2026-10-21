@@ -552,7 +552,7 @@ impl App {
         widget::tooltip(button, widget::text(hint), hint_at).into()
     }
 
-    /// A one-shot's page: one "Download" button that shows its progress.
+    /// A one-shot's page: one "Download Book" button that shows its progress.
     pub(super) fn one_shot_download_action<'a>(&self, issue_key: &str, series_key: &str) -> Element<'a, Message> {
         let remove = Message::Dl(DlMsg::Remove(vec![issue_key.to_string()]));
         let busy = |ring: Element<'a, Message>, label: String| -> Element<'a, Message> {
@@ -564,7 +564,7 @@ impl App {
             .into()
         };
         match self.dl.state(issue_key) {
-            DlState::None => widget::button::standard("Download")
+            DlState::None => widget::button::standard("Download Book")
                 .leading_icon(icon::from_name("folder-download-symbolic"))
                 .on_press(Message::Dl(DlMsg::Download(vec![(issue_key.to_string(), series_key.to_string())])))
                 .into(),

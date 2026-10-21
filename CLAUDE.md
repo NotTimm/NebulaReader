@@ -178,9 +178,11 @@ the owner's laptop). Last updated 2026-10-21.
   start at the top. Seen working in Xvfb; untried on real machines.
 - 0.1.12 is NOT released: the version is bumped (Cargo.toml, metainfo,
   spec) but the owner stopped the publish run on 2026-10-21 (no tag, no
-  GitHub Release). Since then: right-click on a Continue Reading card
-  offers "Download Issue" (the chapter it shows, `CardAction::DownloadIssue`)
-  instead of "Download All". Publish when the owner asks.
+  GitHub Release). Since then: card menus download/remove one item for
+  one-shots ("Download Book") and Continue Reading cards ("Download
+  Issue"/"Download Book" for the chapter shown, "Remove Download" for
+  just it: `CardAction::DownloadIssue`/`RemoveIssueDownload`); other
+  series cards keep Download All / Remove Downloads.
 - Audit 2026-10-21 (in 0.1.12): one DB commit per
   sync/scan (`library::batch`, synchronous=NORMAL); a failed dark-mode
   read never means light (Mac `defaults`, Windows registry, portal);
