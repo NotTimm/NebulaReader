@@ -72,6 +72,7 @@
     <release version="0.1.12" date="2026-10-21" type="stable">
       <description>
         <ul>
+          <li>Right-clicking a Continue Reading card offers to download the chapter it shows, not the whole series</li>
           <li>Fit to Width: press Space (or the header button) to make a comic page as wide as the window and scroll down it</li>
           <li>Jellyfin comics open faster, page turns are quicker, and each page takes half the memory</li>
           <li>Dark mode no longer switches to light when the system check fails, as could happen on a Mac when opening a comic</li>

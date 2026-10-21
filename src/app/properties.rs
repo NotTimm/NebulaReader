@@ -21,6 +21,8 @@ pub enum CardAction {
     OpenPage,
     Read,
     Download,
+    /// Just the chapter a Continue Reading card shows.
+    DownloadIssue,
     RemoveDownloads,
     MarkRead,
     MarkUnread,
@@ -51,8 +53,10 @@ pub struct Props {
 }
 
 impl App {
-    /// The right-click menu for a library card.
-    pub(super) fn card_menu(&self, e: &SeriesEntry) -> Vec<menu::Tree<Message>> {
+    /// The right-click menu for a library card. On a Continue Reading card
+    /// (`continuing`), downloading means the chapter it shows, not the
+    /// whole series.
+    pub(super) fn card_menu(&self, e: &SeriesEntry, continuing: bool) -> Vec<menu::Tree<Message>> {
         use menu::Item;
 
         let one_shot = e.issue_count <= 1;
@@ -67,7 +71,12 @@ impl App {
         if crate::jellyfin::is_key(&e.path) {
             items.push(Item::Divider);
             let has = self.dl.has_series(&e.path);
-            if !(one_shot && has) {
+            let issue = (continuing && !one_shot && !e.last_issue_path.is_empty()).then_some(e.last_issue_path.as_str());
+            if let Some(issue) = issue {
+                if !self.dl.has(issue) {
+                    items.push(Item::Button("Download Issue", None, CardAction::DownloadIssue));
+                }
+            } else if !(one_shot && has) {
                 items.push(Item::Button(if one_shot { "Download" } else { "Download All" }, None, CardAction::Download));
             }
             if has {
@@ -113,6 +122,11 @@ impl App {
             CardAction::Download => {
                 let items = self.series_issues(&key).into_iter().map(|i| (i.path, key.clone())).collect();
                 return self.update_downloads(DlMsg::Download(items));
+            }
+            CardAction::DownloadIssue => {
+                if !entry.last_issue_path.is_empty() {
+                    return self.update_downloads(DlMsg::Download(vec![(entry.last_issue_path.clone(), key)]));
+                }
             }
             CardAction::RemoveDownloads => {
                 let issues = self.series_issues(&key).into_iter().map(|i| i.path).collect();

@@ -176,7 +176,11 @@ the owner's laptop). Last updated 2026-10-21.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- Released 0.1.12 (2026-10-21): Fit to Width and the audit below.
+- 0.1.12 is NOT released: the version is bumped (Cargo.toml, metainfo,
+  spec) but the owner stopped the publish run on 2026-10-21 (no tag, no
+  GitHub Release). Since then: right-click on a Continue Reading card
+  offers "Download Issue" (the chapter it shows, `CardAction::DownloadIssue`)
+  instead of "Download All". Publish when the owner asks.
 - Audit 2026-10-21 (in 0.1.12): one DB commit per
   sync/scan (`library::batch`, synchronous=NORMAL); a failed dark-mode
   read never means light (Mac `defaults`, Windows registry, portal);

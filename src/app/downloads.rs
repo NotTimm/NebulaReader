@@ -127,6 +127,12 @@ impl Downloads {
         self.done.iter().map(|(k, d)| (k.clone(), d.file.clone())).collect()
     }
 
+    /// Whether this issue is downloaded (even to a drive that isn't
+    /// connected right now).
+    pub fn has(&self, issue_key: &str) -> bool {
+        self.done.contains_key(issue_key)
+    }
+
     pub fn has_series(&self, series_key: &str) -> bool {
         self.series.contains(series_key)
     }

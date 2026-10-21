@@ -464,7 +464,7 @@ impl App {
             Message::OpenSeriesPage(e.path.clone())
         };
         let card = mouse_area(card).on_press(msg).interaction(cosmic::iced::mouse::Interaction::Pointer);
-        widget::context_menu(card, Some(self.card_menu(e)))
+        widget::context_menu(card, Some(self.card_menu(e, continuing)))
             .on_open(Message::CardMenuOpened(e.path.clone()))
             .into()
     }
