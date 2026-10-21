@@ -172,11 +172,12 @@ the owner's laptop). Last updated 2026-10-21.
   on both axes with a flick glide, two fingers pan while pinching, and a
   pinch that starts zoom mode works at once. Unit-tested with simulated
   fingers only (no touchscreen here); the owner is to try it.
-- Fit to Width (patch 13, after 0.1.11): `Space` in the comic reader (not
+- Fit to Width (patch 13, in 0.1.12): `Space` in the comic reader (not
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- Audit 2026-10-21 (after 0.1.11, unreleased): one DB commit per
+- Released 0.1.12 (2026-10-21): Fit to Width and the audit below.
+- Audit 2026-10-21 (in 0.1.12): one DB commit per
   sync/scan (`library::batch`, synchronous=NORMAL); a failed dark-mode
   read never means light (Mac `defaults`, Windows registry, portal);
   Jellyfin chapters open in parallel (`open_streamed`); decoded pixels

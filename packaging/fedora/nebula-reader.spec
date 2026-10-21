@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.1.11
+Version:        0.1.12
 Release:        1%{?dist}
 Summary:        Comic, manga and ebook reader with Jellyfin support
 
@@ -114,6 +114,11 @@ export NEBULA_DISTRO="Fedora package"
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Wed Oct 21 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.12-1
+- Fit to Width (Space) for comics
+- Faster Jellyfin opening and page turns, less memory per page
+- Dark mode no longer turns light when a check fails
+
 * Tue Oct 20 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.11-1
 - First COPR build: no GitHub update check, updates come through dnf
 

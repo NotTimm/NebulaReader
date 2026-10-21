@@ -69,6 +69,19 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.12" date="2026-10-21" type="stable">
+      <description>
+        <ul>
+          <li>Fit to Width: press Space (or the header button) to make a comic page as wide as the window and scroll down it</li>
+          <li>Jellyfin comics open faster, page turns are quicker, and each page takes half the memory</li>
+          <li>Dark mode no longer switches to light when the system check fails, as could happen on a Mac when opening a comic</li>
+          <li>Hidden Mac "._" files and __MACOSX folders are no longer listed as chapters or pages</li>
+          <li>Mac: Cmd shortcuts, Trash without a Finder prompt, and Jellyfin progress kept on Cmd+Q</li>
+          <li>Windows: removing a download works while the comic is open, and drive roots no longer list the Recycle Bin</li>
+          <li>Library syncs and scans no longer freeze the window while saving</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.11" date="2026-10-20" type="stable">
       <description>
         <ul>
