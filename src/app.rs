@@ -2985,8 +2985,10 @@ impl App {
                 match result {
                     Ok(r) => {
                         if let Some(db) = &self.db {
-                            let _ = library::upsert_scanned_series(db, &r.series);
-                            let _ = library::sync_issues(db, &r.series.path, &r.issues);
+                            let _ = library::batch(db, || {
+                                library::upsert_scanned_series(db, &r.series)?;
+                                library::sync_issues(db, &r.series.path, &r.issues)
+                            });
                             if library::get_series(db, &r.series.path).is_some_and(|e| e.meta_fetched_at == 0) {
                                 tasks.push(self.enqueue_meta(r.series.path.clone()));
                             }

@@ -306,6 +306,7 @@ pub fn open_db() -> Result<Connection, String> {
 fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=NORMAL;
          CREATE TABLE IF NOT EXISTS series (
              id              INTEGER PRIMARY KEY AUTOINCREMENT,
              path            TEXT    UNIQUE NOT NULL,
@@ -578,13 +579,29 @@ pub fn upsert_scanned_series(conn: &Connection, s: &ScannedSeries) -> Result<(),
     Ok(())
 }
 
+/// Runs `f` as one unit: all of its writes land, or none do. The
+/// outermost call is a single commit (one disk flush however many rows it
+/// writes); calls inside it nest.
+pub fn batch<T>(conn: &Connection, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    conn.execute_batch("SAVEPOINT batch").map_err(|e| format!("savepoint: {e}"))?;
+    match f() {
+        Ok(v) => {
+            conn.execute_batch("RELEASE batch").map_err(|e| format!("commit: {e}"))?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO batch; RELEASE batch");
+            Err(e)
+        }
+    }
+}
+
 /// Replaces a series' issue list with `issues` (in order), keeping reading
 /// progress and linked metadata for issues that are still there.
 pub fn sync_issues(conn: &Connection, series_path: &str, issues: &[IssueRow]) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
-    {
-        let mut upsert = tx
-            .prepare(
+    batch(conn, || {
+        let mut upsert = conn
+            .prepare_cached(
                 "INSERT INTO issues (series_path, path, idx, name, number, subtitle, page_count,
                                      release_date, creators, details_read)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 0), COALESCE(?8, ''), COALESCE(?9, ''), ?10)
@@ -617,8 +634,8 @@ pub fn sync_issues(conn: &Connection, series_path: &str, issues: &[IssueRow]) ->
         }
         let keep: std::collections::HashSet<&str> = issues.iter().map(|r| r.path.as_str()).collect();
         let existing: Vec<String> = {
-            let mut st = tx
-                .prepare("SELECT path FROM issues WHERE series_path = ?1")
+            let mut st = conn
+                .prepare_cached("SELECT path FROM issues WHERE series_path = ?1")
                 .map_err(|e| format!("prepare: {e}"))?;
             let rows = st
                 .query_map(params![series_path], |r| r.get::<_, String>(0))
@@ -626,14 +643,13 @@ pub fn sync_issues(conn: &Connection, series_path: &str, issues: &[IssueRow]) ->
             rows.flatten().collect()
         };
         for p in existing.iter().filter(|p| !keep.contains(p.as_str())) {
-            let _ = tx.execute(
+            let _ = conn.execute(
                 "DELETE FROM issues WHERE series_path = ?1 AND path = ?2",
                 params![series_path, p],
             );
         }
-    }
-    tx.commit().map_err(|e| format!("commit: {e}"))?;
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Issues whose file hasn't been checked for a date and creators yet.
@@ -939,12 +955,12 @@ pub fn prune_root(conn: &Connection, root: &str, found: &[String]) -> usize {
             st.query_map(params![root], |r| r.get::<_, String>(0)).map(|it| it.flatten().collect())
         })
         .unwrap_or_default();
-    let mut removed = 0;
-    for p in paths.iter().filter(|p| !keep.contains(p.as_str())) {
-        delete_series(conn, p);
-        removed += 1;
-    }
-    removed
+    let gone: Vec<&String> = paths.iter().filter(|p| !keep.contains(p.as_str())).collect();
+    let _ = batch(conn, || {
+        gone.iter().for_each(|p| delete_series(conn, p));
+        Ok(())
+    });
+    gone.len()
 }
 
 /// Series this library folder holds, so a scan that suddenly finds nothing
@@ -964,11 +980,14 @@ pub fn prune_jellyfin_roots(conn: &Connection, account_prefix: &str, roots: &std
             st.query_map(params![account_prefix], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.flatten().collect())
         })
         .unwrap_or_default();
-    for (path, root) in rows {
-        if !roots.contains(root.as_str()) {
-            delete_series(conn, &path);
+    let _ = batch(conn, || {
+        for (path, root) in &rows {
+            if !roots.contains(root.as_str()) {
+                delete_series(conn, path);
+            }
         }
-    }
+        Ok(())
+    });
 }
 
 /// Forgets files opened outside any library folder that have since been
@@ -1293,16 +1312,17 @@ pub fn is_placeholder_title(title: &str) -> bool {
 /// CBZ): the issue, the series' "last read" and, when the series is that
 /// one file, the series itself and its cover cache. Progress stays.
 pub fn rename_issue_file(conn: &Connection, old: &str, new: &str) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
-    for sql in [
-        "UPDATE issues SET path = ?2 WHERE path = ?1",
-        "UPDATE series SET last_issue_path = ?2 WHERE last_issue_path = ?1",
-        "UPDATE issues SET series_path = ?2 WHERE series_path = ?1",
-        "UPDATE series SET path = ?2 WHERE path = ?1",
-    ] {
-        tx.execute(sql, params![old, new]).map_err(|e| format!("rename {old}: {e}"))?;
-    }
-    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    batch(conn, || {
+        for sql in [
+            "UPDATE issues SET path = ?2 WHERE path = ?1",
+            "UPDATE series SET last_issue_path = ?2 WHERE last_issue_path = ?1",
+            "UPDATE issues SET series_path = ?2 WHERE series_path = ?1",
+            "UPDATE series SET path = ?2 WHERE path = ?1",
+        ] {
+            conn.execute(sql, params![old, new]).map_err(|e| format!("rename {old}: {e}"))?;
+        }
+        Ok(())
+    })?;
     let covers = series_cover_dir(old);
     if covers.is_dir() {
         let _ = std::fs::rename(covers, series_cover_dir(new));

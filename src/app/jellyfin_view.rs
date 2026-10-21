@@ -1148,6 +1148,8 @@ impl App {
         let Some(db) = &self.db else { return Task::none() };
         let mut tasks = Vec::new();
         let mut by_root: HashMap<String, Vec<String>> = HashMap::new();
+        // Everything below is written as one commit, not one per row.
+        let _ = db.execute_batch("SAVEPOINT batch");
 
         for s in &series {
             let clean = if naming::starts_with_chapter(&s.title) {
@@ -1229,6 +1231,7 @@ impl App {
                 _ => library::clear_pending_progress(db, &item_key, at),
             }
         }
+        let _ = db.execute_batch("RELEASE batch");
         let names: Vec<String> =
             series.iter().filter(|s| library::get_series(db, &s.key).is_some_and(|e| e.meta_fetched_at == 0)).map(|s| s.key.clone()).collect();
         for key in names {
