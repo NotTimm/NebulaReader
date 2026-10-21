@@ -117,7 +117,17 @@ static HOST: RwLock<Option<HostColors>> = RwLock::new(None);
 /// Reads the host desktop's colours. Call once, before the app starts
 /// (it may briefly block on the settings portal or registry).
 pub fn init(desktop: Desktop) {
-    *HOST.write().unwrap_or_else(|e| e.into_inner()) = Some(read_host_colors(desktop).unwrap_or_default());
+    // A read that fails (a busy moment) would start the app in light mode;
+    // try again briefly before falling back to the look's defaults.
+    let colors = (0..3)
+        .find_map(|attempt| {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            read_host_colors(desktop)
+        })
+        .unwrap_or_default();
+    *HOST.write().unwrap_or_else(|e| e.into_inner()) = Some(colors);
 }
 
 /// Reads the host's colours again; true when they changed since the last
@@ -277,16 +287,16 @@ fn luminance(c: Srgb) -> f32 {
 fn read_host_colors(desktop: Desktop) -> Option<HostColors> {
     Some(match desktop {
         Desktop::Kde => {
-            let mut colors = kde::read().unwrap_or_default();
+            let colors = kde::read().unwrap_or_default();
             // A missing kdeglobals (fresh account, sandbox without access)
             // still has the portal for dark mode and accent.
             if colors.dark.is_none() && colors.window.is_none() {
-                colors = portal::read();
+                return portal::read();
             }
             colors
         }
-        Desktop::Windows => windows::read(),
-        Desktop::Gnome | Desktop::Other => portal::read(),
+        Desktop::Windows => return windows::read(),
+        Desktop::Gnome | Desktop::Other => return portal::read(),
         Desktop::MacOs => return macos::read(),
         Desktop::Cosmic => HostColors::default(),
     })
@@ -350,19 +360,19 @@ mod kde {
 mod portal {
     use super::*;
 
+    /// `None` when the portal didn't answer (not running, or slow), so a
+    /// failed check isn't mistaken for light mode.
     #[cfg(target_os = "linux")]
-    pub fn read() -> HostColors {
+    pub fn read() -> Option<HostColors> {
         use ashpd::desktop::settings::{ColorScheme, Settings};
 
-        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
-            return HostColors::default();
-        };
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
         let read = async {
             let settings = Settings::new().await.ok()?;
-            let dark = match settings.color_scheme().await {
-                Ok(ColorScheme::PreferDark) => Some(true),
-                Ok(ColorScheme::PreferLight) => Some(false),
-                _ => None,
+            let dark = match settings.color_scheme().await.ok()? {
+                ColorScheme::PreferDark => Some(true),
+                ColorScheme::PreferLight => Some(false),
+                ColorScheme::NoPreference => None,
             };
             // `accent_color` is newer (GNOME 47+); older portals just don't have it.
             let accent = settings.accent_color().await.ok().and_then(|c| {
@@ -379,12 +389,11 @@ mod portal {
         rt.block_on(async { tokio::time::timeout(std::time::Duration::from_millis(500), read).await })
             .ok()
             .flatten()
-            .unwrap_or_default()
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub fn read() -> HostColors {
-        HostColors::default()
+    pub fn read() -> Option<HostColors> {
+        Some(HostColors::default())
     }
 }
 
@@ -392,15 +401,22 @@ mod portal {
 mod windows {
     use super::*;
 
+    /// `None` when the registry couldn't be read, so a failed check isn't
+    /// mistaken for light mode. A value that isn't there means light.
     #[cfg(windows)]
-    pub fn read() -> HostColors {
+    pub fn read() -> Option<HostColors> {
         use windows_registry::CURRENT_USER;
 
-        let dark = CURRENT_USER
+        // HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND): the key or value isn't set.
+        const NOT_FOUND: i32 = 0x8007_0002_u32 as i32;
+        let dark = match CURRENT_USER
             .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
             .and_then(|k| k.get_u32("AppsUseLightTheme"))
-            .ok()
-            .map(|light| light == 0);
+        {
+            Ok(light) => Some(light == 0),
+            Err(e) if e.code().0 == NOT_FOUND => None,
+            Err(_) => return None,
+        };
         // The shade Windows 11's own apps use for this mode.
         let shade = CURRENT_USER
             .open(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent")
@@ -419,7 +435,7 @@ mod windows {
                     ((abgr >> 16) & 0xff) as f32 / 255.0,
                 )
             }));
-        HostColors { dark, accent, ..HostColors::default() }
+        Some(HostColors { dark, accent, ..HostColors::default() })
     }
 
     /// Picks from `AccentPalette`: eight RGBA entries from lightest to
@@ -433,8 +449,8 @@ mod windows {
     }
 
     #[cfg(not(windows))]
-    pub fn read() -> HostColors {
-        HostColors::default()
+    pub fn read() -> Option<HostColors> {
+        Some(HostColors::default())
     }
 }
 
@@ -442,24 +458,35 @@ mod windows {
 mod macos {
     use super::*;
 
-    /// `None` when `defaults` couldn't be run (a busy moment, say), so a
-    /// failed check isn't mistaken for light mode.
+    /// `None` when `defaults` couldn't be run or failed for any reason
+    /// but a key that isn't set (a busy moment, say), so a failed check
+    /// isn't mistaken for light mode.
     #[cfg(target_os = "macos")]
     pub fn read() -> Option<HostColors> {
-        // `Ok(None)`: the key isn't set (`defaults` exits non-zero).
-        let read = |key: &str| -> std::io::Result<Option<String>> {
-            let out = std::process::Command::new("/usr/bin/defaults").args(["read", "-g", key]).output()?;
-            Ok(out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()))
+        let read = |key: &str| -> Option<Option<String>> {
+            let out = std::process::Command::new("/usr/bin/defaults").args(["read", "-g", key]).output().ok()?;
+            if out.status.success() {
+                return Some(Some(String::from_utf8_lossy(&out.stdout).trim().to_string()));
+            }
+            // "The domain/default pair of (…) does not exist": not set.
+            key_missing(&String::from_utf8_lossy(&out.stderr)).then_some(None)
         };
         // The key only exists in dark mode (Auto included, while it's dark).
-        let dark = Some(read("AppleInterfaceStyle").ok()?.is_some_and(|v| v == "Dark"));
-        let accent = accent(read("AppleAccentColor").ok()?.and_then(|v| v.parse().ok()));
+        let dark = Some(read("AppleInterfaceStyle")?.is_some_and(|v| v == "Dark"));
+        let accent = accent(read("AppleAccentColor")?.and_then(|v| v.parse().ok()));
         Some(HostColors { dark, accent: Some(accent), ..HostColors::default() })
     }
 
     #[cfg(not(target_os = "macos"))]
     pub fn read() -> Option<HostColors> {
         Some(HostColors::default())
+    }
+
+    /// Whether `defaults read` failed because the key isn't set, rather
+    /// than for some other reason.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn key_missing(stderr: &str) -> bool {
+        stderr.contains("does not exist")
     }
 
     /// `AppleAccentColor` is an index into the system palette; unset means
@@ -544,6 +571,15 @@ ColorScheme=BreezeDark
         assert_eq!(macos::accent(None), macos::accent(Some(4)));
         assert_ne!(macos::accent(Some(0)), macos::accent(None));
         assert!(macos::accent(Some(2)).red > 0.99);
+    }
+
+    #[test]
+    fn macos_missing_key_is_told_apart_from_failures() {
+        assert!(macos::key_missing(
+            "2026-10-21 defaults[123:456] \nThe domain/default pair of (kCFPreferencesAnyApplication, AppleInterfaceStyle) does not exist\n"
+        ));
+        assert!(!macos::key_missing(""));
+        assert!(!macos::key_missing("Could not connect to cfprefsd"));
     }
 
     #[test]
