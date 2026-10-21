@@ -176,10 +176,22 @@ the owner's laptop). Last updated 2026-10-21.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- Audit 2026-10-21 (after 0.1.11): one DB commit per sync/scan
-  (`library::batch`, synchronous=NORMAL); a failed dark-mode read never
-  means light (Mac `defaults`, Windows registry, portal); Jellyfin
-  chapters open in parallel (`open_streamed`). More findings in progress.
+- Audit 2026-10-21 (after 0.1.11, unreleased): one DB commit per
+  sync/scan (`library::batch`, synchronous=NORMAL); a failed dark-mode
+  read never means light (Mac `defaults`, Windows registry, portal);
+  Jellyfin chapters open in parallel (`open_streamed`); decoded pixels
+  move into the handle (cache holds `PageSize`), nearby pages are
+  `allocate`d on the GPU, `page_gen` drops decodes/covers/ComicInfo from
+  a previous comic; Mac `._`/`__MACOSX` skipped (`comic::is_mac_junk`),
+  Windows `$RECYCLE.BIN`/hidden skipped in scans; Cmd shortcuts on Mac;
+  Trash via NSFileManager on Mac; at most 8 CBZs open (`forget_zip`
+  before deleting); Drop for App sends Jellyfin progress (Mac Cmd+Q).
+  Not done yet: Finder "Open With" on Mac (no CFBundleDocumentTypes,
+  no openURLs handling), downloads/db in Roaming AppData on Windows,
+  theme polling every 5 s instead of change signals, library grid
+  rebuilt on every message, Jellyfin library fetch one folder at a time,
+  scans re-open known archives with no concurrency cap.
+- `tools/check-targets.sh` type-checks Windows and macOS from Linux.
 - libcosmic: fork pinned at `cd86f68` (patches 1–13, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
