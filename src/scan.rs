@@ -48,7 +48,21 @@ fn is_image(p: &Path) -> bool {
 }
 
 fn is_hidden(p: &Path) -> bool {
-    p.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(true)
+    let Some(name) = p.file_name().map(|n| n.to_string_lossy()) else { return true };
+    // Windows: a drive's `$RECYCLE.BIN` and `System Volume Information`
+    // (and anything else marked hidden or system) aren't comics.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        if name.starts_with('$')
+            || name == "System Volume Information"
+            || std::fs::metadata(p).is_ok_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0)
+        {
+            return true;
+        }
+    }
+    name.starts_with('.')
 }
 
 struct DirInfo {

@@ -108,7 +108,7 @@ impl App {
                             }
                         }
                         crate::comic::forget_rar_cache(&old);
-                        match trash::delete(&old) {
+                        match crate::platform::move_to_trash(&old) {
                             Ok(()) => c.trashed += 1,
                             Err(e) => c.errors.push(format!(
                                 "{} was converted, but couldn't go to the Trash ({e}); delete it yourself",

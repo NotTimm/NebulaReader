@@ -7,24 +7,50 @@ use compress_tools::{ArchiveContents, ArchiveIterator};
 
 /// Open zip archives, cached by path, so preloading nearby pages doesn't
 /// reopen the file and re-parse the central directory on every single page.
-type ZipCache = Mutex<HashMap<PathBuf, Arc<Mutex<zip::ZipArchive<File>>>>>;
+/// Only the most recently used few stay open: each holds the file open,
+/// and macOS allows an app only 256 open files by default, Windows can't
+/// delete an open file, and a drive with open files won't eject.
+struct ZipCache {
+    open: HashMap<PathBuf, (Arc<Mutex<zip::ZipArchive<File>>>, u64)>,
+    uses: u64,
+}
 
-fn zip_cache() -> &'static ZipCache {
-    static CACHE: OnceLock<ZipCache> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+const ZIPS_KEPT_OPEN: usize = 8;
+
+fn zip_cache() -> &'static Mutex<ZipCache> {
+    static CACHE: OnceLock<Mutex<ZipCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(ZipCache { open: HashMap::new(), uses: 0 }))
 }
 
 fn open_zip(path: &Path) -> Result<Arc<Mutex<zip::ZipArchive<File>>>, String> {
-    let mut cache = zip_cache().lock().unwrap();
-    if let Some(archive) = cache.get(path) {
-        return Ok(archive.clone());
+    {
+        let mut cache = zip_cache().lock().unwrap();
+        cache.uses += 1;
+        let uses = cache.uses;
+        if let Some((archive, used)) = cache.open.get_mut(path) {
+            *used = uses;
+            return Ok(archive.clone());
+        }
     }
+    // Parsed without holding the cache, so other archives' pages carry on.
     let file = File::open(path).map_err(|e| format!("failed to open {}: {e}", path.display()))?;
     let archive = zip::ZipArchive::new(file)
         .map_err(|e| format!("failed to read zip {}: {e}", path.display()))?;
     let archive = Arc::new(Mutex::new(archive));
-    cache.insert(path.to_path_buf(), archive.clone());
+    let mut cache = zip_cache().lock().unwrap();
+    let uses = cache.uses;
+    let archive = cache.open.entry(path.to_path_buf()).or_insert((archive, uses)).0.clone();
+    while cache.open.len() > ZIPS_KEPT_OPEN {
+        let Some(oldest) = cache.open.iter().min_by_key(|(_, (_, used))| *used).map(|(p, _)| p.clone()) else { break };
+        cache.open.remove(&oldest);
+    }
     Ok(archive)
+}
+
+/// Closes `path` if it's open, before it's deleted or moved (Windows
+/// can't delete an open file).
+pub fn forget_zip(path: &Path) {
+    zip_cache().lock().unwrap().open.remove(path);
 }
 
 /// A single decoded page.
@@ -62,19 +88,29 @@ pub struct ChapterInfo {
 
 pub(crate) fn is_image_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]
-        .iter()
-        .any(|ext| lower.ends_with(ext))
+    !is_mac_junk(name)
+        && [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
+}
+
+/// Files a Mac leaves beside the real ones: `._name` (a file's extra
+/// attributes, written on drives and shares without them, e.g. exFAT or
+/// SMB) and anything under `__MACOSX/` in a zip made with Finder. They
+/// share the real file's extension but aren't comics or pages.
+pub(crate) fn is_mac_junk(name: &str) -> bool {
+    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    file.starts_with("._") || name.starts_with("__MACOSX/") || name.contains("/__MACOSX/")
 }
 
 fn is_zip_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.ends_with(".cbz") || lower.ends_with(".zip")
+    !is_mac_junk(name) && (lower.ends_with(".cbz") || lower.ends_with(".zip"))
 }
 
 fn is_rar_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    lower.ends_with(".cbr") || lower.ends_with(".rar")
+    !is_mac_junk(name) && (lower.ends_with(".cbr") || lower.ends_with(".rar"))
 }
 
 pub(crate) fn natural_key(name: &str) -> Vec<(String, u64)> {
@@ -784,5 +820,24 @@ mod rar_tests {
         let t = std::time::Instant::now();
         decode_source(&pages[1]).unwrap();
         println!("second page (already extracted) in {:?}", t.elapsed());
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn mac_leftovers_are_not_pages_or_chapters() {
+        assert!(is_image_name("Ch 1/001.jpg"));
+        assert!(!is_image_name("Ch 1/._001.jpg"));
+        assert!(!is_image_name("._001.jpg"));
+        assert!(!is_image_name("__MACOSX/Ch 1/._001.jpg"));
+        assert!(!is_image_name("Ch 1/__MACOSX/001.jpg"));
+        assert!(is_zip_name("Issue 01.cbz"));
+        assert!(!is_zip_name("._Issue 01.cbz"));
+        assert!(!is_rar_name("._Issue 01.cbr"));
+        // A name that merely starts with an underscore is fine.
+        assert!(is_image_name("_cover.png"));
     }
 }

@@ -1764,7 +1764,8 @@ impl App {
                 }
                 return Task::none();
             }
-            let ctrl = self.modifiers.control();
+            // Cmd on a Mac, Ctrl elsewhere.
+            let ctrl = self.modifiers.command();
             let shift = self.modifiers.shift();
             let msg = match &key {
                 Key::Character(c) if c.as_str() == " " && shift => Some(BookMsg::PageUp),
@@ -1802,7 +1803,9 @@ impl App {
                 return self.update(Message::PrevPage);
             }
             // Comics only: in a book Space turns the page (above).
-            Key::Character(c) if c.as_str() == " " && self.app_view == AppView::Reader && !self.sources.is_empty() => {
+            Key::Character(c)
+                if c.as_str() == " " && self.app_view == AppView::Reader && !self.sources.is_empty() && !self.modifiers.command() =>
+            {
                 return self.update(Message::ToggleFitWidth);
             }
             Key::Named(Named::Escape) => {
@@ -1816,14 +1819,16 @@ impl App {
             }
             Key::Character(c)
                 if self.app_view == AppView::Reader
-                    && self.modifiers.control()
+                    && self.modifiers.command()
                     && c.as_str() == "0" =>
             {
                 self.zoom_active = false;
                 self.fit_width = false;
                 self.zoom = 1.0;
             }
-            Key::Character(c) if self.app_view == AppView::Reader => match c.as_str() {
+            // Single-letter shortcuts, unless Cmd/Ctrl is held (Cmd+C on a
+            // Mac copies, it doesn't open the chapter list).
+            Key::Character(c) if self.app_view == AppView::Reader && !self.modifiers.command() => match c.as_str() {
                 "f" | "F" => return self.update(Message::ToggleFullscreen),
                 "t" | "T" => self.theater_mode = !self.theater_mode,
                 "l" | "L" => {

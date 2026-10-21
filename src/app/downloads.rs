@@ -238,7 +238,7 @@ impl App {
                         continue;
                     }
                     if let Some(file) = library::remove_download(db, &issue) {
-                        let _ = std::fs::remove_file(file);
+                        delete_file(&file);
                     }
                 }
                 if unreachable > 0 {
@@ -331,7 +331,7 @@ impl App {
                         // The copy is recorded before the original goes, so
                         // a crash in between leaves two copies, not none.
                         if library::add_download(db, &row).is_ok() && old.file != *new_file {
-                            let _ = std::fs::remove_file(&old.file);
+                            delete_file(&old.file);
                             // Tidy the old folders if that emptied them.
                             if let Some(account_dir) = old.file.parent() {
                                 let _ = std::fs::remove_dir(account_dir);
@@ -495,7 +495,7 @@ impl App {
             if !d.file.parent().is_some_and(Path::is_dir) {
                 continue;
             }
-            let _ = std::fs::remove_file(&d.file);
+            delete_file(&d.file);
             library::remove_download(db, &d.path);
         }
         self.dl.reload(db);
@@ -805,5 +805,16 @@ mod tests {
         assert_eq!(human_size(5 * 1024 * 1024 / 2), "2.5 MB");
         assert_eq!(human_size(230 * 1024 * 1024), "230 MB");
         assert_eq!(human_size(1536 * 1024 * 1024), "1.5 GB");
+    }
+}
+
+/// Deletes a downloaded file, closing it first if the reader has it open
+/// (Windows can't delete an open file).
+fn delete_file(file: &Path) {
+    crate::comic::forget_zip(file);
+    if let Err(e) = std::fs::remove_file(file) {
+        if file.exists() {
+            log::warn!("couldn't delete {}: {e}", file.display());
+        }
     }
 }

@@ -230,7 +230,7 @@ also how apps reach the COSMIC Store).
 | Scroll a line | | `↓` `↑` |
 | Contents / chapters | `C` | `C` |
 | Full screen | `F` (`Esc` to leave) | `F` (`Esc` to leave) |
-| Reading settings | `S` | `A`; text size `Ctrl +` / `Ctrl −`, `Ctrl 0` to reset |
+| Reading settings | `S` | `A`; text size `Ctrl +` / `Ctrl −`, `Ctrl 0` to reset (`Cmd` on a Mac) |
 | Dual page / zoom / theater | `L` / `M` / `T`; `Ctrl 0` resets the zoom | |
 | Info panel / copy the page | `I` / `P` | |
 | Back | `Esc` leaves full screen, then Fit to Width, zoom or the chapter list, then goes back to the library | same |
