@@ -57,6 +57,8 @@ pub enum JfMsg {
     Sync(String),
     Fetched(String, Result<Vec<RemoteSeries>, String>),
     CoverSaved,
+    /// Shows the covers saved over the last moment, all at once.
+    ShowSavedCovers,
     /// The first chapters of a series came in.
     FirstLoaded(String, Loaded),
     MoreLoaded(String, Result<Loaded, String>),
@@ -93,6 +95,8 @@ pub struct PendingSignIn {
 
 #[derive(Default)]
 pub struct JfState {
+    /// Covers were saved and a library refresh to show them is coming.
+    pub covers_pending_refresh: bool,
     pub url_input: String,
     pub status: Option<String>,
     pub busy: bool,
@@ -987,7 +991,20 @@ impl App {
                 }
                 Err(e) => log::warn!("jellyfin: sending progress kept offline for {item_key}: {e}"),
             },
-            JfMsg::CoverSaved => return self.reload_library(),
+            // A first sync saves hundreds of covers; reload the library
+            // for a batch of them, not for each.
+            JfMsg::CoverSaved => {
+                if !std::mem::replace(&mut self.jf.covers_pending_refresh, true) {
+                    return cosmic::task::future(async {
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        Message::Jf(JfMsg::ShowSavedCovers)
+                    });
+                }
+            }
+            JfMsg::ShowSavedCovers => {
+                self.jf.covers_pending_refresh = false;
+                return self.reload_library();
+            }
             JfMsg::FirstLoaded(key, loaded) => {
                 if let Some(r) = self.remote.as_mut().filter(|r| r.series_key == key) {
                     r.next = (r.next + loaded.chapters.len()).min(r.issues.len());

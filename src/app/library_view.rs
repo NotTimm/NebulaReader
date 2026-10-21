@@ -327,7 +327,7 @@ impl App {
             if items.is_empty() {
                 continue;
             }
-            items.sort_by_key(|e| e.name().to_lowercase());
+            items.sort_by_cached_key(|e| e.name().to_lowercase());
             let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(root);
             sections.push((name, items));
         }
@@ -341,7 +341,7 @@ impl App {
         remote_roots.dedup();
         for root in remote_roots {
             let mut items: Vec<&SeriesEntry> = visible.iter().copied().filter(|e| e.library_root == root).collect();
-            items.sort_by_key(|e| e.name().to_lowercase());
+            items.sort_by_cached_key(|e| e.name().to_lowercase());
             let name = self.jf.library_names.get(root).cloned().unwrap_or_else(|| "Jellyfin".into());
             sections.push((name, items));
         }

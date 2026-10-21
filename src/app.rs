@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use cosmic::app::{Core, Task};
 use cosmic::dialog::file_chooser::{self, FileFilter};
@@ -138,7 +138,7 @@ pub enum Message {
     ToggleIssueRead(i64, bool),
     MarkSeriesRead(bool),
     // Chapter covers
-    ChapterCoverReady { chapter_idx: usize, result: Result<(u32, u32, Vec<u8>), String> },
+    ChapterCoverReady { gen: u64, chapter_idx: usize, result: Result<(u32, u32, Vec<u8>), String> },
     // Library
     LibrarySearchChanged(String),
     LibrarySource(usize),
@@ -582,6 +582,9 @@ fn decode_semaphore() -> &'static tokio::sync::Semaphore {
 /// The comic the reader has open (`App::page_gen`) and the page it's on,
 /// so decodes queued earlier can tell they're no longer wanted.
 static DECODE_GEN: AtomicU64 = AtomicU64::new(0);
+/// Whether the full-screen header bar is showing (`App::fullscreen_header`),
+/// for the pointer subscription.
+static HEADER_SHOWN: AtomicBool = AtomicBool::new(false);
 static DECODE_PAGE: AtomicUsize = AtomicUsize::new(0);
 
 /// A decoded page's size in pixels.
@@ -638,8 +641,15 @@ fn copy_task(page: widget::image::Handle) -> Task<Message> {
 }
 
 /// Decode the first page of `chapter_idx`, thumbnail it, save to disk, return rgba.
-fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> Task<Message> {
+fn cover_task(gen: u64, chapter_idx: usize, source: PageSource, series_path: PathBuf) -> Task<Message> {
+    // Two at a time: a series with hundreds of chapters would otherwise
+    // decode hundreds of full pages at once, ahead of the pages being read.
+    static COVERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
     cosmic::task::future(async move {
+        let _permit = COVERS.acquire().await;
+        if DECODE_GEN.load(Ordering::Relaxed) != gen {
+            return Message::ChapterCoverReady { gen, chapter_idx, result: Err("no longer needed".into()) };
+        }
         let result = tokio::task::spawn_blocking(move || {
             let page = comic::decode_source(&source)?;
             let img = image::RgbaImage::from_raw(page.width, page.height, page.rgba)
@@ -662,6 +672,7 @@ fn cover_task(chapter_idx: usize, source: PageSource, series_path: PathBuf) -> T
         })
         .await;
         Message::ChapterCoverReady {
+            gen,
             chapter_idx,
             result: match result {
                 Ok(r) => r,
@@ -1155,7 +1166,7 @@ impl App {
             if ch.page_count > 0 {
                 self.covers_pending.insert(ch_idx);
                 let source = self.sources[ch.start].clone();
-                tasks.push(cover_task(ch_idx, source, series_path.clone()));
+                tasks.push(cover_task(self.page_gen, ch_idx, source, series_path.clone()));
             }
         }
         Task::batch(tasks)
@@ -1665,7 +1676,19 @@ impl Application for App {
         // In full screen, follow the pointer to reveal the hidden header.
         let pointer = if self.fullscreen && self.app_view == AppView::Reader {
             event::listen_with(|event, _, _| match event {
-                event::Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::PointerY(position.y)),
+                // Only when it would show or hide the header: a mouse
+                // reports hundreds of moves a second, and each message
+                // redraws the reader.
+                event::Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    let show = if position.y <= 4.0 {
+                        true
+                    } else if position.y > 72.0 {
+                        false
+                    } else {
+                        return None;
+                    };
+                    (HEADER_SHOWN.load(Ordering::Relaxed) != show).then_some(Message::PointerY(position.y))
+                }
                 _ => None,
             })
         } else {
@@ -1702,6 +1725,7 @@ impl Application for App {
         if !self.fullscreen || self.app_view != AppView::Reader {
             self.fullscreen_header = false;
         }
+        HEADER_SHOWN.store(self.fullscreen_header, Ordering::Relaxed);
         self.core.window.show_headerbar = !self.fullscreen
             || self.app_view != AppView::Reader
             || self.fullscreen_header
@@ -2711,7 +2735,7 @@ impl App {
                     if !library::chapter_cover_path(&key, 0).exists() {
                         if let Some(source) = self.sources.first().cloned() {
                             self.covers_pending.insert(0);
-                            tasks.push(cover_task(0, source, path.clone()));
+                            tasks.push(cover_task(self.page_gen, 0, source, path.clone()));
                         }
                     }
                 }
@@ -2996,7 +3020,10 @@ impl App {
                 }
             }
             Message::PageSizeRead(key, size) => self.page_size_read(key, size),
-            Message::ChapterCoverReady { chapter_idx, result } => {
+            Message::ChapterCoverReady { gen, chapter_idx, result } => {
+                if gen != self.page_gen {
+                    return Task::none();
+                }
                 self.covers_pending.remove(&chapter_idx);
                 if let Ok((w, h, rgba)) = result {
                     let handle = widget::image::Handle::from_rgba(w, h, rgba);

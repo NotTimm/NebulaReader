@@ -59,9 +59,12 @@ impl App {
             .filter(|r| self.open_path.as_ref().is_some_and(|p| p.to_string_lossy() == r.series_key));
         if let Some(r) = remote {
             let offline = self.jellyfin_offline(&r.series_key);
+            // Looked up once, not per row: a long manga has 1000+ chapters.
+            let loaded_at: std::collections::HashMap<std::borrow::Cow<'_, str>, usize> =
+                self.chapters.iter().enumerate().map(|(i, c)| (c.path.to_string_lossy(), i)).collect();
             let mut rows = Vec::new();
             for issue in &self.reader_issues {
-                let loaded = self.chapters.iter().position(|c| c.path.to_string_lossy() == issue.path);
+                let loaded = loaded_at.get(issue.path.as_str()).copied();
                 // Offline, only what's loaded or downloaded can be opened.
                 if offline && loaded.is_none() && self.dl.file(&issue.path).is_none() {
                     continue;
@@ -88,12 +91,14 @@ impl App {
         }
 
         // Local: every chapter is loaded already.
+        let issues: std::collections::HashMap<&str, &library::IssueEntry> =
+            self.reader_issues.iter().map(|e| (e.path.as_str(), e)).collect();
         self.chapters
             .iter()
             .enumerate()
             .map(|(i, ch)| {
                 let path = ch.path.to_string_lossy();
-                let issue = self.reader_issues.iter().find(|e| e.path == path);
+                let issue = issues.get(path.as_ref()).copied();
                 Row {
                     number: i + 1,
                     title: ch.name.clone(),

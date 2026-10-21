@@ -118,5 +118,15 @@ windows-sys = { version = "0.61", features = [
 [profile.release]
 lto = true
 
+# Image decoders and inflating are 10-50x slower unoptimised, which makes
+# debug builds page far slower than the real app; optimise just those.
+[profile.dev.package]
+zune-jpeg.opt-level = 3
+png.opt-level = 3
+image-webp.opt-level = 3
+fdeflate.opt-level = 3
+miniz_oxide.opt-level = 3
+image.opt-level = 3
+
 [dev-dependencies]
 minisign = "0.10.0"
