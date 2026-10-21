@@ -1000,7 +1000,7 @@ impl App {
                         self.loading = false;
                         self.sources.clear();
                         self.chapters.clear();
-                        self.cache.clear();
+                        self.clear_pages();
                         self.open_path = Some(PathBuf::from(&key));
                         return Task::none();
                     }

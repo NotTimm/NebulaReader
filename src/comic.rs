@@ -97,7 +97,8 @@ pub(crate) fn natural_key(name: &str) -> Vec<(String, u64)> {
 fn decode_image(name: &str, data: &[u8]) -> Result<Page, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("failed to decode page {name}: {e}"))?
-        .to_rgba8();
+        // Takes the pixels as they are when they're RGBA already.
+        .into_rgba8();
     let (width, height) = img.dimensions();
     Ok(Page { width, height, rgba: img.into_raw() })
 }

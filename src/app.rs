@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use cosmic::app::{Core, Task};
 use cosmic::dialog::file_chooser::{self, FileFilter};
@@ -86,7 +86,10 @@ pub enum Message {
     // Loading
     Loaded(PathBuf, Vec<PageSource>, Vec<ChapterInfo>),
     EpubLoaded(PathBuf, Result<epub::EpubBook, String>),
-    PageDecoded(usize, Result<Arc<comic::Page>, String>),
+    /// A page decoded for the comic opened as `.0` (see `App::page_gen`).
+    PageDecoded(u64, usize, Result<(widget::image::Handle, PageSize), String>),
+    /// A decoded page is on the GPU, ready to draw the moment it's shown.
+    PageAllocated(u64, usize, Option<cosmic::iced::runtime::image::Allocation>),
     LoadFailed(String),
     Cancelled,
     /// No-op message that just forces an extra render pass. Newly-decoded
@@ -230,7 +233,13 @@ pub struct App {
     open_path: Option<PathBuf>,
     sources: Vec<PageSource>,
     chapters: Vec<ChapterInfo>,
-    cache: HashMap<usize, (widget::image::Handle, Arc<comic::Page>)>,
+    cache: HashMap<usize, (widget::image::Handle, PageSize)>,
+    /// Pages kept on the GPU (near the current one), so turning to them
+    /// draws at once instead of uploading first.
+    allocations: HashMap<usize, cosmic::iced::runtime::image::Allocation>,
+    /// Counts the comics opened, so a page decoded for one never lands in
+    /// the next.
+    page_gen: u64,
     pending: HashSet<usize>,
     current_page: usize,
     /// Last navigation direction (>0 forward, <0 backward, 0 unknown), used
@@ -570,29 +579,53 @@ fn decode_semaphore() -> &'static tokio::sync::Semaphore {
     })
 }
 
-fn decode_task(index: usize, source: PageSource) -> Task<Message> {
+/// The comic the reader has open (`App::page_gen`) and the page it's on,
+/// so decodes queued earlier can tell they're no longer wanted.
+static DECODE_GEN: AtomicU64 = AtomicU64::new(0);
+static DECODE_PAGE: AtomicUsize = AtomicUsize::new(0);
+
+/// A decoded page's size in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PageSize {
+    width: u32,
+    height: u32,
+}
+
+fn decode_task(gen: u64, index: usize, source: PageSource) -> Task<Message> {
     cosmic::task::future(async move {
         let _permit = decode_semaphore().acquire().await;
-        let result = tokio::task::spawn_blocking(move || comic::decode_source(&source)).await;
-        Message::PageDecoded(
-            index,
-            match result {
-                Ok(r) => r.map(Arc::new),
-                Err(e) => Err(format!("decode panicked: {e}")),
-            },
-        )
+        // Paged far past it, or opened something else, while it waited:
+        // skip the fetch and decode, so the page on screen isn't queued
+        // behind work nobody will see.
+        if DECODE_GEN.load(Ordering::Relaxed) != gen
+            || index.abs_diff(DECODE_PAGE.load(Ordering::Relaxed)) > CACHE_RADIUS
+        {
+            return Message::PageDecoded(gen, index, Err("no longer needed".into()));
+        }
+        let result = tokio::task::spawn_blocking(move || {
+            // The pixels move into the handle: no second copy of the page.
+            comic::decode_source(&source).map(|page| {
+                let size = PageSize { width: page.width, height: page.height };
+                (widget::image::Handle::from_rgba(page.width, page.height, page.rgba), size)
+            })
+        })
+        .await;
+        Message::PageDecoded(gen, index, result.unwrap_or_else(|e| Err(format!("decode panicked: {e}"))))
     })
 }
 
-fn copy_task(page: Arc<comic::Page>) -> Task<Message> {
+fn copy_task(page: widget::image::Handle) -> Task<Message> {
     cosmic::task::future(async move {
         let result = tokio::task::spawn_blocking(move || {
+            let widget::image::Handle::Rgba { width, height, pixels, .. } = &page else {
+                return Err("copy: page isn't decoded".to_string());
+            };
             let mut cb = arboard::Clipboard::new()
                 .map_err(|e| format!("clipboard: {e}"))?;
             cb.set_image(arboard::ImageData {
-                width: page.width as usize,
-                height: page.height as usize,
-                bytes: Cow::Borrowed(&page.rgba),
+                width: *width as usize,
+                height: *height as usize,
+                bytes: Cow::Borrowed(pixels),
             })
             .map_err(|e| format!("copy: {e}"))
         })
@@ -807,6 +840,10 @@ impl App {
         let keep_start = self.current_page.saturating_sub(CACHE_RADIUS);
         let keep_end = (self.current_page + CACHE_RADIUS).min(len - 1);
         self.cache.retain(|idx, _| (keep_start..=keep_end).contains(idx));
+        let gpu = self.current_page.saturating_sub(PRELOAD_FAR)..=self.current_page + PRELOAD_FAR;
+        self.allocations.retain(|idx, _| gpu.contains(idx));
+        DECODE_GEN.store(self.page_gen, Ordering::Relaxed);
+        DECODE_PAGE.store(self.current_page, Ordering::Relaxed);
 
         let (ahead, behind) = if self.nav_dir < 0 {
             (PRELOAD_NEAR, PRELOAD_FAR)
@@ -834,7 +871,7 @@ impl App {
                 continue;
             }
             self.pending.insert(idx);
-            tasks.push(decode_task(idx, self.sources[idx].clone()));
+            tasks.push(decode_task(self.page_gen, idx, self.sources[idx].clone()));
         }
         Task::batch(tasks)
     }
@@ -904,8 +941,17 @@ impl App {
             .map(|(_, (h, _))| h)
     }
 
-    fn page_data(&self, idx: usize) -> Option<Arc<comic::Page>> {
-        self.cache.get(&idx).map(|(_, p)| p.clone())
+    fn page_size(&self, idx: usize) -> Option<PageSize> {
+        self.cache.get(&idx).map(|(_, p)| *p)
+    }
+
+    /// Forgets the open comic's pages, including decodes still under way.
+    pub(super) fn clear_pages(&mut self) {
+        self.cache.clear();
+        self.allocations.clear();
+        self.pending.clear();
+        self.page_gen += 1;
+        DECODE_GEN.store(self.page_gen, Ordering::Relaxed);
     }
 
     fn current_chapter(&self) -> Option<(usize, &ChapterInfo, usize)> {
@@ -1237,6 +1283,8 @@ impl Application for App {
             sources: Vec::new(),
             chapters: Vec::new(),
             cache: HashMap::new(),
+            allocations: HashMap::new(),
+            page_gen: 0,
             pending: HashSet::new(),
             current_page: 0,
             nav_dir: 0,
@@ -1791,11 +1839,7 @@ impl App {
                 "c" | "C" if self.chapters.len() > 1 || self.reader_issues.len() > 1 => {
                     return self.toggle_chapter_list();
                 }
-                "p" | "P" => {
-                    if let Some(page) = self.page_data(self.current_page) {
-                        return copy_task(page);
-                    }
-                }
+                "p" | "P" => return self.update(Message::CopyPage),
                 _ => {}
             },
             _ => {}
@@ -2613,8 +2657,7 @@ impl App {
                 self.loading = false;
                 self.sources = sources;
                 self.chapters = chapters;
-                self.cache.clear();
-                self.pending.clear();
+                self.clear_pages();
                 self.chapter_covers.clear();
                 self.covers_pending.clear();
                 self.zoom_active = false;
@@ -2706,8 +2749,7 @@ impl App {
                         let path_str = path.to_string_lossy().to_string();
                         self.sources.clear();
                         self.chapters.clear();
-                        self.cache.clear();
-                        self.pending.clear();
+                        self.clear_pages();
                         self.chapter_covers.clear();
                         self.covers_pending.clear();
                         self.zoom_active = false;
@@ -2789,23 +2831,37 @@ impl App {
                     Err(e) => self.error = Some(e),
                 }
             }
-            Message::PageDecoded(index, result) => {
+            Message::PageDecoded(gen, index, result) => {
+                if gen != self.page_gen {
+                    return Task::none();
+                }
                 self.pending.remove(&index);
                 let is_current = index == self.current_page;
-                if let Ok(page) = result {
-                    let handle = widget::image::Handle::from_rgba(
-                        page.width, page.height, page.rgba.clone(),
-                    );
-                    self.cache.insert(index, (handle, page));
+                let mut tasks = Vec::new();
+                if let Ok((handle, size)) = result {
+                    // Upload it now, while it isn't on screen yet.
+                    if index.abs_diff(self.current_page) <= PRELOAD_FAR {
+                        tasks.push(
+                            cosmic::iced::runtime::image::allocate(handle.clone())
+                                .map(move |a| cosmic::Action::App(Message::PageAllocated(gen, index, a.ok()))),
+                        );
+                    }
+                    self.cache.insert(index, (handle, size));
                 }
                 if is_current {
                     // The freshly-uploaded texture sometimes doesn't paint on
                     // the very frame it lands in the cache, so force one more
                     // render pass shortly after.
-                    return cosmic::task::future(async move {
+                    tasks.push(cosmic::task::future(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         Message::Redraw
-                    });
+                    }));
+                }
+                return Task::batch(tasks);
+            }
+            Message::PageAllocated(gen, index, allocation) => {
+                if let Some(a) = allocation.filter(|_| gen == self.page_gen && self.cache.contains_key(&index)) {
+                    self.allocations.insert(index, a);
                 }
             }
             Message::Redraw => {}
@@ -3375,8 +3431,8 @@ impl App {
                 }
             }
             Message::CopyPage => {
-                if let Some(page) = self.page_data(self.current_page) {
-                    return copy_task(page);
+                if let Some(page) = self.handle(self.current_page) {
+                    return copy_task(page.clone());
                 }
             }
             Message::CopiedPage(r) => { if let Err(e) = r { self.error = Some(e); } }
@@ -3436,7 +3492,7 @@ impl App {
             Message::Jf(msg) => return self.update_jellyfin(msg),
             Message::Dl(msg) => return self.update_downloads(msg),
             Message::FitPage => {
-                let Some(page) = self.page_data(self.current_page) else { return Task::none() };
+                let Some(page) = self.page_size(self.current_page) else { return Task::none() };
                 let Some(id) = self.core.main_window_id() else { return Task::none() };
                 if page.height == 0 {
                     return Task::none();
