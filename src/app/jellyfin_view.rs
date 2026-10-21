@@ -266,43 +266,24 @@ fn load_issues(
     downloaded: &HashMap<String, PathBuf>,
     ask_over: Option<u64>,
 ) -> Result<Loaded, String> {
+    // Each streamed chapter's table of contents is a round trip or more
+    // to the server; ask for all of them at once rather than in turn.
+    let opened: Vec<Opened> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = issues
+            .iter()
+            .map(|(key, _)| scope.spawn(move || open_streamed(account, key, extensions, downloaded)))
+            .collect();
+        jobs.into_iter().map(|j| j.join().expect("opening a chapter panicked")).collect()
+    });
+
     let mut sources = Vec::new();
     let mut chapters = Vec::new();
-    for (key, name) in issues {
+    for ((key, name), opened) in issues.iter().zip(opened) {
         let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
-        let ext = extensions.get(item_id).map(String::as_str).unwrap_or("");
+        let Opened { local, ext, cached, streamed, known_size } = opened;
         let start = sources.len();
-
-        // Downloaded: read the local copy, no network needed.
-        let local = downloaded.get(key).filter(|f| f.exists());
-        let ext = if ext.is_empty() { "cbz" } else { ext };
-        let cached = library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}"));
-        let mut known_size = None;
-        let streamed = if local.is_some() || cached.exists() {
-            None
-        } else if matches!(ext, "cbz" | "zip") {
-            RemoteZip::open(Box::new(account.range_source(item_id)))
-                .ok()
-                .filter(|z| !z.entries.is_empty())
-                .map(|zip| (0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }).collect())
-        } else if matches!(ext, "cbr" | "rar") {
-            // Pages are read one by one unless the archive is solid.
-            let index = super::rar_index::index_path(item_id);
-            match RemoteRar::open(Box::new(account.range_source(item_id)), Some(&index)) {
-                Ok(rar) if !rar.solid() && !rar.entries().is_empty() => Some(
-                    (0..rar.entries().len()).map(|index| PageSource::RemoteRar { archive: rar.clone(), index }).collect(),
-                ),
-                Ok(rar) => {
-                    known_size = Some(rar.len());
-                    None
-                }
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
         if let Some(file) = local {
-            let (pages, _) = comic::collect_sources(file)?;
+            let (pages, _) = comic::collect_sources(&file)?;
             sources.extend(pages);
         } else if let Some(pages) = streamed {
             sources.extend::<Vec<PageSource>>(pages);
@@ -328,7 +309,7 @@ fn load_issues(
                     return Ok(Loaded { sources, chapters, blocked: Some(blocked) });
                 }
             }
-            let local = download(account, item_id, ext)?;
+            let local = download(account, item_id, &ext)?;
             let (pages, _) = comic::collect_sources(&local)?;
             sources.extend(pages);
         }
@@ -340,6 +321,60 @@ fn load_issues(
         });
     }
     Ok(Loaded { sources, chapters, blocked: None })
+}
+
+/// How one chapter of a batch will be read, worked out before its pages
+/// are listed.
+struct Opened {
+    /// The user's downloaded copy.
+    local: Option<PathBuf>,
+    ext: String,
+    /// Where a whole fetch goes (or went).
+    cached: PathBuf,
+    /// Its pages, read straight from the server.
+    streamed: Option<Vec<PageSource>>,
+    /// Its size, when opening it told us (a solid RAR).
+    known_size: Option<u64>,
+}
+
+/// Opens a chapter for streaming when it can be: a zip (or non-solid RAR)
+/// on the server that isn't downloaded or cached already.
+fn open_streamed(
+    account: &Account,
+    key: &str,
+    extensions: &HashMap<String, String>,
+    downloaded: &HashMap<String, PathBuf>,
+) -> Opened {
+    let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
+    let ext = extensions.get(item_id).map(String::as_str).filter(|e| !e.is_empty()).unwrap_or("cbz").to_string();
+    // Downloaded: read the local copy, no network needed.
+    let local = downloaded.get(key).filter(|f| f.exists()).cloned();
+    let cached = library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}"));
+    let mut known_size = None;
+    let streamed = if local.is_some() || cached.exists() {
+        None
+    } else if matches!(ext.as_str(), "cbz" | "zip") {
+        RemoteZip::open(Box::new(account.range_source(item_id)))
+            .ok()
+            .filter(|z| !z.entries.is_empty())
+            .map(|zip| (0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }).collect())
+    } else if matches!(ext.as_str(), "cbr" | "rar") {
+        // Pages are read one by one unless the archive is solid.
+        let index = super::rar_index::index_path(item_id);
+        match RemoteRar::open(Box::new(account.range_source(item_id)), Some(&index)) {
+            Ok(rar) if !rar.solid() && !rar.entries().is_empty() => Some(
+                (0..rar.entries().len()).map(|index| PageSource::RemoteRar { archive: rar.clone(), index }).collect(),
+            ),
+            Ok(rar) => {
+                known_size = Some(rar.len());
+                None
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    Opened { local, ext, cached, streamed, known_size }
 }
 
 /// Downloads an item into the cache (kept for re-reads; the cache is safe
@@ -1390,5 +1425,28 @@ mod tests {
             let b = loaded.blocked.expect("should ask first");
             println!("asked first: {} bytes, nothing fetched: {}", b.size, loaded.sources.is_empty());
         }
+    }
+
+    /// Times opening a batch of CBZ chapters the way the reader does:
+    /// `NEBULA_MOCK_CBZS=<id>,<id>,… cargo test opens_cbz_chapters_from_the_mock --
+    /// --ignored --nocapture` with the mock on port 8097.
+    #[test]
+    #[ignore]
+    fn opens_cbz_chapters_from_the_mock() {
+        let ids = std::env::var("NEBULA_MOCK_CBZS").expect("set NEBULA_MOCK_CBZS");
+        let account = Account {
+            url: "http://localhost:8097".into(),
+            server_id: "mockserver".into(),
+            server_name: "mockfin".into(),
+            user_id: "mockuser".into(),
+            user_name: "tester".into(),
+            token: "mock-token".into(),
+        };
+        let issues: Vec<(String, String)> = ids.split(',').map(|id| (account.item_key(id), format!("Chapter {id}"))).collect();
+        let extensions: HashMap<String, String> = ids.split(',').map(|id| (id.to_string(), "cbz".to_string())).collect();
+        let t = Instant::now();
+        let loaded = load_issues(&account, "series", &issues, &extensions, &HashMap::new(), None).unwrap();
+        println!("{} chapters, {} pages in {:?}", loaded.chapters.len(), loaded.sources.len(), t.elapsed());
+        assert_eq!(loaded.chapters.len(), issues.len());
     }
 }

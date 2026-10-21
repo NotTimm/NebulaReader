@@ -68,10 +68,14 @@ impl Account {
 
     /// Byte-range access to an item's file, for streaming pages.
     pub fn range_source(&self, item_id: &str) -> HttpRange {
+        // A server that refused `/File` before is sent to `/Download` right
+        // away, instead of spending a round trip on every chapter.
+        let refuses_file = file_refused().lock().is_ok_and(|s| s.contains(&self.url));
         HttpRange {
             urls: [self.file_url(item_id), self.download_url(item_id)],
-            current: AtomicUsize::new(0),
+            current: AtomicUsize::new(refuses_file as usize),
             auth: self.auth(),
+            server: self.url.clone(),
         }
     }
 }
@@ -809,6 +813,13 @@ pub struct HttpRange {
     urls: [String; 2],
     current: AtomicUsize,
     auth: String,
+    server: String,
+}
+
+/// Servers (by URL) that refused `/File` this session.
+fn file_refused() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static S: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    S.get_or_init(Default::default)
 }
 
 fn blocking_client() -> &'static reqwest::blocking::Client {
@@ -835,6 +846,9 @@ impl HttpRange {
             let refused = matches!(resp.status().as_u16(), 403 | 404 | 405);
             if refused && i + 1 < self.urls.len() {
                 self.current.store(i + 1, Ordering::Relaxed);
+                if let Ok(mut s) = file_refused().lock() {
+                    s.insert(self.server.clone());
+                }
                 continue;
             }
             return Ok(resp);
