@@ -117,13 +117,14 @@ static HOST: RwLock<Option<HostColors>> = RwLock::new(None);
 /// Reads the host desktop's colours. Call once, before the app starts
 /// (it may briefly block on the settings portal or registry).
 pub fn init(desktop: Desktop) {
-    *HOST.write().unwrap_or_else(|e| e.into_inner()) = Some(read_host_colors(desktop));
+    *HOST.write().unwrap_or_else(|e| e.into_inner()) = Some(read_host_colors(desktop).unwrap_or_default());
 }
 
 /// Reads the host's colours again; true when they changed since the last
 /// read. Blocks briefly, so call it off the UI thread.
 pub fn reread(desktop: Desktop) -> bool {
-    let fresh = read_host_colors(desktop);
+    // A read that couldn't run says nothing about the host: keep the colours.
+    let Some(fresh) = read_host_colors(desktop) else { return false };
     let mut host = HOST.write().unwrap_or_else(|e| e.into_inner());
     if host.as_ref() == Some(&fresh) {
         return false;
@@ -271,8 +272,10 @@ fn luminance(c: Srgb) -> f32 {
 
 // ── Reading the host ──────────────────────────────────────────────────────────
 
-fn read_host_colors(desktop: Desktop) -> HostColors {
-    match desktop {
+/// `None` when the host couldn't be asked at all (only macOS's `defaults`
+/// can fail that way), as opposed to it having no answer.
+fn read_host_colors(desktop: Desktop) -> Option<HostColors> {
+    Some(match desktop {
         Desktop::Kde => {
             let mut colors = kde::read().unwrap_or_default();
             // A missing kdeglobals (fresh account, sandbox without access)
@@ -284,9 +287,9 @@ fn read_host_colors(desktop: Desktop) -> HostColors {
         }
         Desktop::Windows => windows::read(),
         Desktop::Gnome | Desktop::Other => portal::read(),
-        Desktop::MacOs => macos::read(),
+        Desktop::MacOs => return macos::read(),
         Desktop::Cosmic => HostColors::default(),
-    }
+    })
 }
 
 /// KDE Plasma: `kdeglobals` is an INI file holding the active colour
@@ -439,25 +442,24 @@ mod windows {
 mod macos {
     use super::*;
 
+    /// `None` when `defaults` couldn't be run (a busy moment, say), so a
+    /// failed check isn't mistaken for light mode.
     #[cfg(target_os = "macos")]
-    pub fn read() -> HostColors {
-        let read = |key: &str| {
-            std::process::Command::new("defaults")
-                .args(["read", "-g", key])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    pub fn read() -> Option<HostColors> {
+        // `Ok(None)`: the key isn't set (`defaults` exits non-zero).
+        let read = |key: &str| -> std::io::Result<Option<String>> {
+            let out = std::process::Command::new("/usr/bin/defaults").args(["read", "-g", key]).output()?;
+            Ok(out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()))
         };
         // The key only exists in dark mode (Auto included, while it's dark).
-        let dark = Some(read("AppleInterfaceStyle").is_some_and(|v| v == "Dark"));
-        let accent = accent(read("AppleAccentColor").and_then(|v| v.parse().ok()));
-        HostColors { dark, accent: Some(accent), ..HostColors::default() }
+        let dark = Some(read("AppleInterfaceStyle").ok()?.is_some_and(|v| v == "Dark"));
+        let accent = accent(read("AppleAccentColor").ok()?.and_then(|v| v.parse().ok()));
+        Some(HostColors { dark, accent: Some(accent), ..HostColors::default() })
     }
 
     #[cfg(not(target_os = "macos"))]
-    pub fn read() -> HostColors {
-        HostColors::default()
+    pub fn read() -> Option<HostColors> {
+        Some(HostColors::default())
     }
 
     /// `AppleAccentColor` is an index into the system palette; unset means
