@@ -185,9 +185,8 @@ the owner's laptop). Last updated 2026-10-21.
   Issue"/"Download Book" for the chapter shown, "Remove Download" for
   just it: `CardAction::DownloadIssue`/`RemoveIssueDownload`); other
   series cards keep Download All / Remove Downloads. Release notes for it:
-  `packaging/release-notes/0.1.12.md`. Waiting on the owner to paste
-  `packaging/pending/release.yml` over the workflow (publishes the notes
-  file); then start the publish run.
+  `packaging/release-notes/0.1.12.md`; the release workflow publishes
+  that file (owner's commit 0f50ad2) and won't publish without it.
 - Audit 2026-10-21 (in 0.1.12): one DB commit per
   sync/scan (`library::batch`, synchronous=NORMAL); a failed dark-mode
   read never means light (Mac `defaults`, Windows registry, portal);
