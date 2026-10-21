@@ -796,12 +796,18 @@ const JELLYFIN_ICON: &[u8] = include_bytes!("../../res/icons/ui/jellyfin.svg");
 const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg");
 const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
 const BOLT: &[u8] = include_bytes!("../../res/icons/ui/bolt.svg");
+const FIT_WIDTH: &[u8] = include_bytes!("../../res/icons/ui/fit-width.svg");
 
 /// A single-colour icon of ours, drawn in the theme's text colour.
 fn ui_icon(svg: &'static [u8]) -> widget::icon::Handle {
     let mut handle = widget::icon::from_svg_bytes(svg);
     handle.symbolic = true;
     handle
+}
+
+/// Fit to Width in the reader's header: arrows out to a frame's sides.
+pub(super) fn fit_width_icon() -> widget::icon::Handle {
+    ui_icon(FIT_WIDTH)
 }
 
 /// A lightning bolt (battery charging), in the theme's text colour.

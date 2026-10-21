@@ -105,7 +105,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-20.
+the owner's laptop). Last updated 2026-10-21.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -172,7 +172,15 @@ the owner's laptop). Last updated 2026-10-20.
   on both axes with a flick glide, two fingers pan while pinching, and a
   pinch that starts zoom mode works at once. Unit-tested with simulated
   fingers only (no touchscreen here); the owner is to try it.
-- libcosmic: fork pinned at `f8d6187` (patches 1–12, see Cargo.toml),
+- Fit to Width (patch 13, after 0.1.11): `Space` in the comic reader (not
+  books) or its header button; `App::fit_width`, never saved. The viewer
+  eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
+  start at the top. Seen working in Xvfb; untried on real machines.
+- Audit 2026-10-21 (after 0.1.11): one DB commit per sync/scan
+  (`library::batch`, synchronous=NORMAL); a failed dark-mode read never
+  means light (Mac `defaults`, Windows registry, portal); Jellyfin
+  chapters open in parallel (`open_streamed`). More findings in progress.
+- libcosmic: fork pinned at `cd86f68` (patches 1–13, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently

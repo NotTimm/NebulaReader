@@ -107,6 +107,12 @@ pub enum Message {
     ToggleTheater,
     ToggleLayout,
     ToggleZoom,
+    /// Space: Fit to Width on or off.
+    ToggleFitWidth,
+    /// Fit to Width has finished easing back to the whole page.
+    FitWidthEased,
+    /// Hides the note saying Fit to Width went on or off (its number).
+    HideFitNote(u64),
     ToggleInfo,
     ToggleChapterSelect,
     /// Jump the chapter panel to a volume or block of chapters.
@@ -246,6 +252,15 @@ pub struct App {
     theater_mode: bool,
     layout: Layout,
     zoom_active: bool,
+    /// Fit to Width: the page as wide as the window, read top to bottom.
+    /// Never remembered: each comic opens whole.
+    fit_width: bool,
+    /// Still easing back to the whole page after Fit to Width.
+    fit_width_leaving: bool,
+    /// The brief note saying Fit to Width went on or off, and its number
+    /// (so an older note's timer doesn't hide a newer one).
+    fit_note: Option<(&'static str, u64)>,
+    fit_note_counter: u64,
     /// Tells a mouse wheel from a touchpad scroll, for entering zoom.
     wheel: cosmic::iced::widget::image::viewer::WheelSource,
     zoom: f32,
@@ -1238,6 +1253,10 @@ impl Application for App {
             theater_mode: settings.theater_mode,
             layout: if settings.dual_page { Layout::Dual } else { Layout::Single },
             zoom_active: false,
+            fit_width: false,
+            fit_width_leaving: false,
+            fit_note: None,
+            fit_note_counter: 0,
             wheel: Default::default(),
             zoom: 1.0,
             show_chapter_select: false,
@@ -1541,6 +1560,12 @@ impl Application for App {
                         if self.zoom_active { "Stop zooming (M)" } else { "Zoom and pan (M, or scroll; Shift + scroll for fine steps)" },
                     ));
                     els.push(tip(
+                        widget::button::icon(library_view::fit_width_icon())
+                            .selected(self.fit_width)
+                            .on_press(Message::ToggleFitWidth),
+                        if self.fit_width { "Whole page (Space)" } else { "Fit to Width (Space)" },
+                    ));
+                    els.push(tip(
                         widget::button::icon(icon::from_name("edit-copy-symbolic")).on_press(Message::CopyPage),
                         "Copy page image (P)",
                     ));
@@ -1728,10 +1753,15 @@ impl App {
                 if self.app_view != AppView::Reader { return Task::none(); }
                 return self.update(Message::PrevPage);
             }
+            // Comics only: in a book Space turns the page (above).
+            Key::Character(c) if c.as_str() == " " && self.app_view == AppView::Reader && !self.sources.is_empty() => {
+                return self.update(Message::ToggleFitWidth);
+            }
             Key::Named(Named::Escape) => {
                 if self.fullscreen {
                     return self.update(Message::ToggleFullscreen);
                 }
+                if self.fit_width { return self.update(Message::ToggleFitWidth); }
                 if self.zoom_active { self.zoom_active = false; self.zoom = 1.0; }
                 else if self.show_chapter_select { self.show_chapter_select = false; }
                 else if self.app_view != AppView::Library { return self.update(Message::GoToLibrary); }
@@ -1742,6 +1772,7 @@ impl App {
                     && c.as_str() == "0" =>
             {
                 self.zoom_active = false;
+                self.fit_width = false;
                 self.zoom = 1.0;
             }
             Key::Character(c) if self.app_view == AppView::Reader => match c.as_str() {
@@ -1754,7 +1785,7 @@ impl App {
                     }
                     return self.refresh_window();
                 }
-                "m" | "M" => { self.zoom_active = !self.zoom_active; self.zoom = 1.0; }
+                "m" | "M" => return self.update(Message::ToggleZoom),
                 "i" | "I" => return self.update(Message::ToggleInfo),
                 "s" | "S" => return self.update(Message::ToggleSettings),
                 "c" | "C" if self.chapters.len() > 1 || self.reader_issues.len() > 1 => {
@@ -1784,10 +1815,12 @@ impl App {
         // ── Page content ──────────────────────────────────────────────────────
         let viewer: Element<'_, Message> =
             if !self.sources.is_empty() && self.handle(self.current_page).is_some() {
-                match (&self.layout, self.zoom_active) {
+                let use_viewer = self.zoom_active || self.fit_width || self.fit_width_leaving;
+                match (&self.layout, use_viewer) {
                     (_, true) => {
                         let h = self.handle(self.current_page).unwrap();
                         widget::image::viewer(h.clone())
+                            .fit_width(self.fit_width)
                             .content_fit(ContentFit::Contain)
                             .min_scale(MIN_ZOOM)
                             .max_scale(MAX_ZOOM)
@@ -1888,7 +1921,7 @@ impl App {
                     .push(icon::from_name("image-x-generic-symbolic").size(64))
                     .push(widget::text::title3("Open a comic or book to start reading"))
                     .push(widget::text(
-                        "← → page  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy",
+                        "← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy",
                     ).size(12))
                     .push(widget::text("You can also drag and drop a file or folder here.").size(12))
                     .push(widget::button::suggested("Open Comic or Book").on_press(Message::OpenFile))
@@ -1896,7 +1929,12 @@ impl App {
             };
 
         // ── Backdrop (never tints the page itself) ────────────────────────────
-        let viewer_bg: Element<'_, Message> = self.backdrop(viewer);
+        let viewer_bg: Element<'_, Message> = match self.fit_note {
+            Some((note, _)) if !self.sources.is_empty() => {
+                cosmic::iced::widget::stack![self.backdrop(viewer), fit_note(note)].into()
+            }
+            _ => self.backdrop(viewer),
+        };
 
         // ── Right panel (chapter select; Info lives in the context drawer) ────
         let main_row: Element<'_, Message> = if self.show_chapter_select {
@@ -2580,6 +2618,7 @@ impl App {
                 self.chapter_covers.clear();
                 self.covers_pending.clear();
                 self.zoom_active = false;
+                self.fit_width = false;
                 self.zoom = 1.0;
                 self.comic_info = None;
                 self.epub_book = None;
@@ -2672,6 +2711,7 @@ impl App {
                         self.chapter_covers.clear();
                         self.covers_pending.clear();
                         self.zoom_active = false;
+                        self.fit_width = false;
                         self.zoom = 1.0;
                         self.comic_info = None;
                         self.start_chapter = None;
@@ -3273,8 +3313,38 @@ impl App {
                 return self.refresh_window();
             }
             Message::ToggleZoom => {
+                // From Fit to Width, back to the whole page.
+                if self.fit_width {
+                    return self.update(Message::ToggleFitWidth);
+                }
                 self.zoom_active = !self.zoom_active;
                 self.zoom = 1.0;
+            }
+            Message::ToggleFitWidth => {
+                self.fit_width = !self.fit_width;
+                self.fit_note_counter += 1;
+                let note = self.fit_note_counter;
+                self.fit_note = Some((if self.fit_width { "Fit to Width" } else { "Whole Page" }, note));
+                let mut tasks = vec![cosmic::task::future(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+                    Message::HideFitNote(note)
+                })];
+                // The viewer stays while it eases back to the whole page,
+                // then the plain page takes over.
+                if !self.fit_width && !self.zoom_active {
+                    self.fit_width_leaving = true;
+                    tasks.push(cosmic::task::future(async {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        Message::FitWidthEased
+                    }));
+                }
+                return Task::batch(tasks);
+            }
+            Message::FitWidthEased => self.fit_width_leaving = false,
+            Message::HideFitNote(note) => {
+                if self.fit_note.is_some_and(|(_, n)| n == note) {
+                    self.fit_note = None;
+                }
             }
             Message::ToggleInfo => {
                 let showing_info =
@@ -3404,4 +3474,28 @@ impl App {
             None => Task::none(),
         }
     }
+}
+
+/// The brief note at the bottom of the page saying Fit to Width went on
+/// or off.
+fn fit_note(note: &'static str) -> Element<'static, Message> {
+    widget::container(
+        widget::container(widget::text(note).size(13))
+            .padding([6, 14])
+            .style(|theme: &cosmic::Theme| {
+                let c = theme.cosmic();
+                widget::container::Style {
+                    background: Some(Background::Color(Color { a: 0.85, ..c.bg_color().into() })),
+                    text_color: Some(c.on_bg_color().into()),
+                    border: cosmic::iced::Border { radius: 999.0.into(), ..Default::default() },
+                    ..Default::default()
+                }
+            }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(Alignment::Center)
+    .align_y(Alignment::End)
+    .padding([0, 0, 24, 0])
+    .into()
 }
