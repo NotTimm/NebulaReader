@@ -178,15 +178,14 @@ the owner's laptop). Last updated 2026-10-21.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- 0.1.12 is NOT released: the version is bumped (Cargo.toml, metainfo,
-  spec) but the owner stopped the publish run on 2026-10-21 (no tag, no
-  GitHub Release). Since then: card menus download/remove one item for
-  one-shots ("Download Book") and Continue Reading cards ("Download
-  Issue"/"Download Book" for the chapter shown, "Remove Download" for
-  just it: `CardAction::DownloadIssue`/`RemoveIssueDownload`); other
-  series cards keep Download All / Remove Downloads. Release notes for it:
-  `packaging/release-notes/0.1.12.md`; the release workflow publishes
-  that file (owner's commit 0f50ad2) and won't publish without it.
+- Released 0.1.12 (2026-10-21): Fit to Width, the audit below, and card
+  menus that download/remove one item for one-shots ("Download Book")
+  and Continue Reading cards ("Download Issue"/"Download Book" for the
+  chapter shown, "Remove Download" for just it:
+  `CardAction::DownloadIssue`/`RemoveIssueDownload`); other series cards
+  keep Download All / Remove Downloads. First release whose GitHub text
+  comes from `packaging/release-notes/<version>.md`. COPR build started;
+  the winget job failed as expected (first PR not merged yet).
 - Audit 2026-10-21 (in 0.1.12): one DB commit per
   sync/scan (`library::batch`, synchronous=NORMAL); a failed dark-mode
   read never means light (Mac `defaults`, Windows registry, portal);
