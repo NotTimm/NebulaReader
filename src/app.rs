@@ -138,6 +138,8 @@ pub enum Message {
     ToggleIssueRead(i64, bool),
     MarkSeriesRead(bool),
     // Chapter covers
+    /// The open comic's ComicInfo.xml, for the comic opened as `.0`.
+    ComicInfoRead(u64, Option<ComicInfo>),
     ChapterCoverReady { gen: u64, chapter_idx: usize, result: Result<(u32, u32, Vec<u8>), String> },
     // Library
     LibrarySearchChanged(String),
@@ -1220,6 +1222,15 @@ impl App {
 
         self.library_entries = entries;
         Task::none()
+    }
+}
+
+/// Quitting with Cmd+Q on a Mac closes the window without the close
+/// request that sends the last Jellyfin progress (`JfMsg::Closing`), so
+/// it's sent here too. It does nothing the second time.
+impl Drop for App {
+    fn drop(&mut self) {
+        let _ = self.update_jellyfin(JfMsg::Closing);
     }
 }
 
@@ -2756,9 +2767,20 @@ impl App {
                     .unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
                 self.set_header_title(self.title.clone());
 
-                // Embedded ComicInfo.xml of the issue being read.
+                // Embedded ComicInfo.xml of the issue being read, looked up
+                // off the UI thread: in a CBR it can mean unpacking much of
+                // the archive.
                 if let Some((_, ch, _)) = self.current_chapter() {
-                    self.comic_info = comic::find_comic_info(&ch.path).map(|xml| comicinfo::parse(&xml));
+                    let (gen, path) = (self.page_gen, ch.path.clone());
+                    tasks.push(cosmic::task::future(async move {
+                        let info = tokio::task::spawn_blocking(move || {
+                            comic::find_comic_info(&path).map(|xml| comicinfo::parse(&xml))
+                        })
+                        .await
+                        .ok()
+                        .flatten();
+                        Message::ComicInfoRead(gen, info)
+                    }));
                 }
                 self.persist_progress();
 
@@ -3020,6 +3042,11 @@ impl App {
                 }
             }
             Message::PageSizeRead(key, size) => self.page_size_read(key, size),
+            Message::ComicInfoRead(gen, info) => {
+                if gen == self.page_gen {
+                    self.comic_info = info;
+                }
+            }
             Message::ChapterCoverReady { gen, chapter_idx, result } => {
                 if gen != self.page_gen {
                     return Task::none();
