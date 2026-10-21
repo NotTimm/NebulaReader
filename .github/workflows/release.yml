@@ -531,6 +531,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The release notes: packaging/release-notes/<version>.md, written for
+      # each release. A release without them isn't published.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging/release-notes
+      - name: Check the release notes
+        run: |
+          notes="packaging/release-notes/${{ needs.version.outputs.version }}.md"
+          test -s "$notes" || { echo "::error::Missing $notes: write the release notes first"; exit 1; }
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -549,6 +559,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Nebula Reader ${{ needs.version.outputs.version }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          body_path: packaging/release-notes/${{ needs.version.outputs.version }}.md
+          # GitHub's list of changes goes below the notes.
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
