@@ -135,12 +135,12 @@ the owner's laptop). Last updated 2026-10-20.
   fetched whole after asking above 100 MB (`jf.blocked`). Caches trimmed
   to 2 GB at startup. Convert to CBZ: `src/convert.rs` +
   `src/app/convert_view.rs` (CBRs to the Trash via the `trash` crate).
-- winget: microsoft/winget-pkgs#457615 (`NotTimm.NebulaReader` 0.1.9, opened
+- winget: microsoft/winget-pkgs#457615 (`NotTimm.NebulaReader` 0.1.11, opened
   2026-10-21). Two earlier PRs (#454452, #457241) had passed validation but
   were auto-closed as empty after the branch was pushed back to fcb0e6200
   (the commit that only deletes 0.1.1); GitHub won't reopen them. Never
   re-run that old reopen command block. Branch `NotTimm.NebulaReader-0.1.0`
-  in `~/Projects/winget-pkgs` must stay at 26575e1ce. Once merged, re-run
+  in `~/Projects/winget-pkgs` must stay at 5a8ab004b (or later). Once merged, re-run
   the release workflow's `winget` job from the newest release to file
   updates; until then that job fails, which is expected.
 - Fedora/COPR: `packaging/fedora/nebula-reader.spec` (offline build from
