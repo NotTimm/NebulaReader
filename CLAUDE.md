@@ -20,7 +20,9 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #457615; #4572
   `cargo test` goes to `master` right away (fast-forward or a merge commit;
   never squash, the history is the log). Keep the session branch in sync.
 - Don't make releases (version bumps, tags, publish runs) unless the owner
-  asks for one. Push features to `master`; a test build without `publish`
+  asks for one. Every release gets detailed, user-facing release notes in
+  `packaging/release-notes/<version>.md` (the publish job uses them and
+  fails without them); give the owner the same notes in the chat. Push features to `master`; a test build without `publish`
   is fine when useful.
 - Claude sessions' GitHub tokens may lack the `workflow` scope, so changes
   under `.github/workflows/` can be refused on push or merge. When that

@@ -113,7 +113,10 @@ workflow artifacts. To publish:
 1. Bump `version` in `Cargo.toml` (and add a `<release>` entry to
    `res/io.github.NotTimm.NebulaReader.metainfo.xml`, and set `Version`
    and a `%changelog` entry in `packaging/fedora/nebula-reader.spec`; the
-   workflow fails if the spec's version differs), commit, push.
+   workflow fails if the spec's version differs), write the release
+   notes in `packaging/release-notes/<version>.md` (what's new, fixes,
+   per platform, for users; the workflow won't publish without them),
+   commit, push.
 2. Tag that commit with the same version prefixed by `v` and push the tag:
 
    ```
