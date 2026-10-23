@@ -107,7 +107,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-21.
+the owner's laptop). Last updated 2026-10-23.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -178,6 +178,10 @@ the owner's laptop). Last updated 2026-10-21.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Unreleased (after 0.1.12): Ctrl (Cmd on a Mac) + a mouse wheel scrolls a
+  zoomed comic page, with Shift sideways (patch 14); a touchpad's
+  Ctrl + scroll still zooms, and on a whole page it does nothing. Seen
+  working in Xvfb (give the window focus first: there's no window manager).
 - Released 0.1.12 (2026-10-21): Fit to Width, the audit below, and card
   menus that download/remove one item for one-shots ("Download Book")
   and Continue Reading cards ("Download Issue"/"Download Book" for the
@@ -202,7 +206,7 @@ the owner's laptop). Last updated 2026-10-21.
   rebuilt on every message, Jellyfin library fetch one folder at a time,
   scans re-open known archives with no concurrency cap.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
-- libcosmic: fork pinned at `cd86f68` (patches 1–13, see Cargo.toml),
+- libcosmic: fork pinned at `0d39ac6` (patches 1–14, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently

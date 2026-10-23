@@ -1627,7 +1627,13 @@ impl Application for App {
                         widget::button::icon(icon::from_name("zoom-in-symbolic"))
                             .selected(self.zoom_active)
                             .on_press(Message::ToggleZoom),
-                        if self.zoom_active { "Stop zooming (M)" } else { "Zoom and pan (M, or scroll; Shift + scroll for fine steps)" },
+                        if self.zoom_active {
+                            "Stop zooming (M)"
+                        } else if cfg!(target_os = "macos") {
+                            "Zoom and pan (M, or scroll; Shift + scroll for fine steps, Cmd + scroll to move the page)"
+                        } else {
+                            "Zoom and pan (M, or scroll; Shift + scroll for fine steps, Ctrl + scroll to move the page)"
+                        },
                     ));
                     els.push(tip(
                         widget::button::icon(library_view::fit_width_icon())
@@ -2004,9 +2010,11 @@ impl App {
                     .align_x(Alignment::Center)
                     .push(icon::from_name("image-x-generic-symbolic").size(64))
                     .push(widget::text::title3("Open a comic or book to start reading"))
-                    .push(widget::text(
-                        "← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy",
-                    ).size(12))
+                    .push(widget::text(if cfg!(target_os = "macos") {
+                        "← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer, Cmd: move)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy"
+                    } else {
+                        "← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer, Ctrl: move)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy"
+                    }).size(12))
                     .push(widget::text("You can also drag and drop a file or folder here.").size(12))
                     .push(widget::button::suggested("Open Comic or Book").on_press(Message::OpenFile))
                     .into()
@@ -3519,8 +3527,12 @@ impl App {
                 // Same mouse-or-touchpad call as the viewer (Windows reports
                 // touchpads as fractional lines).
                 let physical = self.wheel.is_physical_wheel(&delta, cosmic::iced::time::Instant::now());
+                // Ctrl (Cmd) + wheel scrolls a zoomed page; a whole page has
+                // nowhere to scroll, so it doesn't start zooming either.
+                let moving = physical && self.modifiers.command();
                 if self.app_view == AppView::Reader
                     && (physical || self.modifiers.control())
+                    && !moving
                     && !self.sources.is_empty()
                 {
                     self.enter_zoom();
