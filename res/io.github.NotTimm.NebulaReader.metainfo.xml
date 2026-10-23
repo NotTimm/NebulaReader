@@ -69,6 +69,13 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.13" date="2026-10-23" type="stable">
+      <description>
+        <ul>
+          <li>With a mouse, hold Ctrl (Cmd on a Mac) and turn the wheel to scroll down a zoomed comic page; add Shift to move sideways</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.12" date="2026-10-21" type="stable">
       <description>
         <ul>
@@ -160,7 +167,7 @@
           <li>Colour themes: built-in themes, plus your own COSMIC theme (.ron) and KDE colour scheme (.colors) files</li>
           <li>Follows your system's dark mode and accent colour while running, on every desktop; on Windows with the same accent shades as Windows' own apps</li>
           <li>Series show their creators and years, issues their release dates, and books their author</li>
-          <li>The mouse wheel zooms comic pages directly; hold Shift for finer steps</li>
+          <li>The mouse wheel zooms comic pages directly; hold Shift for finer steps, or Ctrl to scroll a zoomed page</li>
           <li>Two-page spreads show on their own, and each zoomed page starts at its top</li>
           <li>Full screen hides the header bar until the pointer reaches the top</li>
           <li>Jellyfin: what you're reading shows on the server's dashboard</li>

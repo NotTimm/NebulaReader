@@ -178,7 +178,7 @@ the owner's laptop). Last updated 2026-10-23.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- Unreleased (after 0.1.12): Ctrl (Cmd on a Mac) + a mouse wheel scrolls a
+- Released 0.1.13 (2026-10-23): Ctrl (Cmd on a Mac) + a mouse wheel scrolls a
   zoomed comic page, with Shift sideways (patch 14); a touchpad's
   Ctrl + scroll still zooms, and on a whole page it does nothing. Seen
   working in Xvfb (give the window focus first: there's no window manager).

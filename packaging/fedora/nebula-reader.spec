@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.1.12
+Version:        0.1.13
 Release:        1%{?dist}
 Summary:        Comic, manga and ebook reader with Jellyfin support
 
@@ -114,6 +114,9 @@ export NEBULA_DISTRO="Fedora package"
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Fri Oct 23 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.13-1
+- Ctrl + mouse wheel scrolls a zoomed comic page (Ctrl + Shift: sideways)
+
 * Wed Oct 21 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.12-1
 - Fit to Width (Space) for comics
 - Faster Jellyfin opening and page turns, less memory per page
