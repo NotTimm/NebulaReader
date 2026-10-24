@@ -206,6 +206,9 @@ the owner's laptop). Last updated 2026-10-23.
   rebuilt on every message, Jellyfin library fetch one folder at a time,
   scans re-open known archives with no concurrency cap.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
+- Dependabot (2026-10-24): `.github/dependabot.yml` (weekly, crates
+  grouped minor/patch, Actions grouped, libcosmic ignored); alerts and
+  security-fix PRs switched on. How to handle the PRs: docs/DEVELOPING.md.
 - libcosmic: fork pinned at `0d39ac6` (patches 1–14, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
