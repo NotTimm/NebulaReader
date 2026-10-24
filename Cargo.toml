@@ -20,7 +20,7 @@ image = { version = "0.25", default-features = false, features = [
 compress-tools = "0.15"
 # Header checksums for one-page RAR archives (src/remote_rar.rs).
 crc32fast = "1"
-zip = "2"
+zip = "9"
 # The CBR files a CBZ conversion replaces go to the system Trash.
 trash = "5"
 flate2 = "1"
