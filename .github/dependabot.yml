@@ -1,0 +1,39 @@
+# Dependabot: weekly update PRs for the crates and the GitHub Actions the
+# workflows use. Security fixes come as their own PRs as soon as an
+# advisory appears (repository Settings → Code security), whatever the
+# schedule here.
+#
+# Every update PR runs ci.yml (cargo test) and, when it touches
+# Cargo.toml/Cargo.lock or a workflow, the full release.yml build of every
+# package (without signing: Dependabot PRs can't read the repo's secrets).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    ignore:
+      # The owner's fork, pinned by commit and kept in sync with upstream
+      # by hand (tools/libcosmic-drift.sh, docs/DEVELOPING.md); it also
+      # pins the iced/winit/wgpu stack, so those move with it.
+      - dependency-name: libcosmic
+    groups:
+      # One PR for all the minor and patch bumps; each major bump (which
+      # may need code changes) gets its own.
+      crates:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

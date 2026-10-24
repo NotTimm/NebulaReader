@@ -194,6 +194,24 @@ the old key whose `PUBLIC_KEY` is the new one, then switch the secrets.
 Without the old key, installed copies can't verify updates and have to be
 updated by hand once.
 
+## Dependency updates (Dependabot)
+
+`.github/dependabot.yml` opens update PRs every Monday: one grouped PR
+for the crates' minor and patch bumps, one per major bump, and one for
+the GitHub Actions. Security fixes arrive as their own PRs whenever an
+advisory comes out. `libcosmic` is ignored: the fork is updated by hand
+(see below), and the iced/winit/wgpu crates it pins move with it.
+
+Each PR runs `ci.yml` (`cargo test`) and, since it touches `Cargo.lock`,
+the whole `release.yml` build, so every platform compiles before you
+merge (unsigned: Dependabot PRs can't read the signing secrets, which is
+fine outside a publish). Merge with a merge commit, never squash. After a
+batch that adds or drops crates, refresh the `License:` list in
+`packaging/fedora/nebula-reader.spec` from the `fedora` job's
+`%cargo_license_summary` output. The Flatpak's `cargo-sources.json` and
+the Fedora vendor tarball are generated from `Cargo.lock` in CI, so they
+need nothing.
+
 ## The libcosmic fork
 
 `Cargo.toml` points at `github.com/NotTimm/libcosmic`, a small fork of
