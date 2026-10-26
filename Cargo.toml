@@ -32,7 +32,7 @@ ron = "0.12"
 # Local time for the full-screen clock.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 quick-xml = "0.39"
 regex = "1"
 minisign-verify = "0.3"
