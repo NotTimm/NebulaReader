@@ -331,7 +331,9 @@ fn attr(e: &BytesStart, name: &str) -> Option<String> {
 
 fn parse_opf(xml: &str) -> Opf {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    // Not trimmed: the spaces around an entity (`A &amp; B`) are text
+    // events of their own. The whole text is trimmed instead.
+    reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
 
     let mut opf = Opf {
@@ -346,32 +348,49 @@ fn parse_opf(xml: &str) -> Opf {
     let mut in_title = false;
     let mut in_creator = false;
     let mut in_date = false;
+    // Text arrives in pieces (an entity like `&amp;` is its own event).
+    let mut text = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match local_name(&e.name()).as_str() {
-                "title" => in_title = opf.title.is_empty(),
-                "creator" => in_creator = opf.author.is_none(),
-                "date" => in_date = opf.date.is_none(),
+                "title" => {
+                    in_title = opf.title.is_empty();
+                    text.clear();
+                }
+                "creator" => {
+                    in_creator = opf.author.is_none();
+                    text.clear();
+                }
+                "date" => {
+                    in_date = opf.date.is_none();
+                    text.clear();
+                }
                 "spine" => opf.ncx_id = attr(&e, "toc"),
                 _ => {}
             },
-            Ok(Event::Text(t)) => {
-                let text = decode_text(&t);
-                let text = text.trim();
-                if in_title {
-                    opf.title = text.to_string();
-                } else if in_creator {
-                    opf.author = Some(text.to_string());
-                } else if in_date && !text.is_empty() {
-                    // Keep just the date part of "2019-02-12T00:00:00Z".
-                    opf.date = Some(text.split('T').next().unwrap_or(text).to_string());
+            Ok(ref ev @ (Event::Text(_) | Event::GeneralRef(_))) => {
+                if in_title || in_creator || in_date {
+                    text.push_str(&event_text(ev));
                 }
             }
             Ok(Event::End(e)) => match local_name(&e.name()).as_str() {
-                "title" => in_title = false,
-                "creator" => in_creator = false,
-                "date" => in_date = false,
+                "title" if in_title => {
+                    opf.title = text.trim().to_string();
+                    in_title = false;
+                }
+                "creator" if in_creator => {
+                    opf.author = Some(text.trim().to_string());
+                    in_creator = false;
+                }
+                "date" if in_date => {
+                    let date = text.trim();
+                    if !date.is_empty() {
+                        // Keep just the date part of "2019-02-12T00:00:00Z".
+                        opf.date = Some(date.split('T').next().unwrap_or(date).to_string());
+                    }
+                    in_date = false;
+                }
                 _ => {}
             },
             Ok(Event::Empty(e)) => {
@@ -449,7 +468,9 @@ fn read_toc(
 
 fn parse_ncx(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    // Not trimmed: the spaces around an entity (`A &amp; B`) are text
+    // events of their own. The whole text is trimmed instead.
+    reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut out = Vec::new();
     let mut depth = 0usize;
@@ -465,7 +486,7 @@ fn parse_ncx(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
                 "text" => in_text = true,
                 _ => {}
             },
-            Ok(Event::Text(t)) if in_text => label.push_str(decode_text(&t).trim()),
+            Ok(ref ev @ (Event::Text(_) | Event::GeneralRef(_))) if in_text => label.push_str(&event_text(ev)),
             Ok(Event::End(e)) => match local_name(&e.name()).as_str() {
                 "navPoint" => depth = depth.saturating_sub(1),
                 "text" => in_text = false,
@@ -473,8 +494,9 @@ fn parse_ncx(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
             },
             Ok(Event::Empty(e)) if local_name(&e.name()) == "content" => {
                 if let Some(src) = attr(&e, "src") {
+                    let label = collapse(&label);
                     if !label.is_empty() {
-                        out.push((join_epub_path(dir, &src), label.clone(), depth.saturating_sub(1)));
+                        out.push((join_epub_path(dir, &src), label, depth.saturating_sub(1)));
                     }
                 }
             }
@@ -512,9 +534,9 @@ fn parse_nav(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
                 }
                 _ => {}
             },
-            Ok(Event::Text(t)) => {
+            Ok(ref ev @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if let Some((_, label)) = current.as_mut() {
-                    label.push_str(&decode_text(&t));
+                    label.push_str(&event_text(ev));
                 }
             }
             Ok(Event::End(e)) => match local_name(&e.name()).as_str() {
@@ -894,9 +916,9 @@ fn parse_xhtml_body(xhtml: &str, css: &CssHints) -> Vec<Parsed> {
                     }
                 }
             }
-            Ok(Event::Text(t)) => {
+            Ok(ref ev @ (Event::Text(_) | Event::GeneralRef(_))) => {
                 if skip_depth == 0 && in_body {
-                    p.push_text(&decode_text(&t));
+                    p.push_text(&event_text(ev));
                 }
             }
             Ok(Event::CData(t)) => {
@@ -922,15 +944,24 @@ fn parse_xhtml_body(xhtml: &str, css: &CssHints) -> Vec<Parsed> {
     p.out
 }
 
-/// Decodes a text node, resolving XML *and* common HTML entities
-/// (`&nbsp;`, `&mdash;`… are everywhere in EPUBs but aren't XML).
-fn decode_text(t: &quick_xml::events::BytesText) -> String {
-    let raw = String::from_utf8_lossy(t.as_ref());
+/// The text of a text node or of an entity reference, which quick-xml
+/// (since 0.38) reports as an event of its own; anything else is empty.
+fn event_text(ev: &Event) -> String {
+    match ev {
+        Event::Text(t) => decode_text(&String::from_utf8_lossy(t)),
+        Event::GeneralRef(r) => decode_text(&format!("&{};", String::from_utf8_lossy(r))),
+        _ => String::new(),
+    }
+}
+
+/// Resolves XML *and* common HTML entities in text (`&nbsp;`, `&mdash;`…
+/// are everywhere in EPUBs but aren't XML).
+fn decode_text(raw: &str) -> String {
     if !raw.contains('&') {
-        return raw.into_owned();
+        return raw.to_owned();
     }
     let mut out = String::with_capacity(raw.len());
-    let mut rest: &str = &raw;
+    let mut rest: &str = raw;
     while let Some(amp) = rest.find('&') {
         out.push_str(&rest[..amp]);
         let tail = &rest[amp..];
@@ -1032,6 +1063,29 @@ fn read_zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entities_in_titles_and_contents() {
+        let opf = parse_opf(r#"<package><metadata>
+            <dc:title>Pride &amp; Prejudice&#x2009;&mdash;&nbsp;Vol. 1</dc:title>
+            <dc:creator>Jane &amp; Co</dc:creator></metadata></package>"#);
+        assert_eq!(opf.title, "Pride & Prejudice\u{2009}—\u{a0}Vol. 1");
+        assert_eq!(opf.author.as_deref(), Some("Jane & Co"));
+
+        let ncx = parse_ncx(
+            r#"<ncx><navMap><navPoint><navLabel><text>Tom &amp; Jerry</text></navLabel>
+            <content src="a.xhtml"/></navPoint></navMap></ncx>"#,
+            Path::new(""),
+        );
+        assert_eq!(ncx[0].1, "Tom & Jerry");
+
+        let nav = parse_nav(
+            r#"<nav epub:type="toc"><ol><li><a href="b.xhtml">Salt &amp;
+            Pepper</a></li></ol></nav>"#,
+            Path::new(""),
+        );
+        assert_eq!(nav[0].1, "Salt & Pepper");
+    }
 
     #[test]
     fn inline_runs_and_css_classes() {

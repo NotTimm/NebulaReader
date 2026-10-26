@@ -148,7 +148,7 @@ fn list_zip_entries(path: &Path) -> Result<Vec<String>, String> {
     let mut names: Vec<String> = (0..archive.len())
         .filter_map(|i| {
             archive.by_index_raw(i).ok().and_then(|entry| {
-                let name = entry.name().to_owned();
+                let name = entry.name().ok()?.into_owned();
                 (is_image_name(&name) && !name.ends_with('/')).then_some(name)
             })
         })
@@ -647,7 +647,7 @@ fn zip_image_names_uncached(path: &Path) -> Result<Vec<String>, String> {
     let mut names: Vec<String> = (0..archive.len())
         .filter_map(|i| {
             archive.by_index_raw(i).ok().and_then(|e| {
-                let n = e.name().to_owned();
+                let n = e.name().ok()?.into_owned();
                 (is_image_name(&n) && !n.ends_with('/')).then_some(n)
             })
         })
@@ -679,7 +679,7 @@ pub fn looks_like_comic(path: &Path) -> bool {
         let Ok(file) = File::open(path) else { return false };
         let Ok(mut archive) = zip::ZipArchive::new(file) else { return false };
         (0..archive.len())
-            .filter_map(|i| archive.by_index_raw(i).ok().map(|e| e.name().to_owned()))
+            .filter_map(|i| archive.by_index_raw(i).ok().and_then(|e| e.name().ok().map(|n| n.into_owned())))
             .filter(|n| !n.ends_with('/'))
             .collect()
     } else if is_rar_name(&name) {
@@ -763,7 +763,7 @@ pub fn find_comic_info(path: &Path) -> Option<String> {
         let idx = (0..archive.len()).find(|&i| {
             archive
                 .by_index_raw(i)
-                .map(|e| e.name().to_ascii_lowercase().ends_with("comicinfo.xml"))
+                .map(|e| e.name().is_ok_and(|n| n.to_ascii_lowercase().ends_with("comicinfo.xml")))
                 .unwrap_or(false)
         })?;
         let mut entry = archive.by_index(idx).ok()?;

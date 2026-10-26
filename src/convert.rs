@@ -147,7 +147,7 @@ mod tests {
         let names = crate::comic::count_pages(&cbz).unwrap();
         assert_eq!(names, crate::comic::count_pages(&cbr).unwrap());
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&cbz).unwrap()).unwrap();
-        let first = zip.by_index(1).unwrap().name().to_string();
+        let first = zip.by_index(1).unwrap().name().unwrap().to_string();
         let mut from_zip = Vec::new();
         std::io::Read::read_to_end(&mut zip.by_name(&first).unwrap(), &mut from_zip).unwrap();
         let from_rar = std::process::Command::new("bsdtar").arg("-xOf").arg(&cbr).arg(&first).output().unwrap().stdout;
