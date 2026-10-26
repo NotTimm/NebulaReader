@@ -288,7 +288,7 @@ fn find_opf_path(zip: &mut zip::ZipArchive<std::fs::File>) -> Result<String, Str
         match reader.read_event_into(&mut buf) {
             Ok(Event::Empty(e)) | Ok(Event::Start(e)) if local_name(&e.name()) == "rootfile" => {
                 for attr in e.attributes().flatten() {
-                    if local_name_bytes(attr.key.as_ref()) == "full-path" {
+                    if local_name_str(attr.key.as_ref()) == "full-path" {
                         return Ok(attr.unescape_value().unwrap_or_default().into_owned());
                     }
                 }
@@ -323,9 +323,9 @@ struct Opf {
 fn attr(e: &BytesStart, name: &str) -> Option<String> {
     e.attributes()
         .flatten()
-        .find(|a| local_name_bytes(a.key.as_ref()) == name)
+        .find(|a| local_name_str(a.key.as_ref()) == name)
         .map(|a| a.unescape_value().map(|v| v.into_owned()).unwrap_or_else(|_| {
-            String::from_utf8_lossy(&a.value).into_owned()
+            a.value.to_string()
         }))
 }
 
@@ -923,7 +923,7 @@ fn parse_xhtml_body(xhtml: &str, css: &CssHints) -> Vec<Parsed> {
             }
             Ok(Event::CData(t)) => {
                 if skip_depth == 0 && in_body {
-                    p.push_text(&String::from_utf8_lossy(&t));
+                    p.push_text(&t);
                 }
             }
             Ok(Event::End(e)) => {
@@ -948,8 +948,8 @@ fn parse_xhtml_body(xhtml: &str, css: &CssHints) -> Vec<Parsed> {
 /// (since 0.38) reports as an event of its own; anything else is empty.
 fn event_text(ev: &Event) -> String {
     match ev {
-        Event::Text(t) => decode_text(&String::from_utf8_lossy(t)),
-        Event::GeneralRef(r) => decode_text(&format!("&{};", String::from_utf8_lossy(r))),
+        Event::Text(t) => decode_text(t),
+        Event::GeneralRef(r) => decode_text(&format!("&{};", &**r)),
         _ => String::new(),
     }
 }
@@ -1015,12 +1015,11 @@ fn collapse(s: &str) -> String {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn local_name(name: &quick_xml::name::QName) -> String {
-    local_name_bytes(name.as_ref())
+    local_name_str(name.as_ref())
 }
 
-fn local_name_bytes(bytes: &[u8]) -> String {
-    let s = String::from_utf8_lossy(bytes);
-    s.rsplit(':').next().unwrap_or(&s).to_string()
+fn local_name_str(s: &str) -> String {
+    s.rsplit(':').next().unwrap_or(s).to_string()
 }
 
 fn join_epub_path(base: &Path, href: &str) -> String {

@@ -33,7 +33,7 @@ ron = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
-quick-xml = "0.39"
+quick-xml = "0.42"
 regex = "1"
 minisign-verify = "0.3"
 
