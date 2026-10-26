@@ -62,7 +62,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         name: Read version from Cargo.toml
         run: |
@@ -89,7 +89,7 @@ jobs:
     needs: version
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -114,7 +114,7 @@ jobs:
             dpkg-deb --contents "$f"
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-deb
           path: dist/*.deb
@@ -134,7 +134,7 @@ jobs:
             git tar zstd gcc gcc-c++ make pkgconf-pkg-config rpm-build \
             libxkbcommon-devel wayland-devel libarchive-devel openssl-devel
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Mark checkout as safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -157,7 +157,7 @@ jobs:
             rpm -qRp "$f"
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-rpm
           path: dist/*.rpm
@@ -168,7 +168,7 @@ jobs:
     needs: version
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -186,7 +186,7 @@ jobs:
       - name: Build AppImage
         run: bash packaging/build-appimage.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-appimage
           path: dist/NebulaReader-*.AppImage
@@ -199,9 +199,9 @@ jobs:
     name: Generate cargo-sources.json
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -210,7 +210,7 @@ jobs:
           pip install aiohttp tomlkit pyyaml
           bash packaging/gen-cargo-sources.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cargo-sources
           path: packaging/cargo-sources.json
@@ -221,7 +221,7 @@ jobs:
     needs: version
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -236,7 +236,7 @@ jobs:
       - name: Vendor
         run: bash packaging/fedora/make-vendor.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-vendor
           path: dist/*-vendor.tar.xz
@@ -254,9 +254,9 @@ jobs:
       - name: Install tools
         run: dnf install -y --setopt=install_weak_deps=False git tar rpm-build dnf-plugins-core
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: nebula-reader-vendor
           path: rpmbuild/SOURCES
@@ -278,9 +278,9 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: cargo-sources
           path: packaging
@@ -292,7 +292,7 @@ jobs:
           cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
           upload-artifact: false
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-flatpak
           path: NebulaReader-*.flatpak
@@ -305,14 +305,14 @@ jobs:
     env:
       VCPKG_DEFAULT_TRIPLET: x64-windows
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Point VCPKG_ROOT at the runner's vcpkg
         shell: pwsh
         run: '"VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV'
 
       # Building libarchive takes a few minutes; keep the result around.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ env.VCPKG_ROOT }}/installed
           key: vcpkg-libarchive-x64-windows-v1
@@ -397,7 +397,7 @@ jobs:
           $un = Get-ChildItem "$env:LOCALAPPDATA\Programs\Nebula Reader\unins*.exe" | Select-Object -First 1
           Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-windows
           path: |
@@ -410,7 +410,7 @@ jobs:
     needs: version
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: brew install libarchive pkgconf dylibbundler
@@ -461,7 +461,7 @@ jobs:
           codesign --verify --strict --verbose=2 "$d/Nebula Reader.app"
           test -x "$d/Nebula Reader.app/Contents/MacOS/nebula-reader"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-macos
           path: |
@@ -475,12 +475,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       # Only for the public key the app checks against.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: src/updater.rs
           sparse-checkout-cone-mode: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: nebula-reader-*
           path: dist
@@ -517,7 +517,7 @@ jobs:
             echo "signed $f"
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nebula-reader-signatures
           path: dist/*.minisig
@@ -533,7 +533,7 @@ jobs:
     steps:
       # The release notes: packaging/release-notes/<version>.md, written for
       # each release. A release without them isn't published.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: packaging/release-notes
       - name: Check the release notes
@@ -541,7 +541,7 @@ jobs:
           notes="packaging/release-notes/${{ needs.version.outputs.version }}.md"
           test -s "$notes" || { echo "::error::Missing $notes: write the release notes first"; exit 1; }
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -551,7 +551,7 @@ jobs:
       # Creates the release if it doesn't exist yet; if it does (e.g. a
       # re-run, or a release drafted by hand first), updates it and
       # replaces same-named assets.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           # Explicit so a manual publish (not on a tag ref) creates the tag
           # on the commit it built.
