@@ -212,6 +212,11 @@ batch that adds or drops crates, refresh the `License:` list in
 the Fedora vendor tarball are generated from `Cargo.lock` in CI, so they
 need nothing.
 
+Dependabot can lag behind the advisories: after a batch, run
+`cargo audit` (`cargo install cargo-audit --locked`) and bump whatever it
+still flags. A crate it lists that `cargo tree -i <crate>@<version>
+--target all` can't place isn't built on any platform.
+
 ## The libcosmic fork
 
 `Cargo.toml` points at `github.com/NotTimm/libcosmic`, a small fork of

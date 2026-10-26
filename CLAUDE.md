@@ -107,7 +107,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-23.
+the owner's laptop). Last updated 2026-10-26.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -209,6 +209,12 @@ the owner's laptop). Last updated 2026-10-23.
 - Dependabot (2026-10-24): `.github/dependabot.yml` (weekly, crates
   grouped minor/patch, Actions grouped, libcosmic ignored); alerts and
   security-fix PRs switched on. How to handle the PRs: docs/DEVELOPING.md.
+  First batch merged 2026-10-26 (PRs #1–#7: Actions v4→v7 etc., zip 9,
+  rusqlite 0.40, ashpd 0.13, quick-xml, the minor group), plus what
+  `cargo audit` still flagged: quick-xml 0.42 and h2 0.4.20. Code
+  changes: zip `name()` returns a Result; quick-xml reports `&amp;` etc.
+  as `Event::GeneralRef` (epub `event_text`) and hands out `str` from
+  0.40; ashpd needs the `settings` feature. Unreleased.
 - libcosmic: fork pinned at `0d39ac6` (patches 1–14, see Cargo.toml),
   merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
