@@ -72,6 +72,9 @@ pub struct SeriesEntry {
     /// Fraction of the in-progress issue, for the progress bar.
     pub current_issue_fraction: f32,
     pub current_issue_label: String,
+    /// Unfinished issues with a saved page, wherever it was saved: progress
+    /// from a server only reaches the issues, not the series' own fields.
+    pub issues_in_progress: usize,
     /// Who made it, one "Role: Name, Name" per line.
     pub creators: String,
     /// Last year of publication, for finished series ("2018–2020").
@@ -108,7 +111,7 @@ impl SeriesEntry {
 
     pub fn has_progress(&self) -> bool {
         self.last_read_page > 0 || self.last_read_chapter > 0 || self.issues_read > 0
-            || self.current_issue_fraction > 0.0
+            || self.current_issue_fraction > 0.0 || self.issues_in_progress > 0
     }
 }
 
@@ -1076,7 +1079,8 @@ const SERIES_COLS: &str = "s.id, s.path, s.title, s.display_title, s.description
        FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path),
     (SELECT CASE WHEN i.number != '' THEN i.number ELSE i.name END
        FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path),
-    s.creators, s.end_year";
+    s.creators, s.end_year,
+    (SELECT COUNT(*) FROM issues i WHERE i.series_path = s.path AND NOT i.completed AND i.last_page > 0)";
 
 /// Single files that are also an issue of a folder/group series are hidden
 /// from the shelf — that series already represents them.
@@ -1154,6 +1158,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SeriesEntry> {
         current_issue_label: row.get::<_, Option<String>>(27)?.unwrap_or_default(),
         creators: row.get(28)?,
         end_year: row.get::<_, Option<i64>>(29)?.map(|v| v as u32),
+        issues_in_progress: row.get::<_, i64>(30)? as usize,
         path,
         is_epub,
     })
@@ -1347,6 +1352,22 @@ mod download_tests {
         assert_eq!(remove_download(&conn, "jellyfin://a/gone"), Some(PathBuf::from("/tmp/jellyfin://a/gone.cbz")));
         assert_eq!(remove_download(&conn, "jellyfin://a/gone"), None);
         assert_eq!(downloads(&conn).len(), 1);
+    }
+
+    #[test]
+    fn remote_progress_alone_counts_as_progress() {
+        let conn = db();
+        conn.execute("INSERT INTO series (path, title, last_opened) VALUES ('jellyfin://a/s', 'S', 0)", []).unwrap();
+        for i in ["jellyfin://a/i1", "jellyfin://a/i2"] {
+            conn.execute("INSERT INTO issues (series_path, path) VALUES ('jellyfin://a/s', ?1)", [i]).unwrap();
+        }
+        assert!(!get_series(&conn, "jellyfin://a/s").unwrap().has_progress());
+        // Read on another device: page 12 of a chapter never opened here,
+        // so its page count is still unknown.
+        apply_remote_progress(&conn, "jellyfin://a/s", "jellyfin://a/i2", 12, false, 1_700_000_000).unwrap();
+        let e = get_series(&conn, "jellyfin://a/s").unwrap();
+        assert!(e.has_progress() && !e.is_finished());
+        assert_eq!((e.last_opened, e.last_issue_path.as_str()), (1_700_000_000, "jellyfin://a/i2"));
     }
 
     #[test]
