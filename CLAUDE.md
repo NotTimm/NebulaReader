@@ -107,7 +107,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-26.
+the owner's laptop). Last updated 2026-10-27.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -135,8 +135,7 @@ the owner's laptop). Last updated 2026-10-26.
   (`comic::rar_page`); Jellyfin ones stream via `src/remote_rar.rs`
   (header walk, index cached in `cache/jellyfin-index`), solid ones are
   fetched whole after asking above 100 MB (`jf.blocked`). Caches trimmed
-  to 2 GB at startup. Convert to CBZ: `src/convert.rs` +
-  `src/app/convert_view.rs` (CBRs to the Trash via the `trash` crate).
+  to 2 GB at startup. Convert to CBZ was removed in 0.1.14.
 - winget: microsoft/winget-pkgs#457615 (`NotTimm.NebulaReader` 0.1.11, opened
   2026-10-21). Two earlier PRs (#454452, #457241) had passed validation but
   were auto-closed as empty after the branch was pushed back to fcb0e6200
@@ -178,6 +177,14 @@ the owner's laptop). Last updated 2026-10-26.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Released 0.1.14 (2026-10-27): Convert to CBZ removed (it needed write
+  access to home; the Flatpak has `home:ro`), with `convert.rs`, its view,
+  the `trash` crate and `library::rename_issue_file`. Opening a Jellyfin CBR
+  without an index says "Creating index of CBR comic…"
+  (`App::creating_index`, `rar_index::needs_index`); the ahead-of-time job
+  says "Creating index(es) of CBR comic(s)…". Also the Dependabot batch and
+  libcosmic synced through upstream 95236a94 (fork `756cd0f`). The owner is
+  writing their own Flathub manifest against this release.
 - Released 0.1.13 (2026-10-23): Ctrl (Cmd on a Mac) + a mouse wheel scrolls a
   zoomed comic page, with Shift sideways (patch 14); a touchpad's
   Ctrl + scroll still zooms, and on a whole page it does nothing. Seen
@@ -215,8 +222,8 @@ the owner's laptop). Last updated 2026-10-26.
   changes: zip `name()` returns a Result; quick-xml reports `&amp;` etc.
   as `Event::GeneralRef` (epub `event_text`) and hands out `str` from
   0.40; ashpd needs the `settings` feature. Unreleased.
-- libcosmic: fork pinned at `0d39ac6` (patches 1–14, see Cargo.toml),
-  merged with upstream through `430f3d48` (2026-10-19; iced at 229186b5); 0.1.2 was built from
+- libcosmic: fork pinned at `756cd0f` (patches 1–14, see Cargo.toml),
+  merged with upstream through `95236a94` (2026-10-27; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
   touched chapter); a per-chapter shelf would be an option, not default.

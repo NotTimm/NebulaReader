@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.1.13
+Version:        0.1.14
 Release:        1%{?dist}
 Summary:        Comic, manga and ebook reader with Jellyfin support
 
@@ -114,6 +114,10 @@ export NEBULA_DISTRO="Fedora package"
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Tue Oct 27 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.14-1
+- Convert to CBZ removed; Jellyfin CBRs say when their page index is created
+- libcosmic synced with upstream; dependency and security updates
+
 * Fri Oct 23 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.13-1
 - Ctrl + mouse wheel scrolls a zoomed comic page (Ctrl + Shift: sideways)
 

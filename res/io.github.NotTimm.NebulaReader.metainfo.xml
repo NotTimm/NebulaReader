@@ -69,6 +69,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.14" date="2026-10-27" type="stable">
+      <description>
+        <ul>
+          <li>Convert to CBZ is removed: Jellyfin CBRs stream from a page index instead, and your files are never changed</li>
+          <li>Opening a Jellyfin CBR for the first time says "Creating index of CBR comic…" while its page index is made; later opens start right away</li>
+          <li>Updated COSMIC toolkit and libraries, with security fixes in the XML and HTTP/2 code</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.13" date="2026-10-23" type="stable">
       <description>
         <ul>
