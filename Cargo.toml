@@ -31,7 +31,7 @@ serde_json = "1"
 ron = "0.12"
 # Local time for the full-screen clock.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 quick-xml = "0.42"
 regex = "1"
