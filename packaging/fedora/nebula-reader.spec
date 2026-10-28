@@ -60,6 +60,7 @@ BuildRequires:  pkgconfig(libarchive)
 BuildRequires:  pkgconfig(xkbcommon)
 BuildRequires:  pkgconfig(wayland-client)
 BuildRequires:  pkgconfig(openssl)
+BuildRequires:  pkgconfig(libzstd)
 BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 
@@ -84,6 +85,9 @@ cat cargo-vendor-git.toml >> .cargo/config.toml
 %build
 # Updates come from the repositories: no GitHub check, and About says so.
 export NEBULA_DISTRO="Fedora package"
+# Link Fedora's libzstd: zstd-sys's bundled copy, built with Fedora's
+# flags (-flto), fails to link (undefined FSE_readNCount, HUF_readStats).
+export ZSTD_SYS_USE_PKG_CONFIG=1
 %cargo_build
 %{cargo_license_summary}
 %{cargo_license} > LICENSE.dependencies
@@ -102,6 +106,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{app_id}.desktop
 appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xml
 %if %{with check}
 export NEBULA_DISTRO="Fedora package"
+export ZSTD_SYS_USE_PKG_CONFIG=1
 %cargo_test
 %endif
 
