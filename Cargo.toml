@@ -1,6 +1,6 @@
 [package]
 name = "nebula-reader"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 license = "GPL-3.0-only"
 description = "Nebula Reader: a comic, manga and ebook reader for COSMIC and other desktops"
@@ -131,3 +131,15 @@ image.opt-level = 3
 
 [dev-dependencies]
 minisign = "0.10.0"
+
+# cosmic-settings-daemon (behind libcosmic's cosmic-launch, not built here)
+# asks for these from pop-os/libcosmic. Take them from the fork instead, so
+# the lockfile holds one libcosmic: `cargo vendor` (the Fedora vendor
+# tarball) refuses the same crate from two sources. Keep the rev in step
+# with the libcosmic dependency above.
+[patch."https://github.com/pop-os/libcosmic"]
+build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
+cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
+cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
+iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
+iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }

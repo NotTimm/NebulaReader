@@ -247,7 +247,10 @@ To sync, in a clone of the fork with `upstream` pointing at
    `iced/Cargo.lock`) and apply the saved patch in `iced/`.
 4. Check that `git diff upstream/master` outside `iced/` and
    `cosmic-icons/` shows only our patches. Commit the merge, push it to a
-   branch, point `Cargo.toml` at it and run `cargo check` and `cargo test`.
+   branch, point `Cargo.toml` at it (the `libcosmic` revs *and* the
+   `[patch."https://github.com/pop-os/libcosmic"]` section at the end, which
+   keeps crates other git dependencies want from pop-os on the fork) and
+   run `cargo check` and `cargo test`.
 5. Fast-forward the fork's `master` to the merge and push. Never rebase or
    force-push: released Nebula versions pin old fork commits, which must
    stay fetchable. `nebula-0.1.2` tags the commit 0.1.2 was built from.

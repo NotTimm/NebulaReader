@@ -135,7 +135,7 @@ the owner's laptop). Last updated 2026-10-27.
   (`comic::rar_page`); Jellyfin ones stream via `src/remote_rar.rs`
   (header walk, index cached in `cache/jellyfin-index`), solid ones are
   fetched whole after asking above 100 MB (`jf.blocked`). Caches trimmed
-  to 2 GB at startup. Convert to CBZ was removed in 0.1.14.
+  to 2 GB at startup. Convert to CBZ was removed in 0.1.15.
 - winget: microsoft/winget-pkgs#457615 (`NotTimm.NebulaReader` 0.1.11, opened
   2026-10-21). Two earlier PRs (#454452, #457241) had passed validation but
   were auto-closed as empty after the branch was pushed back to fcb0e6200
@@ -177,7 +177,10 @@ the owner's laptop). Last updated 2026-10-27.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- Released 0.1.14 (2026-10-27): Convert to CBZ removed (it needed write
+- Released 0.1.15 (2026-10-28; 0.1.14 was tagged but never published: its
+  vendor job failed on libcosmic crates from two sources, fixed by the
+  `[patch."https://github.com/pop-os/libcosmic"]` section in Cargo.toml,
+  whose rev must follow the libcosmic pin): Convert to CBZ removed (it needed write
   access to home; the Flatpak has `home:ro`), with `convert.rs`, its view,
   the `trash` crate and `library::rename_issue_file`. Opening a Jellyfin CBR
   without an index says "Creating index of CBR comic…"
