@@ -1,0 +1,47 @@
+name: Bug report
+description: Something doesn't work, looks wrong, or crashes
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Nebula version
+      description: Settings → About
+      placeholder: "0.1.15"
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Fedora .rpm / COPR
+        - Ubuntu / Debian .deb
+        - Flatpak
+        - AppImage
+        - Windows installer
+        - Windows zip
+        - macOS .dmg
+        - Built from source
+        - Other
+  - type: input
+    id: system
+    attributes:
+      label: System and desktop
+      placeholder: "Fedora 44 COSMIC, Windows 11, macOS 15 on an M2…"
+  - type: input
+    id: files
+    attributes:
+      label: Kind of file or library, if it matters
+      placeholder: "CBR from a Jellyfin server, a local EPUB…"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: Optional. Running `RUST_LOG=info nebula-reader` from a terminal prints what Nebula was doing.
+      render: text

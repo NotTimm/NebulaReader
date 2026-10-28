@@ -1,0 +1,16 @@
+name: Idea or feature request
+description: Something Nebula could do, or do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe the idea and what it would help you with. Small touches are welcome too.
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: Other apps that do it well, mock-ups, or whether you'd like to work on it yourself.

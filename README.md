@@ -13,6 +13,7 @@
   <a href="https://github.com/NotTimm/NebulaReader/releases/latest"><img src="https://img.shields.io/github/v/release/NotTimm/NebulaReader?label=download&color=e8857f" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/NotTimm/NebulaReader?color=7a7fd6" alt="GPL-3.0 license"></a>
   <img src="https://img.shields.io/badge/platforms-Linux%20%C2%B7%20Windows%20%C2%B7%20macOS-555" alt="Linux, Windows and macOS">
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-5aa469" alt="Pull requests welcome"></a>
 </p>
 
 <p align="center">
@@ -358,9 +359,22 @@ Windows builds, packaging, releases and the libcosmic fork are covered in
 
 ## Contributing
 
-Bug reports and ideas are welcome in
-[issues](https://github.com/NotTimm/NebulaReader/issues). Nebula is built
-with Rust and [libcosmic](https://github.com/pop-os/libcosmic).
+**Help is very welcome, and pull requests from anyone are too.** Nebula is
+a one-person project so far, and there's plenty of room to shape it:
+
+- 🐛 **Found a bug?** [Open an issue](https://github.com/NotTimm/NebulaReader/issues/new/choose),
+  even a short one. Reports from Windows, macOS, KDE, GNOME and
+  touchscreens are extra helpful, since those get the least testing.
+- 💡 **Have an idea or a wish?** Suggest it in an
+  [issue](https://github.com/NotTimm/NebulaReader/issues). Small
+  touches and big features are both fair game.
+- 🛠️ **Want to code?** Fork, change, and send a pull request; no need to
+  ask first. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build it,
+  where things live, and lists ideas waiting for someone to pick them up.
+- 📦 **Package it** for your distro, or improve the docs and translations.
+
+Nebula is built with Rust and [libcosmic](https://github.com/pop-os/libcosmic).
+If you like it, a ⭐ helps other people find it.
 
 ## License
 

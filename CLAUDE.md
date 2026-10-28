@@ -216,6 +216,10 @@ the owner's laptop). Last updated 2026-10-27.
   rebuilt on every message, Jellyfin library fetch one folder at a time,
   scans re-open known archives with no concurrency cap.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
+- Contributions: the owner welcomes outside issues and PRs (2026-10-28).
+  `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
+  keep in step with the open items here), the README's Contributing
+  section, issue forms in `.github/ISSUE_TEMPLATE/` and a PR template.
 - Dependabot (2026-10-24): `.github/dependabot.yml` (weekly, crates
   grouped minor/patch, Actions grouped, libcosmic ignored); alerts and
   security-fix PRs switched on. How to handle the PRs: docs/DEVELOPING.md.
