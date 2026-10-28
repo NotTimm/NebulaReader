@@ -107,7 +107,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-27.
+the owner's laptop). Last updated 2026-10-28.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -177,6 +177,11 @@ the owner's laptop). Last updated 2026-10-27.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Released 0.1.16 (2026-10-28): Continue Reading counts chapters with a
+  page saved on the Jellyfin server (`SeriesEntry::issues_in_progress`);
+  before, a series started elsewhere showed only once a chapter was
+  finished or opened here. Still one card per series. Fedora spec links
+  the system libzstd.
 - Released 0.1.15 (2026-10-28; 0.1.14 was tagged but never published: its
   vendor job failed on libcosmic crates from two sources, fixed by the
   `[patch."https://github.com/pop-os/libcosmic"]` section in Cargo.toml,

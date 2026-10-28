@@ -69,6 +69,13 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.1.16" date="2026-10-28" type="stable">
+      <description>
+        <ul>
+          <li>Continue Reading now shows comics and books you started on your Jellyfin server or in another app, even before you finish a chapter or open them in Nebula</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.15" date="2026-10-28" type="stable">
       <description>
         <ul>

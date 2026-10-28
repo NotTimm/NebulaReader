@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.1.15
+Version:        0.1.16
 Release:        1%{?dist}
 Summary:        Comic, manga and ebook reader with Jellyfin support
 
@@ -119,6 +119,10 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Wed Oct 28 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.16-1
+- Continue Reading shows series started on the Jellyfin server
+- Link the system libzstd
+
 * Wed Oct 28 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.15-1
 - Convert to CBZ removed; Jellyfin CBRs say when their page index is created
 - libcosmic synced with upstream; dependency and security updates
