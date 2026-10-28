@@ -179,9 +179,6 @@ impl App {
         if let Some(dl) = self.download_status() {
             col = col.push(dl);
         }
-        if let Some(conv) = self.convert_status() {
-            col = col.push(conv);
-        }
         if let Some(idx) = self.index_status() {
             col = col.push(idx);
         }

@@ -168,20 +168,3 @@ mod tests {
         assert_eq!(Desktop::from_xdg_current_desktop(""), Desktop::Other);
     }
 }
-
-/// Moves a file to the system Trash. On a Mac this asks the system
-/// directly rather than through Finder, which would first ask the user to
-/// let Nebula control Finder (and fail if they said no).
-pub fn move_to_trash(path: &std::path::Path) -> Result<(), trash::Error> {
-    #[cfg(target_os = "macos")]
-    {
-        use trash::macos::{DeleteMethod, TrashContextExtMacos};
-        let mut ctx = trash::TrashContext::default();
-        ctx.set_delete_method(DeleteMethod::NsFileManager);
-        ctx.delete(path)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        trash::delete(path)
-    }
-}

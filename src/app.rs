@@ -35,7 +35,6 @@ mod window_icon;
 mod jellyfin_view;
 mod downloads;
 mod properties;
-mod convert_view;
 mod rar_index;
 mod chapter_list;
 
@@ -208,7 +207,6 @@ pub enum Message {
     /// A library card was right-clicked.
     CardMenuOpened(String),
     CardMenu(properties::CardAction),
-    Convert(convert_view::ConvMsg),
     Index(rar_index::IdxMsg),
     IssueMenuOpened(String),
     IssueMenu(rar_index::IssueAction),
@@ -248,6 +246,9 @@ pub struct App {
     /// to bias page preloading toward where the reader is actually headed.
     nav_dir: i8,
     loading: bool,
+    /// The comic being loaded is a Jellyfin CBR without a page index yet,
+    /// so the loading screen says one is being created.
+    creating_index: bool,
     error: Option<String>,
     fullscreen: bool,
     /// The header bar is revealed in full screen (pointer at the top edge).
@@ -289,11 +290,6 @@ pub struct App {
     /// The library card whose right-click menu is open.
     menu_target: Option<String>,
     properties: Option<properties::Props>,
-    /// Library series with CBR issues, which can be converted to CBZ.
-    rar_series: HashSet<String>,
-    convert_ask: Option<convert_view::ConvertPlan>,
-    converting: Option<convert_view::Converting>,
-    convert_note: Option<String>,
     /// Building Jellyfin CBR page indexes ahead of time.
     indexing: Option<rar_index::Indexing>,
     index_note: Option<String>,
@@ -998,6 +994,7 @@ impl App {
     /// reader. `chapter` jumps to an issue; `None` resumes.
     fn open_entry(&mut self, key: String, chapter: Option<usize>) -> Task<Message> {
         self.loading = true;
+        self.creating_index = false;
         self.error = None;
         self.back_to_series = self.app_view == AppView::Series;
         self.app_view = AppView::Reader;
@@ -1202,7 +1199,6 @@ impl App {
 
     fn reload_library(&mut self) -> Task<Message> {
         let Some(db) = &self.db else { return Task::none() };
-        self.rar_series = library::series_with_rar(db);
 
         let entries = if self.library_search.is_empty() {
             library::all_series(db)
@@ -1311,6 +1307,7 @@ impl Application for App {
             current_page: 0,
             nav_dir: 0,
             loading: flags.is_some(),
+            creating_index: false,
             error: None,
             fullscreen: false,
             fullscreen_header: false,
@@ -1338,10 +1335,6 @@ impl Application for App {
             back_to_series: false,
             menu_target: None,
             properties: None,
-            rar_series: HashSet::new(),
-            convert_ask: None,
-            converting: None,
-            convert_note: None,
             indexing: None,
             index_note: None,
             unindexed: HashMap::new(),
@@ -1439,10 +1432,6 @@ impl Application for App {
 
         app.refresh_themes();
         (app, Task::batch(tasks))
-    }
-
-    fn dialog(&self) -> Option<Element<'_, Message>> {
-        self.convert_dialog()
     }
 
     fn context_drawer(&self) -> Option<cosmic::app::context_drawer::ContextDrawer<'_, Message>> {
@@ -1725,7 +1714,7 @@ impl Application for App {
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), self.convert_subscription(), pointer, system_colors, status])
+        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), pointer, system_colors, status])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2002,7 +1991,7 @@ impl App {
                     .spacing(12)
                     .align_x(Alignment::Center)
                     .push(widget::indeterminate_circular())
-                    .push(widget::text("Loading comic…"))
+                    .push(widget::text(if self.creating_index { "Creating index of CBR comic…" } else { "Loading comic…" }))
                     .into()
             } else {
                 widget::Column::new()
@@ -3041,7 +3030,6 @@ impl App {
             }
             Message::CardMenuOpened(key) => self.menu_target = Some(key),
             Message::CardMenu(action) => return self.card_action(action),
-            Message::Convert(msg) => return self.update_convert(msg),
             Message::Index(msg) => return self.update_index(msg),
             Message::IssueMenuOpened(key) => self.issue_menu_target = Some(key),
             Message::IssueMenu(rar_index::IssueAction::BuildIndex) => {

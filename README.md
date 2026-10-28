@@ -50,9 +50,10 @@ the way so you can read.
   and details; Continue Reading jumps straight back in. Right-click a
   cover to read, download, mark it read, show it in its folder or see its
   **Properties** (format, location, pages, page size, size on disk).
-- **Convert to CBZ** (right-click a series with CBR files): the pages are
-  repacked unchanged into CBZs, which open faster and stream from
-  Jellyfin. Progress carries over, and the CBRs go to the Trash.
+- CBR comics from Jellyfin stream page by page. The first time one is
+  opened, Nebula creates an index of its pages ("Creating index of CBR
+  comic…") and keeps it, so later opens start right away. Right-click a
+  series to build the indexes ahead of time.
 - Drag a file or folder onto the window to open it.
 - Libraries on a USB drive are kept while the drive is unplugged and come
   back when it's plugged in again.

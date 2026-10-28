@@ -89,6 +89,12 @@ fn index_state(key: &str, extensions: &HashMap<String, String>, downloaded: &Has
     }
 }
 
+/// Whether opening this Jellyfin chapter starts by walking its CBR's
+/// headers (no index yet). Touches the disk, so not for drawing.
+pub(super) fn needs_index(key: &str, extensions: &HashMap<String, String>, downloaded: &HashMap<String, PathBuf>) -> bool {
+    matches!(index_state(key, extensions, downloaded), IndexState::Missing)
+}
+
 /// Series -> chapters without an index, and chapter -> solid for those with one.
 type Scan = (HashMap<String, Vec<String>>, HashMap<String, bool>);
 
@@ -304,11 +310,11 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(widget::indeterminate_circular().size(14.0).bar_height(2.0))
-                    .push(widget::text::caption(format!(
-                        "Building page indexes… {} of {}",
-                        (job.done + 1).min(job.total),
-                        job.total
-                    )))
+                    .push(widget::text::caption(if job.total == 1 {
+                        "Creating index of CBR comic…".to_string()
+                    } else {
+                        format!("Creating indexes of CBR comics… {} of {}", (job.done + 1).min(job.total), job.total)
+                    }))
                     .push_maybe(
                         (!job.stopped).then(|| widget::button::link("Stop").on_press(Message::Index(IdxMsg::Stop))),
                     )

@@ -560,6 +560,7 @@ impl App {
             loading: false,
         });
         self.jf.live = Live::default();
+        self.creating_index = super::rar_index::needs_index(&issues[start].0, &self.jf.extensions, &self.dl.files());
         let ask = self.ask_over(&key);
         load_task(account, key, issues[first..end].to_vec(), self.jf.extensions.clone(), self.dl.files(), ask, false)
     }

@@ -29,7 +29,6 @@ pub enum CardAction {
     MarkRead,
     MarkUnread,
     ShowInFolder,
-    ConvertToCbz,
     BuildIndex,
     Properties,
 }
@@ -101,9 +100,6 @@ impl App {
         if local_folder(e).is_some() {
             items.push(Item::Button("Show in Folder", None, CardAction::ShowInFolder));
         }
-        if self.rar_series.contains(&e.path) && !crate::jellyfin::is_key(&e.path) {
-            items.push(Item::Button("Convert to CBZ…", None, CardAction::ConvertToCbz));
-        }
         // Jellyfin CBRs whose pages haven't been indexed yet.
         if self.unindexed.contains_key(&e.path) {
             items.push(Item::Button(
@@ -146,7 +142,6 @@ impl App {
                     crate::platform::open_url(&dir.to_string_lossy());
                 }
             }
-            CardAction::ConvertToCbz => return self.update_convert(super::convert_view::ConvMsg::Ask(key)),
             CardAction::BuildIndex => {
                 let keys = self.unindexed.get(&key).cloned().unwrap_or_default();
                 return self.update_index(super::rar_index::IdxMsg::Build(keys));
@@ -355,10 +350,6 @@ impl App {
                     .push(widget::button::standard("Open Page").on_press(Message::OpenSeriesPage(p.key.clone())))
                     .push_maybe(p.folder.as_ref().map(|dir| {
                         widget::button::standard("Show in Folder").on_press(Message::OpenUrl(dir.to_string_lossy().into_owned()))
-                    }))
-                    .push_maybe(self.rar_series.contains(&p.key).then(|| {
-                        widget::button::standard("Convert to CBZ…")
-                            .on_press(Message::Convert(super::convert_view::ConvMsg::Ask(p.key.clone())))
                     })),
             )
             .width(Length::Fill)

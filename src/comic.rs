@@ -403,12 +403,6 @@ pub fn prune_cache(root: &Path, limit: u64) {
     }
 }
 
-/// Drops an archive's extracted pages (it was converted or deleted).
-pub fn forget_rar_cache(archive: &Path) {
-    rar_jobs().lock().unwrap().remove(archive);
-    let _ = std::fs::remove_dir_all(rar_cache_dir(archive));
-}
-
 /// Keeps the extracted-RAR cache under `limit` bytes.
 pub fn prune_rar_cache(limit: u64) {
     prune_cache(&crate::library::cache_dir().join("rar-cache"), limit);
