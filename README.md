@@ -176,6 +176,13 @@ Folder**). The built-in themes are COSMIC `.ron` files in
 [`res/themes/`](res/themes), handy to copy and edit. A theme changes
 colours only; the Style setting still picks shapes and the title bar.
 
+#### Languages
+
+Nebula speaks **English** and **Spanish**, following your system's
+language. **Settings → Appearance → Language** picks another one, and the
+whole window switches straight away. More languages are a text file away:
+see [how to translate Nebula](i18n/README.md).
+
 ## Download
 
 Grab a package from the
@@ -371,7 +378,9 @@ a one-person project so far, and there's plenty of room to shape it:
 - 🛠️ **Want to code?** Fork, change, and send a pull request; no need to
   ask first. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build it,
   where things live, and lists ideas waiting for someone to pick them up.
-- 📦 **Package it** for your distro, or improve the docs and translations.
+- 🌍 **Translate it** into your language: one text file, no code needed
+  ([how](i18n/README.md)). English and Spanish are there so far.
+- 📦 **Package it** for your distro, or improve the docs.
 
 Nebula is built with Rust and [libcosmic](https://github.com/pop-os/libcosmic).
 If you like it, a ⭐ helps other people find it.

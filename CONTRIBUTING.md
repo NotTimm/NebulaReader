@@ -15,6 +15,10 @@ before opening an issue or a pull request.
   what kind it is (CBZ, CBR, EPUB, a Jellyfin library…).
 - **Suggest something.** Ideas, wishes and "it would be nice if…" are all
   welcome as issues, big or small.
+- **Translate it.** Nebula is in English and Spanish so far. Adding a
+  language is one text file and no code: see
+  [i18n/README.md](i18n/README.md). Partial translations are welcome,
+  and so are fixes to existing ones.
 - **Try it where I can't.** Nebula is built on Linux, so reports from
   Windows, Macs (especially Intel ones), KDE, GNOME, touchscreens and
   tablets, HiDPI screens and big Jellyfin servers are especially useful.
@@ -37,7 +41,9 @@ Some things that are known and wanted but nobody's working on yet:
   reading position *from* the server, not just to it.
 - **Cleaner names**: scan-group tags such as `Jaimini's~box~` in file
   names aren't stripped yet.
-- **Translations**: the interface is English only for now.
+- **More languages**: see [i18n/README.md](i18n/README.md). The app's
+  launcher entry and store description (`res/*.desktop`,
+  `res/*.metainfo.xml`) aren't translated yet either.
 - **Packaging** for distros that aren't covered (Arch/AUR, NixOS,
   openSUSE…).
 
@@ -78,6 +84,9 @@ serves a folder of your own comics as a small fake Jellyfin server:
   Jellyfin client and streaming pages over the network.
 - `src/platform/`: anything specific to Linux, Windows or macOS, and
   following each desktop's colours (`look.rs`).
+- `i18n/`, `src/i18n.rs`: the interface text in each language. Use
+  `fl!("message-id")` instead of a string literal for anything a user
+  reads, and add the message to `i18n/en/nebula_reader.ftl`.
 
 The interface uses [libcosmic](https://github.com/pop-os/libcosmic),
 through a small fork with a few changes for the reader (listed above the

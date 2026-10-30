@@ -107,7 +107,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-28.
+the owner's laptop). Last updated 2026-10-30.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -221,6 +221,16 @@ the owner's laptop). Last updated 2026-10-28.
   rebuilt on every message, Jellyfin library fetch one folder at a time,
   scans re-open known archives with no concurrency cap.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
+- Translations (2026-10-30, unreleased): Fluent via i18n-embed
+  (`src/i18n.rs`, `i18n/<lang>/nebula_reader.ftl`, `i18n.toml`); every
+  user-facing string is `fl!("id", var = value)`, English is the reference
+  (a missing id doesn't compile). Settings → Appearance → Language
+  (`Settings::language`, `None` = system; `i18n::select` also switches
+  libcosmic's strings via fork patch 15). Dropdown labels live in
+  `App::labels`, rebuilt on a language change. English and Spanish are
+  complete (452 messages); tests check parse, ids and variables.
+  `i18n/README.md` is the translator guide. Not translated yet: the
+  .desktop and metainfo files.
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing
@@ -240,7 +250,7 @@ the owner's laptop). Last updated 2026-10-28.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `756cd0f` (patches 1–14, see Cargo.toml),
+- libcosmic: fork pinned at `5062b8b` (patches 1–15, see Cargo.toml),
   merged with upstream through `95236a94` (2026-10-27; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
