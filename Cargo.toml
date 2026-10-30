@@ -17,7 +17,7 @@ image = { version = "0.25", default-features = false, features = [
     "webp",
     "bmp",
 ] }
-compress-tools = "0.15"
+compress-tools = "0.16"
 # Header checksums for one-page RAR archives (src/remote_rar.rs).
 crc32fast = "1"
 zip = "9"
