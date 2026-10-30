@@ -233,7 +233,13 @@ the owner's laptop). Last updated 2026-10-28.
   `cargo audit` still flagged: quick-xml 0.42 and h2 0.4.20. Code
   changes: zip `name()` returns a Result; quick-xml reports `&amp;` etc.
   as `Event::GeneralRef` (epub `event_text`) and hands out `str` from
-  0.40; ashpd needs the `settings` feature. Unreleased.
+  0.40; ashpd needs the `settings` feature.
+  Second batch merged 2026-10-30 (PRs #8–#11: tokio, reqwest 0.13,
+  windows-registry 0.100, compress-tools 0.16). reqwest stays on
+  native-tls (0.13's default is rustls + bundled aws-lc), with "query" for
+  ComicVine; checked against api.github.com. Unreleased. `cargo audit`
+  leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
+  xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
 - libcosmic: fork pinned at `756cd0f` (patches 1–14, see Cargo.toml),
   merged with upstream through `95236a94` (2026-10-27; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
