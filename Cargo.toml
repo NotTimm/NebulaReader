@@ -104,7 +104,7 @@ winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 # Dark mode and accent colour for the Windows 11 look.
-windows-registry = "0.6"
+windows-registry = "0.100"
 # Sets the title bar / taskbar icon (see src/app/window_icon.rs) and reads
 # the battery (src/platform/status.rs) and free disk space
 # (src/platform/disk.rs).
