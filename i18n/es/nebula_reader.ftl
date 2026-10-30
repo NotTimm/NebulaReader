@@ -367,6 +367,51 @@ sign-in = Iniciar sesión
 jf-address = Dirección de Jellyfin
 connect = Conectar
 
+## Catálogos OPDS
+
+opds-address = Dirección del catálogo
+opds-username-optional = Usuario (si lo pide)
+opds-password-optional = Contraseña (si la pide)
+opds-help = Komga, Kavita, calibre-web, Stump y muchos otros servidores tienen un catálogo OPDS. El usuario y la contraseña se guardan en este equipo y solo se envían a ese servidor.
+opds-untested = OPDS es nuevo en Nebula y aún no se ha probado con muchos servidores. Cuéntanos qué funciona y qué no.
+opds-connecting = Abriendo { $address }…
+opds-added = Se añadió { $catalog }. Elige las carpetas que quieres en tu biblioteca.
+opds-removed = Se quitó { $catalog }.
+opds-choose-folders = Elegir carpetas
+opds-no-folders = Aún no hay carpetas en la biblioteca
+opds-folder-count = { $count ->
+    [one] 1 carpeta en la biblioteca
+   *[other] { $count } carpetas en la biblioteca
+}
+opds-remove = Quitar
+opds-no-file = este libro no tiene ningún archivo que Nebula pueda obtener
+opds-sign-in-refused = el catálogo rechazó el usuario o la contraseña
+opds-not-a-catalog = esa dirección no es un catálogo OPDS
+opds-no-search = en este catálogo no se puede buscar
+opds-too-big = una carpeta de la biblioteca tiene demasiado contenido para sincronizarla entera; quítala y añade carpetas más pequeñas de dentro
+opds-not-signed-in = Este catálogo ya no está en Ajustes. Vuelve a añadirlo allí.
+opds-loading = Cargando…
+opds-folder-failed = No se pudo abrir esta carpeta: { $error }
+opds-search = Buscar en { $catalog }
+opds-search-results = Resultados de «{ $query }»
+opds-pick-help = Las carpetas que añadas se sincronizan con tu biblioteca como una biblioteca de Jellyfin: cada carpeta de libros se convierte en una serie. Todo lo demás se queda aquí para explorarlo y buscarlo.
+opds-in-library = En tu biblioteca
+opds-add-folder = Añadir a la biblioteca
+opds-remove-folder = Quitar de la biblioteca
+opds-load-more = Cargar más
+opds-book-count = { $count ->
+    [one] 1 libro
+   *[other] { $count } libros
+}
+opds-not-readable = No se puede leer en Nebula
+opds-open-in-browser = Abrir en el navegador
+opds-back = Atrás
+opds-progress-local = Progreso: guardado en este equipo (OPDS no puede guardarlo en el servidor)
+opds-item-pages = Este libro: se recibe del catálogo página a página
+kind-opds-series = Serie en un catálogo OPDS
+kind-opds-book = Libro en un catálogo OPDS
+kind-opds-comic = Cómic en un catálogo OPDS
+
 ## Descargas
 
 dl-not-in-library = Ya no está en la biblioteca

@@ -133,6 +133,16 @@ comes from and whether it's online, and what you're reading shows on the
 server's dashboard. **Download** whole series or single chapters to read
 when the server can't be reached. [How it works](#jellyfin)
 
+### 📡 OPDS catalogs (new, untested)
+
+Add an OPDS catalog (Komga, Kavita, calibre-web, Stump and many more
+have one), pick the folders you want, and they're synced into your
+library just like a Jellyfin library, with streaming, downloads and
+offline reading. Everything else in the catalog stays browsable and
+searchable. **Not tried against real servers yet**: please
+[report](https://github.com/NotTimm/NebulaReader/issues/new/choose) how
+it goes with yours. [How it works](#opds-catalogs)
+
 ### 🎨 At home on your desktop
 
 <p align="center">
@@ -316,6 +326,44 @@ password login is `tester` / `secret`):
 python3 tools/mock-jellyfin.py ~/Comics/Manga --port 8097
 ```
 
+## OPDS catalogs
+
+> **Untested.** OPDS support is built from the OPDS 1.2 and 2.0 specs and
+> the Page Streaming Extension, and covered by unit tests, but it hasn't
+> been tried against a real Komga, Kavita, calibre-web or other server
+> yet. Reports, good or bad, are very welcome.
+
+1. **Settings → OPDS**, type the catalog's address (for Komga that's
+   `https://komga.example/opds/v1.2/catalog`, for Kavita the OPDS URL
+   from your user settings) and, if it asks for one, a username and
+   password. Press **Connect**.
+2. The **Catalog** page opens. Walk its folders, and press **Add to
+   Library** on the ones you want (a library, "All series", "By
+   series"…). Each folder of books becomes a series in your library;
+   books listed straight in a folder you added are grouped by the series
+   in their names. **Choose Folders** in settings comes back here.
+3. Everything you didn't add can still be browsed and searched on the
+   Catalog page.
+
+How it works:
+
+- An OPDS catalog has no fixed layout and lists the same book in many
+  places ("By author", "Newest"…), so only the folders you added are
+  synced, a few folders below each at most. A book found twice stays in
+  the first series it was found in.
+- Comics stream page by page like Jellyfin's: a CBZ or CBR with HTTP
+  range requests, or pages the server sends as images (OPDS Page
+  Streaming, which Komga, Kavita and others offer, also for PDFs). What
+  can't be streamed is fetched whole first. Downloads and offline reading
+  work the same as for Jellyfin.
+- OPDS has no way to save reading progress to the server, so progress
+  stays on this computer. A server's own page-streaming position is read
+  when it offers one.
+- A username and password are kept in `opds.json` (owner-only) because
+  OPDS has no tokens, and only ever sent to the catalog's own address,
+  never to other sites a feed links to.
+- Books only for sale or loan show as **Open in Browser**.
+
 ## ComicVine metadata (optional)
 
 AniList only knows manga, so Western comics (Marvel, DC and so on) are
@@ -335,6 +383,7 @@ Linux:
 | `~/.config/nebula-reader/themes/` | Your imported themes |
 | `~/.local/share/nebula-reader/jellyfin-downloads/` | Jellyfin chapters and books downloaded for offline reading (or a `Nebula Reader` folder in the download folder you picked) |
 | `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
+| `~/.config/nebula-reader/opds.json` | OPDS catalogs, their folders in the library, and usernames and passwords (owner-only file) |
 | `~/.cache/nebula-reader/` | Cover thumbnails, unpacked CBRs and Jellyfin chapters fetched whole (each kept under 2 GB), CBR page indexes; safe to delete |
 
 On Windows everything except the cache (library, settings, themes,

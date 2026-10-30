@@ -231,11 +231,25 @@ the owner's laptop). Last updated 2026-10-30.
   complete (452 messages); tests check parse, ids and variables.
   `i18n/README.md` is the translator guide. Not translated yet: the
   .desktop and metainfo files.
-- OPDS is the next source (agreed 2026-10-30), built natively like
-  Jellyfin. No plugin system and no provider docs: the owner wants only
-  native code in the app, and anyone adding a source works it out from
-  the code (`docs/PROVIDERS.md` was written and dropped). Never DRM or
-  ToS-breaking scrapers.
+- OPDS (2026-10-30, unreleased, **untested on real servers**; README and
+  CONTRIBUTING say so): native like Jellyfin, no plugin system or provider
+  docs (owner's call: only native code, contributors work from the code).
+  `src/remote.rs` is the shared layer (`remote::Account` = Jellyfin | OPDS:
+  range source, whole download, page stream, cover, ping, fetch_library,
+  download_item); `jellyfin_view.rs` runs reader/sync/covers/offline/
+  account rows for both, Jellyfin-only parts (progress, sessions, marks)
+  match `RemoteAccount::Jellyfin`. Pages for both kinds should share
+  code like this (owner, 2026-10-30). `src/opds.rs`: feeds (Atom 1.2,
+  JSON 2.0), PSE + Divina (`PageSource::Web`), Basic auth only to the
+  catalog's own host, accounts in `opds.json` (password stored, 0600),
+  item links in `cache/opds/<account>.json`. Sync walks only the user's
+  picked folders (`Account::roots`) level by level, 6 at once, depth 4,
+  20 000 pages (too big = error, never a partial prune); series = feed,
+  else `belongsTo`, else the name in titles. Keys
+  `opds://opds-<fnv>/<o|s|f|b|r><fnv>`: never change the hash. UI:
+  Settings → OPDS and `AppView::Catalog` (`opds_view.rs`: browse,
+  search, Add to/Remove from Library). Progress stays local. No mock
+  server yet (tests serve feeds in-process). Next: try it on Komga/Kavita.
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing

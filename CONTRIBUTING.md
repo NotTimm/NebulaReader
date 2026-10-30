@@ -39,6 +39,9 @@ Some things that are known and wanted but nobody's working on yet:
   once, and not reopening archives that haven't changed.
 - **Jellyfin**: fetch a server's libraries in parallel, and sync a book's
   reading position *from* the server, not just to it.
+- **OPDS on real servers**: OPDS catalogs are new and untested (see the
+  README); trying them with Komga, Kavita, calibre-web, Stump or others
+  and reporting what happens helps most.
 - **Cleaner names**: scan-group tags such as `Jaimini's~box~` in file
   names aren't stripped yet.
 - **More languages**: see [i18n/README.md](i18n/README.md). The app's
@@ -80,8 +83,11 @@ serves a folder of your own comics as a small fake Jellyfin server:
   the settings, each view in its own file.
 - `src/comic.rs`, `src/epub.rs`: reading comic archives and EPUBs.
 - `src/library.rs`, `src/scan.rs`: the library database and folder scans.
-- `src/jellyfin.rs`, `src/remote_zip.rs`, `src/remote_rar.rs`: the
-  Jellyfin client and streaming pages over the network.
+- `src/jellyfin.rs`, `src/opds.rs`: the Jellyfin and OPDS clients;
+  `src/remote.rs`: what the two share, so the reader, downloads and
+  offline reading work the same for both (`src/app/jellyfin_view.rs`,
+  `src/app/opds_view.rs`); `src/remote_zip.rs`, `src/remote_rar.rs`:
+  streaming pages over the network.
 - `src/platform/`: anything specific to Linux, Windows or macOS, and
   following each desktop's colours (`look.rs`).
 - `i18n/`, `src/i18n.rs`: the interface text in each language. Use
