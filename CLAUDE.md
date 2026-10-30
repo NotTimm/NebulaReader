@@ -231,6 +231,12 @@ the owner's laptop). Last updated 2026-10-30.
   complete (452 messages); tests check parse, ids and variables.
   `i18n/README.md` is the translator guide. Not translated yet: the
   .desktop and metainfo files.
+- Providers (2026-10-30, design only): `docs/PROVIDERS.md` is the agreed
+  plan: a `Provider` trait with Jellyfin moved behind it unchanged, then
+  OPDS (1.2 + 2.0, PSE, ranged/download-only, catalog sections and
+  search), keys `<provider>://<account>/<id>`, symbolic icon rules, OPDS
+  bridges as the extension route for now (WASM maybe later). No DRM or
+  ToS-breaking scrapers. Next step: the trait + Jellyfin refactor.
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing

@@ -46,6 +46,9 @@ Some things that are known and wanted but nobody's working on yet:
   `res/*.metainfo.xml`) aren't translated yet either.
 - **Packaging** for distros that aren't covered (Arch/AUR, NixOS,
   openSUSE…).
+- **New sources**: providers (Jellyfin, OPDS next) are being reworked
+  so others can be added, built in or as an OPDS bridge server. The plan
+  is in [docs/PROVIDERS.md](docs/PROVIDERS.md); comments welcome.
 
 If you start on one, say so in an issue so nobody does it twice.
 
