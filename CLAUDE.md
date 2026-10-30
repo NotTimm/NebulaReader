@@ -249,7 +249,8 @@ the owner's laptop). Last updated 2026-10-30.
   `opds://opds-<fnv>/<o|s|f|b|r><fnv>`: never change the hash. UI:
   Settings → OPDS and `AppView::Catalog` (`opds_view.rs`: browse,
   search, Add to/Remove from Library). Progress stays local. No mock
-  server yet (tests serve feeds in-process). Next: try it on Komga/Kavita.
+  server yet (tests serve feeds in-process). Testing checklist: issue #12.
+  Next: try it on Komga/Kavita.
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing
