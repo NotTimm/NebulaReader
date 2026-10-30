@@ -18,6 +18,8 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::remote::{Progress, RemoteIssue, RemoteSeries};
+
 const CLIENT: &str = "Nebula Reader";
 
 /// One signed-in user on one server.
@@ -671,37 +673,6 @@ pub fn parse_date(s: &str) -> Option<i64> {
 
 // ── Library sync ────────────────────────────────────────────────────────────
 
-/// A series (or one-shot) on the server, ready to store in the library.
-#[derive(Clone, Debug)]
-pub struct RemoteSeries {
-    pub key: String,
-    pub title: String,
-    pub is_folder: bool,
-    /// `jellyfin://<account>/<library id>`: groups and prunes per library.
-    pub library_root: String,
-    /// The Jellyfin library's name ("Manga").
-    pub library_name: String,
-    /// Item whose image (or first page) is the series cover.
-    pub cover_item: Option<String>,
-    pub issues: Vec<RemoteIssue>,
-}
-
-#[derive(Clone, Debug)]
-pub struct RemoteIssue {
-    pub key: String,
-    pub item_id: String,
-    pub name: String,
-    pub extension: String,
-    pub played: bool,
-    pub page: usize,
-    /// Unix seconds; 0 when never opened.
-    pub last_read: i64,
-    /// "2021-03-14", empty when the server doesn't know.
-    pub release_date: String,
-    /// One "Role: Name, Name" per line.
-    pub creators: String,
-}
-
 fn remote_issue(account: &Account, item: &Item) -> RemoteIssue {
     let ud = item.user_data.clone().unwrap_or_default();
     RemoteIssue {
@@ -886,7 +857,7 @@ impl crate::remote_zip::RangeSource for HttpRange {
             .headers()
             .get("content-range")
             .and_then(|v| v.to_str().ok())
-            .and_then(parse_content_range_total)
+            .and_then(crate::remote::parse_content_range_total)
             .ok_or("server didn't say how big the file is")?;
         let bytes = resp.bytes().map_err(|e| e.to_string())?.to_vec();
         Ok((bytes, total))
@@ -906,25 +877,6 @@ impl crate::remote_zip::RangeSource for HttpRange {
 /// reader reads the item id back from the file name).
 pub fn default_download_root() -> std::path::PathBuf {
     crate::platform::data_dir().join("jellyfin-downloads")
-}
-
-/// A running download's progress, shared with the UI; `cancel` stops it.
-#[derive(Debug, Default)]
-pub struct Progress {
-    pub done: std::sync::atomic::AtomicU64,
-    pub total: std::sync::atomic::AtomicU64,
-    pub cancel: std::sync::atomic::AtomicBool,
-}
-
-impl Progress {
-    /// 0.0–1.0, or 0 until the size is known.
-    pub fn fraction(&self) -> f32 {
-        let total = self.total.load(Ordering::Relaxed);
-        if total == 0 {
-            return 0.0;
-        }
-        (self.done.load(Ordering::Relaxed) as f64 / total as f64).min(1.0) as f32
-    }
 }
 
 /// No overall time limit (a big chapter on a slow link takes a while), but
@@ -950,8 +902,6 @@ pub async fn download_item(
     dest: &std::path::Path,
     progress: &Progress,
 ) -> Result<u64, String> {
-    use std::io::Write;
-
     let mut resp = None;
     for url in [account.file_url(item_id), account.download_url(item_id)] {
         let r = download_client()
@@ -967,61 +917,15 @@ pub async fn download_item(
         resp = Some(r);
         break;
     }
-    let mut resp = resp.ok_or("the server doesn't offer this file for download")?;
-    if !resp.status().is_success() {
-        return Err(format!("download failed: HTTP {}", resp.status()));
-    }
-    progress.total.store(resp.content_length().unwrap_or(0), Ordering::Relaxed);
-
-    let dir = dest.parent().filter(|d| d.is_dir()).ok_or("the download folder isn't available")?;
-    // Leave some room: a completely full drive is no good to anyone.
-    const SPARE: u64 = 64 * 1024 * 1024;
-    if let (Some(len), Some(free)) = (resp.content_length(), crate::platform::disk::free_space(dir)) {
-        if len + SPARE > free {
-            return Err(format!(
-                "not enough space on the drive: {} MB needed, {} MB free",
-                (len + SPARE) / 1_048_576,
-                free / 1_048_576
-            ));
-        }
-    }
-    let part = dest.with_extension("part");
-    let result = async {
-        let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
-        let mut size = 0u64;
-        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download failed: {e}"))? {
-            if progress.cancel.load(Ordering::Relaxed) {
-                return Err("cancelled".to_string());
-            }
-            file.write_all(&chunk).map_err(|e| format!("couldn't write to the download folder: {e}"))?;
-            size += chunk.len() as u64;
-            progress.done.store(size, Ordering::Relaxed);
-        }
-        file.sync_all().map_err(|e| e.to_string())?;
-        Ok(size)
-    }
-    .await;
-    match result {
-        Ok(size) => {
-            std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
-            crate::platform::disk::sync_dir(dest);
-            Ok(size)
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&part);
-            Err(e)
-        }
-    }
+    let resp = resp.ok_or("the server doesn't offer this file for download")?;
+    crate::remote::save_response(resp, dest, progress).await
 }
 
-/// `bytes 1234-5677/5678` → 5678.
-fn parse_content_range_total(v: &str) -> Option<u64> {
-    v.rsplit('/').next()?.trim().parse().ok()
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::parse_content_range_total;
 
     /// A one-shot HTTP server: answers each request in turn with the given
     /// status and body, and records the request paths.

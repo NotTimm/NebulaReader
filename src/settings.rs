@@ -47,17 +47,31 @@ impl BookTheme {
         [BookTheme::Auto, BookTheme::Paper, BookTheme::Sepia, BookTheme::Dark, BookTheme::Night];
 }
 
-/// Which books the library shows when it has both local and Jellyfin ones.
+/// Which books the library shows when it has books from more than one
+/// place (this computer, Jellyfin, OPDS).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LibrarySource {
     #[default]
     All,
     Local,
     Jellyfin,
+    Opds,
 }
 
 impl LibrarySource {
-    pub const ALL: [LibrarySource; 3] = [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin];
+    pub const ALL: [LibrarySource; 4] =
+        [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin, LibrarySource::Opds];
+
+    /// Whether a library entry (by its key and library root) is from here.
+    pub fn includes(self, path: &str, root: &str) -> bool {
+        let from = |is: fn(&str) -> bool| is(path) || is(root);
+        match self {
+            LibrarySource::All => true,
+            LibrarySource::Local => !from(crate::remote::is_key),
+            LibrarySource::Jellyfin => from(crate::jellyfin::is_key),
+            LibrarySource::Opds => from(crate::opds::is_key),
+        }
+    }
 }
 
 /// How a book's chapter is laid out on screen.

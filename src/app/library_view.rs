@@ -118,8 +118,12 @@ impl App {
             .position(widget::popover::Position::Bottom)
             .on_close(Message::CloseLibraryMenu);
         if self.library_menu {
+            let present = self.sources_present();
             let mut menu = widget::column::with_capacity(LibrarySource::ALL.len()).spacing(2);
             for (i, src) in LibrarySource::ALL.into_iter().enumerate() {
+                if src != LibrarySource::All && src != current && !present.contains(&src) {
+                    continue;
+                }
                 let mut row = widget::row::with_capacity(3)
                     .spacing(10)
                     .align_y(Alignment::Center)
@@ -148,19 +152,28 @@ impl App {
 
     /// Whether the library has both local and Jellyfin series, which is
     /// when the All / Local / Jellyfin dropdown shows.
-    /// Whether the library has both local and Jellyfin series to show, so
-    /// the All / Local / Jellyfin dropdown is worth having.
-    pub(super) fn has_local_and_remote(&self) -> bool {
-        let mut entries = self.library_entries.iter().filter(|e| self.is_visible(e));
-        entries.clone().any(is_remote) && entries.any(|e| !is_remote(e))
+    /// The places the library has series from (Local, Jellyfin, OPDS), for
+    /// the source dropdown.
+    fn sources_present(&self) -> Vec<LibrarySource> {
+        let entries: Vec<&SeriesEntry> = self.library_entries.iter().filter(|e| self.is_visible(e)).collect();
+        LibrarySource::ALL[1..]
+            .iter()
+            .copied()
+            .filter(|src| entries.iter().any(|e| src.includes(&e.path, &e.library_root)))
+            .collect()
     }
 
-    /// Whether a Jellyfin series belongs to an account that's still signed
+    /// Whether the library has series from more than one place, so the
+    /// All / Local / Jellyfin / OPDS dropdown is worth having.
+    pub(super) fn has_local_and_remote(&self) -> bool {
+        self.sources_present().len() > 1
+    }
+
+    /// Whether a server series belongs to an account that's still signed
     /// in. Series left behind by a removed account can't be opened.
     fn has_account(&self, e: &SeriesEntry) -> bool {
-        let key = if crate::jellyfin::is_key(&e.path) { &e.path } else { &e.library_root };
-        crate::jellyfin::parse_key(key)
-            .is_some_and(|(account, _)| self.jellyfin.accounts.iter().any(|a| a.key() == account))
+        let key = if crate::remote::is_key(&e.path) { &e.path } else { &e.library_root };
+        crate::remote::parse_key(key).is_some_and(|(account, _)| self.remote_account(account).is_some())
     }
 
     pub(super) fn view_library(&self) -> Element<'_, Message> {
@@ -198,11 +211,10 @@ impl App {
         }
         // Servers that can't be reached: their libraries show downloads only.
         let offline: Vec<String> = self
-            .jellyfin
-            .accounts
+            .remote_accounts()
             .iter()
             .filter(|a| self.jf.offline.contains(&a.key()))
-            .map(|a| a.server_name.clone())
+            .map(|a| a.server_name().to_string())
             .collect();
         if !offline.is_empty() {
             col = col.push(
@@ -243,11 +255,8 @@ impl App {
 
         // Narrowed by the All / Local / Jellyfin dropdown in the header.
         let visible: Vec<&SeriesEntry> = if self.has_local_and_remote() {
-            match self.settings.library_source {
-                LibrarySource::All => visible,
-                LibrarySource::Local => visible.into_iter().filter(|e| !is_remote(e)).collect(),
-                LibrarySource::Jellyfin => visible.into_iter().filter(|e| is_remote(e)).collect(),
-            }
+            let src = self.settings.library_source;
+            visible.into_iter().filter(|e| src.includes(&e.path, &e.library_root)).collect()
         } else {
             visible
         };
@@ -329,14 +338,15 @@ impl App {
         let mut remote_roots: Vec<&str> = visible
             .iter()
             .map(|e| e.library_root.as_str())
-            .filter(|r| crate::jellyfin::is_key(r))
+            .filter(|r| crate::remote::is_key(r))
             .collect();
         remote_roots.sort_unstable();
         remote_roots.dedup();
         for root in remote_roots {
             let mut items: Vec<&SeriesEntry> = visible.iter().copied().filter(|e| e.library_root == root).collect();
             items.sort_by_cached_key(|e| e.name().to_lowercase());
-            let name = self.jf.library_names.get(root).cloned().unwrap_or_else(|| "Jellyfin".into());
+            let fallback = if crate::opds::is_key(root) { "OPDS" } else { "Jellyfin" };
+            let name = self.jf.library_names.get(root).cloned().unwrap_or_else(|| fallback.into());
             sections.push((name, items));
         }
 
@@ -380,7 +390,7 @@ impl App {
         }
         if is_remote(e) {
             // While its server can't be reached, only what's downloaded.
-            let key = if crate::jellyfin::is_key(&e.path) { &e.path } else { &e.library_root };
+            let key = if crate::remote::is_key(&e.path) { &e.path } else { &e.library_root };
             return self.has_account(e) && (!self.jellyfin_offline(key) || self.dl.has_series(&e.path));
         }
         !self.missing_roots.iter().any(|r| {
@@ -593,10 +603,10 @@ impl App {
         if read > 0 || issues.iter().any(|i| i.in_progress()) {
             actions = actions.push(widget::button::standard(mark_unread).on_press(Message::MarkSeriesRead(false)));
         }
-        // Jellyfin items can be downloaded for reading offline: a series
-        // all at once (each chapter has its own button below), a one-shot
-        // on its own.
-        if crate::jellyfin::is_key(&series.path) {
+        // Jellyfin and OPDS items can be downloaded for reading offline: a
+        // series all at once (each chapter has its own button below), a
+        // one-shot on its own.
+        if crate::remote::is_key(&series.path) {
             if one_shot {
                 if let Some(issue) = issues.first() {
                     actions = actions.push(self.one_shot_download_action(&issue.path, &series.path));
@@ -709,7 +719,7 @@ impl App {
             })
             .push_maybe((!meta.is_empty()).then(|| widget::text::caption(meta.join("  ·  "))));
 
-        let download = crate::jellyfin::is_key(&issue.path)
+        let download = crate::remote::is_key(&issue.path)
             .then(|| self.download_button(&issue.path, &series.path, widget::tooltip::Position::Left));
         let row = widget::Row::new()
             .spacing(12)
@@ -782,12 +792,13 @@ pub(super) fn issue_title(issue: &IssueEntry, manga: bool) -> String {
 }
 
 fn is_remote(e: &SeriesEntry) -> bool {
-    crate::jellyfin::is_key(&e.library_root) || crate::jellyfin::is_key(&e.path)
+    crate::remote::is_key(&e.library_root) || crate::remote::is_key(&e.path)
 }
 
 const ALL_ICON: &[u8] = include_bytes!("../../res/icons/ui/all.svg");
 const LOCAL_ICON: &[u8] = include_bytes!("../../res/icons/ui/local.svg");
 const JELLYFIN_ICON: &[u8] = include_bytes!("../../res/icons/ui/jellyfin.svg");
+const OPDS_ICON: &[u8] = include_bytes!("../../res/icons/ui/opds.svg");
 const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg");
 const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
 const BOLT: &[u8] = include_bytes!("../../res/icons/ui/bolt.svg");
@@ -815,10 +826,17 @@ pub(super) fn jellyfin_icon() -> widget::icon::Handle {
     ui_icon(JELLYFIN_ICON)
 }
 
+/// A book with a feed's waves: a catalog on the network (OPDS has no
+/// logo of its own).
+pub(super) fn opds_icon() -> widget::icon::Handle {
+    ui_icon(OPDS_ICON)
+}
+
 fn source_icon(src: LibrarySource) -> widget::icon::Handle {
     match src {
         LibrarySource::All => ui_icon(ALL_ICON),
         LibrarySource::Local => ui_icon(LOCAL_ICON),
         LibrarySource::Jellyfin => jellyfin_icon(),
+        LibrarySource::Opds => opds_icon(),
     }
 }

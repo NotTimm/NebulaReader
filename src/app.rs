@@ -33,6 +33,7 @@ mod paged;
 mod library_view;
 mod window_icon;
 mod jellyfin_view;
+mod opds_view;
 mod downloads;
 mod properties;
 mod rar_index;
@@ -40,6 +41,7 @@ mod chapter_list;
 
 use book_view::{BookMsg, BookScroll};
 use jellyfin_view::{JfMsg, JfState, RemoteReading};
+use opds_view::{OpdsMsg, OpdsState};
 use downloads::{DlMsg, Downloads};
 
 /// The modifier key named in hints: Cmd on a Mac, Ctrl elsewhere.
@@ -69,7 +71,7 @@ impl Labels {
             look: vec![fl!("style-auto"), "COSMIC".into(), "KDE Breeze".into(), "Windows 11".into(), "GNOME Adwaita".into()],
             corners: vec![fl!("corners-auto"), fl!("corners-round"), fl!("corners-slightly-round"), fl!("corners-square")],
             background: vec![fl!("background-theme"), fl!("background-black")],
-            library_source: vec![fl!("source-all"), fl!("source-local"), "Jellyfin".into()],
+            library_source: vec![fl!("source-all"), fl!("source-local"), "Jellyfin".into(), "OPDS".into()],
             book_line_spacing: vec![fl!("spacing-tight"), fl!("spacing-normal"), fl!("spacing-relaxed"), fl!("spacing-loose")],
             book_layout: vec![fl!("layout-single"), fl!("layout-two"), fl!("layout-scroll")],
             book_width: vec![fl!("width-narrow"), fl!("width-medium"), fl!("width-wide")],
@@ -93,7 +95,7 @@ const CACHE_RADIUS: usize = 14;
 // ── View modes ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum AppView { Library, Series, Reader, Downloads }
+pub enum AppView { Library, Series, Reader, Downloads, Catalog }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Layout { Single, Dual }
@@ -237,6 +239,8 @@ pub enum Message {
     // Books
     Book(BookMsg),
     Jf(JfMsg),
+    /// OPDS catalogs: adding them and the Catalog page.
+    Opds(OpdsMsg),
     /// Jellyfin downloads for offline reading.
     Dl(DlMsg),
     /// A library card was right-clicked.
@@ -398,6 +402,9 @@ pub struct App {
     /// Signed-in Jellyfin accounts (tokens only).
     jellyfin: crate::jellyfin::Accounts,
     jf: JfState,
+    /// OPDS catalogs added.
+    opds: crate::opds::Accounts,
+    op: OpdsState,
     dl: Downloads,
     /// The Jellyfin series being read, if any.
     remote: Option<RemoteReading>,
@@ -1040,8 +1047,8 @@ impl App {
         self.current_page = 0;
         self.show_chapter_select = false;
 
-        if crate::jellyfin::is_key(&key) {
-            return self.open_jellyfin(key, chapter);
+        if crate::remote::is_key(&key) {
+            return self.open_remote(key, chapter);
         }
         let entry = self.db.as_ref().and_then(|db| library::get_series(db, &key));
         if let Some(e) = entry.as_ref().filter(|e| e.kind == SeriesKind::Group) {
@@ -1080,7 +1087,7 @@ impl App {
     /// Whether a library key belongs to a Jellyfin server that couldn't be
     /// reached at the last sync.
     fn jellyfin_offline(&self, key: &str) -> bool {
-        crate::jellyfin::parse_key(key).is_some_and(|(account, _)| self.jf.offline.contains(account))
+        crate::remote::parse_key(key).is_some_and(|(account, _)| self.jf.offline.contains(account))
     }
 
     fn open_series_page(&mut self, key: String) -> Task<Message> {
@@ -1106,8 +1113,8 @@ impl App {
                 self.series_page_covers.insert(issue.idx, widget::image::Handle::from_path(cover));
             } else {
                 self.series_covers_pending.insert(issue.idx);
-                if crate::jellyfin::is_key(&issue.path) {
-                    tasks.push(self.jellyfin_issue_cover(key.clone(), issue.idx, &issue.path));
+                if crate::remote::is_key(&issue.path) {
+                    tasks.push(self.remote_issue_cover(key.clone(), issue.idx, &issue.path));
                 } else {
                     tasks.push(issue_cover_task(key.clone(), issue.idx, PathBuf::from(&issue.path)));
                 }
@@ -1419,6 +1426,8 @@ impl Application for App {
             settings,
             jellyfin: crate::jellyfin::Accounts::load(),
             jf: JfState::default(),
+            opds: crate::opds::Accounts::load(),
+            op: OpdsState::default(),
             dl,
             remote: None,
             context_page: ContextPage::Settings,
@@ -1442,7 +1451,7 @@ impl Application for App {
         tasks.push(app.reload_library());
         // Files an earlier update left behind.
         std::thread::spawn(crate::updater::clean_up);
-        tasks.push(app.sync_all_jellyfin());
+        tasks.push(app.sync_all_remote());
         if app.settings.check_for_updates && crate::updates::Install::detect().checks_github() {
             tasks.push(app.check_for_updates());
         }
@@ -1522,7 +1531,7 @@ impl Application for App {
                 ),
                 self.source_label(),
             ],
-            AppView::Series | AppView::Downloads => vec![tip(
+            AppView::Series | AppView::Downloads | AppView::Catalog => vec![tip(
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
                 fl!("back-to-library"),
             )],
@@ -1536,7 +1545,7 @@ impl Application for App {
         let mut els: Vec<Element<'_, Message>> = Vec::new();
 
         match self.app_view {
-            AppView::Series | AppView::Downloads => {
+            AppView::Series | AppView::Downloads | AppView::Catalog => {
                 els.push(
                     widget::button::icon(icon::from_name("emblem-system-symbolic"))
                         .on_press(Message::ToggleSettings)
@@ -1783,6 +1792,7 @@ impl Application for App {
             AppView::Series => self.view_series(),
             AppView::Reader => self.view_reader(),
             AppView::Downloads => self.view_downloads(),
+            AppView::Catalog => self.view_catalog(),
         };
 
         // While the settings or details drawer is open, a click anywhere
@@ -2326,6 +2336,7 @@ impl App {
             library_section.into(),
             add_folder_row.into(),
             self.build_jellyfin_section(),
+            self.build_opds_section(),
             self.build_about_section(),
         ])
         .into()
@@ -2758,7 +2769,7 @@ impl App {
                 // open counts, not just library folders, so one-off files
                 // get tracked and a shelf cover too.
                 let mut tasks = Vec::new();
-                if let (Some(db), true) = (&self.db, crate::jellyfin::is_key(&key)) {
+                if let (Some(db), true) = (&self.db, crate::remote::is_key(&key)) {
                     // A Jellyfin series: its chapter list comes from the
                     // server (only a window of it is loaded), so just record
                     // the page counts we now know.
@@ -3604,6 +3615,7 @@ impl App {
             }
             Message::Book(msg) => return self.update_book(msg),
             Message::Jf(msg) => return self.update_jellyfin(msg),
+            Message::Opds(msg) => return self.update_opds(msg),
             Message::Dl(msg) => return self.update_downloads(msg),
             Message::FitPage => {
                 let Some(page) = self.page_size(self.current_page) else { return Task::none() };

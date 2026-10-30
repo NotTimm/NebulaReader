@@ -380,6 +380,53 @@ sign-in = Sign in
 jf-address = Jellyfin address
 connect = Connect
 
+## OPDS catalogs
+
+opds-address = Catalog address
+opds-username-optional = Username (if it asks for one)
+opds-password-optional = Password (if it asks for one)
+opds-help = Komga, Kavita, calibre-web, Stump and many other servers have an OPDS catalog. A username and password are kept on this computer and only sent to that server.
+opds-untested = OPDS is new in Nebula and hasn't been tried on many servers yet. Please report what works and what doesn't.
+opds-connecting = Opening { $address }…
+opds-added = Added { $catalog }. Pick the folders to put in your library.
+opds-removed = Removed { $catalog }.
+opds-choose-folders = Choose Folders
+opds-no-folders = No folders in the library yet
+opds-folder-count = { $count ->
+    [one] 1 folder in the library
+   *[other] { $count } folders in the library
+}
+opds-remove = Remove
+opds-no-file = this book has no file Nebula can get
+opds-sign-in-refused = the catalog refused the username or password
+opds-not-a-catalog = that address isn't an OPDS catalog
+opds-no-search = this catalog can't be searched
+opds-too-big = a folder in the library has too much in it to sync whole; take it out and add smaller folders inside it
+opds-not-signed-in = This catalog isn't in Settings any more. Add it again there.
+# The page for browsing a catalog and picking folders.
+opds-loading = Loading…
+opds-folder-failed = Couldn't open this folder: { $error }
+opds-search = Search { $catalog }
+opds-search-results = Results for “{ $query }”
+opds-pick-help = Folders you add are synced into your library like a Jellyfin library: each folder of books becomes a series. Everything else stays here to browse and search.
+opds-in-library = In your library
+opds-add-folder = Add to Library
+opds-remove-folder = Remove from Library
+opds-load-more = Load More
+opds-book-count = { $count ->
+    [one] 1 book
+   *[other] { $count } books
+}
+opds-not-readable = Can't be read in Nebula
+opds-open-in-browser = Open in Browser
+opds-back = Back
+# Hover text on the catalog's name while reading from it.
+opds-progress-local = Progress: kept on this computer (OPDS can't save it to the server)
+opds-item-pages = This book: streamed from the catalog page by page
+kind-opds-series = Series in an OPDS catalog
+kind-opds-book = Book in an OPDS catalog
+kind-opds-comic = Comic in an OPDS catalog
+
 ## Downloads
 
 dl-not-in-library = No longer in the library

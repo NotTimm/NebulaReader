@@ -14,7 +14,7 @@ use cosmic::Element;
 
 use super::{App, Message};
 use crate::remote_rar::RemoteRar;
-use crate::{jellyfin, library};
+use crate::library;
 
 #[derive(Clone, Debug)]
 pub enum IdxMsg {
@@ -70,7 +70,7 @@ fn index_state(key: &str, extensions: &HashMap<String, String>, downloaded: &Has
     struct Flags {
         solid: bool,
     }
-    let Some((_, item_id)) = jellyfin::parse_key(key) else { return IndexState::NotApplicable };
+    let Some((_, item_id)) = crate::remote::parse_key(key) else { return IndexState::NotApplicable };
     let Some(ext) = extensions.get(item_id).filter(|e| matches!(e.as_str(), "cbr" | "rar")) else {
         return IndexState::NotApplicable;
     };
@@ -142,7 +142,7 @@ impl App {
         let series: Vec<(String, Vec<String>)> = library::all_series(db)
             .into_iter()
             .map(|s| s.path)
-            .filter(|p| jellyfin::is_key(p))
+            .filter(|p| crate::remote::is_key(p))
             .map(|key| {
                 let issues = library::issues_for(db, &key).into_iter().map(|i| i.path).collect();
                 (key, issues)
@@ -262,10 +262,10 @@ impl App {
                 }
                 continue;
             };
-            let item_id = jellyfin::parse_key(&key).map(|(_, id)| id.to_string()).unwrap_or_default();
+            let item_id = crate::remote::parse_key(&key).map(|(_, id)| id.to_string()).unwrap_or_default();
             return cosmic::task::future(async move {
                 let result = tokio::task::spawn_blocking(move || {
-                    RemoteRar::open(Box::new(account.range_source(&item_id)), Some(&index_path(&item_id)))
+                    RemoteRar::open(account.range_source(&item_id), Some(&index_path(&item_id)))
                         .map(|rar| rar.solid())
                 })
                 .await

@@ -444,8 +444,8 @@ impl App {
             }
         };
         while let Some((issue, series)) = self.dl.queue.pop_front() {
-            let Some((account_key, item_id)) = jellyfin::parse_key(&issue) else { continue };
-            let Some(account) = self.jellyfin.find(account_key).cloned() else { continue };
+            let Some((account_key, item_id)) = crate::remote::parse_key(&issue) else { continue };
+            let Some(account) = self.account_for(&issue) else { continue };
             let ext = self.jf.extensions.get(item_id).filter(|e| !e.is_empty()).cloned().unwrap_or_else(|| "cbz".into());
             let dir = root.join(account_key);
             if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -458,7 +458,8 @@ impl App {
             let progress = Arc::new(jellyfin::Progress::default());
             self.dl.current = Some((issue.clone(), series.clone(), progress.clone()));
             return cosmic::task::future(async move {
-                let result = jellyfin::download_item(&account, &item_id, &dest, &progress)
+                let result = account
+                    .download_item(&item_id, &dest, &progress)
                     .await
                     .map(|size| (dest, size));
                 Message::Dl(DlMsg::Finished(issue, series, result))

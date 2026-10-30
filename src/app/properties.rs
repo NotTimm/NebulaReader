@@ -69,7 +69,7 @@ impl App {
                 CardAction::Read,
             ),
         ];
-        if crate::jellyfin::is_key(&e.path) {
+        if crate::remote::is_key(&e.path) {
             items.push(Item::Divider);
             // A one-shot, or the chapter a Continue Reading card shows, is
             // downloaded or removed on its own; the whole series only from
@@ -176,11 +176,15 @@ impl App {
 
     fn open_properties(&mut self, e: &SeriesEntry) -> Task<Message> {
         let issues = self.series_issues(&e.path);
-        let remote = crate::jellyfin::is_key(&e.path);
+        let remote = crate::remote::is_key(&e.path);
+        let opds = crate::opds::is_key(&e.path);
         let manga = super::library_view::is_manga(&issues);
         let mut rows: Vec<(String, String)> = Vec::new();
 
         let kind = match (remote, e.kind) {
+            (true, _) if opds && e.issue_count > 1 => fl!("kind-opds-series"),
+            (true, _) if opds && e.is_epub => fl!("kind-opds-book"),
+            (true, _) if opds => fl!("kind-opds-comic"),
             (true, _) if e.issue_count > 1 => fl!("kind-jellyfin-series"),
             (true, _) if e.is_epub => fl!("kind-jellyfin-book"),
             (true, _) => fl!("kind-jellyfin-comic"),
@@ -198,7 +202,7 @@ impl App {
             let ext = if !remote && file.is_dir() {
                 fl!("image-folder")
             } else {
-                let item = crate::jellyfin::parse_key(&i.path).map(|(_, id)| id);
+                let item = crate::remote::parse_key(&i.path).map(|(_, id)| id);
                 item.and_then(|id| self.jf.extensions.get(id).cloned())
                     .or_else(|| file.extension().map(|x| x.to_string_lossy().into_owned()))
                     .map(|x| x.to_uppercase())
@@ -218,9 +222,8 @@ impl App {
         }
 
         if remote {
-            let account = crate::jellyfin::parse_key(&e.path).and_then(|(a, _)| self.jellyfin.find(a));
-            if let Some(a) = account {
-                rows.push((fl!("prop-server"), format!("{} ({})", a.server_name, a.url)));
+            if let Some(a) = self.account_for(&e.path) {
+                rows.push((fl!("prop-server"), format!("{} ({})", a.server_name(), a.url())));
             }
             if let Some(lib) = self.jf.library_names.get(&e.library_root) {
                 rows.push((fl!("prop-library"), lib.clone()));
@@ -370,7 +373,7 @@ impl App {
 
 /// The folder to show for an entry on this computer.
 fn local_folder(e: &SeriesEntry) -> Option<PathBuf> {
-    if crate::jellyfin::is_key(&e.path) || crate::jellyfin::is_key(&e.library_root) {
+    if crate::remote::is_key(&e.path) || crate::remote::is_key(&e.library_root) {
         return None;
     }
     let dir = match e.kind {

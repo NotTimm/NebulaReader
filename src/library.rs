@@ -974,9 +974,10 @@ pub fn series_count_under_root(conn: &Connection, root: &str) -> usize {
         .unwrap_or(0)
 }
 
-/// Removes the series of one Jellyfin account whose library isn't among
-/// `roots` any more (the library was deleted or hidden on the server).
-pub fn prune_jellyfin_roots(conn: &Connection, account_prefix: &str, roots: &std::collections::HashSet<&str>) {
+/// Removes the series of one Jellyfin account (or OPDS catalog) whose
+/// library isn't among `roots` any more (the library was deleted or hidden
+/// on the server, or the folder taken out of the library).
+pub fn prune_remote_roots(conn: &Connection, account_prefix: &str, roots: &std::collections::HashSet<&str>) {
     let rows: Vec<(String, String)> = conn
         .prepare("SELECT path, library_root FROM series WHERE substr(library_root, 1, length(?1)) = ?1")
         .and_then(|mut st| {
@@ -998,7 +999,7 @@ pub fn prune_jellyfin_roots(conn: &Connection, account_prefix: &str, roots: &std
 /// since it may come back.
 pub fn prune_missing_loose_files(conn: &Connection) -> usize {
     let paths: Vec<String> = conn
-        .prepare("SELECT path FROM series WHERE library_root = '' AND path NOT LIKE 'jellyfin://%'")
+        .prepare("SELECT path FROM series WHERE library_root = '' AND path NOT LIKE 'jellyfin://%' AND path NOT LIKE 'opds://%'")
         .and_then(|mut st| st.query_map([], |r| r.get(0)).map(|it| it.flatten().collect()))
         .unwrap_or_default();
     let mut removed = 0;

@@ -73,6 +73,8 @@ pub enum PageSource {
     Rar { archive: PathBuf, entry: String },
     /// A page of a (non-solid) RAR archive on a server.
     RemoteRar { archive: std::sync::Arc<crate::remote_rar::RemoteRar>, index: usize },
+    /// A page the server sends as an image of its own (OPDS page streaming).
+    Web(std::sync::Arc<crate::opds::WebPage>),
 }
 
 /// The page range one chapter occupies in the flat [`PageSource`] list.
@@ -431,6 +433,7 @@ pub fn decode_source(source: &PageSource) -> Result<Page, String> {
             let name = archive.entries().get(*index).map(|e| e.name.clone()).unwrap_or_default();
             decode_image(&name, &archive.read(*index)?)
         }
+        PageSource::Web(page) => decode_image(page.url(), &page.fetch()?),
         PageSource::Rar { archive, entry } => {
             let path = rar_page(archive, entry)?;
             let data = std::fs::read(&path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;

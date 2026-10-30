@@ -2,8 +2,13 @@
 //! libraries into the local library, streaming chapters into the reader and
 //! writing reading progress back to Jellyfin.
 //!
-//! Jellyfin series are ordinary library entries keyed `jellyfin://…`, so
-//! cards, series pages, Continue Reading and progress all work unchanged.
+//! The syncing, reading and offline parts work for OPDS catalogs too
+//! ([`crate::remote::Account`]); what's Jellyfin's own (sign-in, progress
+//! and the dashboard's reading sessions) only runs for Jellyfin accounts.
+//!
+//! Server series are ordinary library entries keyed `jellyfin://…` or
+//! `opds://…`, so cards, series pages, Continue Reading and progress all
+//! work unchanged.
 //! The reader loads a window of chapters (the one being read, one before
 //! and a few after) and appends more as you approach the end, so a 400
 //! chapter series opens as fast as a short one.
@@ -19,10 +24,11 @@ use cosmic::{app::Task, Element};
 use super::{App, AppView, Message};
 use crate::comic::{self, ChapterInfo, PageSource};
 use crate::jellyfin::{self, Account, RemoteSeries};
+use crate::remote::{self, Account as RemoteAccount};
 use crate::library::{self, IssueRow, ScannedSeries, SeriesKind};
 use crate::naming;
 use crate::remote_rar::RemoteRar;
-use crate::remote_zip::{RangeSource, RemoteZip};
+use crate::remote_zip::RemoteZip;
 
 /// Chapters loaded after the one being opened, and per top-up after that.
 const WINDOW_AHEAD: usize = 3;
@@ -115,8 +121,8 @@ pub struct JfState {
     pub library_names: HashMap<String, String>,
     /// Account of the EPUB being downloaded, then of the one open (with its
     /// cached path), for the reader's title bar.
-    book_pending: Option<Account>,
-    book: Option<(PathBuf, Account)>,
+    book_pending: Option<RemoteAccount>,
+    book: Option<(PathBuf, RemoteAccount)>,
     /// The open book's (issue key, series key), for its download button.
     book_keys: Option<(String, String)>,
     /// Progress saving and reachability of the server being read from.
@@ -188,9 +194,9 @@ struct Live {
     pinging: bool,
 }
 
-/// The Jellyfin series open in the reader.
+/// The server series open in the reader.
 pub struct RemoteReading {
-    account: Account,
+    account: RemoteAccount,
     pub(super) series_key: String,
     /// Issue keys in reading order.
     issues: Vec<(String, String)>,
@@ -204,31 +210,38 @@ pub struct RemoteReading {
 /// Fetches an account's library. `left_open` is an item the last run didn't
 /// close: its reading session is ended and its last saved progress put back
 /// first, before the server's idle timeout could have marked it read.
-fn fetch_task(account: Account, left_open: Option<jellyfin::OpenItem>) -> Task<Message> {
+fn fetch_task(account: RemoteAccount, left_open: Option<jellyfin::OpenItem>) -> Task<Message> {
     let key = account.key();
     cosmic::task::future(async move {
-        if let Some(open) = left_open {
-            let _ = jellyfin::report_reading_stopped(&account, &open.item_id).await;
+        if let (Some(open), RemoteAccount::Jellyfin(jf)) = (left_open, &account) {
+            let _ = jellyfin::report_reading_stopped(jf, &open.item_id).await;
             if let Some((ticks, played)) = open.saved {
-                let _ = jellyfin::save_progress(&account, &open.item_id, ticks, played).await;
+                let _ = jellyfin::save_progress(jf, &open.item_id, ticks, played).await;
             }
         }
-        let result = jellyfin::fetch_library(&account).await;
+        let result = account.fetch_library().await;
         Message::Jf(JfMsg::Fetched(key, result))
     })
 }
 
-/// Saves a series or issue cover from Jellyfin's image, falling back to the
-/// archive's first page when Jellyfin has none.
-fn cover_task(account: Account, item_id: String, path: PathBuf, done: Message) -> Task<Message> {
+/// Saves a series or issue cover from the server's image, falling back to
+/// the archive's first page when the server has none.
+fn cover_task(account: RemoteAccount, item_id: String, path: PathBuf, done: Message) -> Task<Message> {
     cosmic::task::future(async move {
-        let bytes = jellyfin::cover(&account, &item_id, 680).await;
+        let bytes = account.cover(&item_id, 680).await;
         let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
             let img = match bytes.ok().and_then(|b| image::load_from_memory(&b).ok()) {
                 Some(img) => img.to_rgba8(),
                 None => {
-                    let zip = RemoteZip::open(Box::new(account.range_source(&item_id)))?;
-                    let page = comic::decode_bytes(&zip.entries.first().ok_or("empty")?.name, &zip.read(0)?)?;
+                    // Pages the server streams one by one, else the
+                    // archive's first page.
+                    let page = match account.page_stream(&item_id).and_then(|p| p.into_iter().next()) {
+                        Some(first) => comic::decode_source(&first)?,
+                        None => {
+                            let zip = RemoteZip::open(account.range_source(&item_id))?;
+                            comic::decode_bytes(&zip.entries.first().ok_or("empty")?.name, &zip.read(0)?)?
+                        }
+                    };
                     image::RgbaImage::from_raw(page.width, page.height, page.rgba).ok_or("bad image")?
                 }
             };
@@ -243,7 +256,11 @@ fn cover_task(account: Account, item_id: String, path: PathBuf, done: Message) -
 /// not downloaded, and not a zip (which always streams page by page). A
 /// CBR streams too unless it turns out to be solid.
 fn must_fetch_whole(extensions: &HashMap<String, String>, downloaded: &HashMap<String, PathBuf>, key: &str) -> bool {
-    let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
+    let (account, item_id) = remote::parse_key(key).unwrap_or_default();
+    // Read page by page as images from the server.
+    if crate::opds::is_key(key) && crate::opds::links(account, item_id).is_some_and(|l| l.streams_pages()) {
+        return false;
+    }
     let ext = extensions.get(item_id).map(String::as_str).unwrap_or("");
     !matches!(ext, "" | "cbz" | "zip") && !downloaded.get(key).is_some_and(|f| f.exists())
 }
@@ -263,7 +280,7 @@ impl App {
 /// Lists the pages of some issues: streamed for zip archives, downloaded
 /// to the cache first for anything else (RAR can't be read out of order).
 fn load_issues(
-    account: &Account,
+    account: &RemoteAccount,
     series_key: &str,
     issues: &[(String, String)],
     extensions: &HashMap<String, String>,
@@ -283,7 +300,7 @@ fn load_issues(
     let mut sources = Vec::new();
     let mut chapters = Vec::new();
     for ((key, name), opened) in issues.iter().zip(opened) {
-        let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
+        let item_id = remote::parse_key(key).map(|(_, id)| id).unwrap_or_default();
         let Opened { local, ext, cached, streamed, known_size } = opened;
         let start = sources.len();
         if let Some(file) = local {
@@ -342,14 +359,15 @@ struct Opened {
 }
 
 /// Opens a chapter for streaming when it can be: a zip (or non-solid RAR)
-/// on the server that isn't downloaded or cached already.
+/// on the server that isn't downloaded or cached already, or pages the
+/// server sends one by one as images (OPDS page streaming).
 fn open_streamed(
-    account: &Account,
+    account: &RemoteAccount,
     key: &str,
     extensions: &HashMap<String, String>,
     downloaded: &HashMap<String, PathBuf>,
 ) -> Opened {
-    let item_id = jellyfin::parse_key(key).map(|(_, id)| id).unwrap_or_default();
+    let item_id = remote::parse_key(key).map(|(_, id)| id).unwrap_or_default();
     let ext = extensions.get(item_id).map(String::as_str).filter(|e| !e.is_empty()).unwrap_or("cbz").to_string();
     // Downloaded: read the local copy, no network needed.
     let local = downloaded.get(key).filter(|f| f.exists()).cloned();
@@ -357,46 +375,51 @@ fn open_streamed(
     let mut known_size = None;
     let streamed = if local.is_some() || cached.exists() {
         None
-    } else if matches!(ext.as_str(), "cbz" | "zip") {
-        RemoteZip::open(Box::new(account.range_source(item_id)))
-            .ok()
-            .filter(|z| !z.entries.is_empty())
-            .map(|zip| (0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }).collect())
-    } else if matches!(ext.as_str(), "cbr" | "rar") {
-        // Pages are read one by one unless the archive is solid.
-        let index = super::rar_index::index_path(item_id);
-        match RemoteRar::open(Box::new(account.range_source(item_id)), Some(&index)) {
-            Ok(rar) if !rar.solid() && !rar.entries().is_empty() => Some(
-                (0..rar.entries().len()).map(|index| PageSource::RemoteRar { archive: rar.clone(), index }).collect(),
-            ),
-            Ok(rar) => {
-                known_size = Some(rar.len());
-                None
-            }
-            Err(_) => None,
-        }
     } else {
-        None
+        let file = if matches!(ext.as_str(), "cbz" | "zip") {
+            RemoteZip::open(account.range_source(item_id))
+                .ok()
+                .filter(|z| !z.entries.is_empty())
+                .map(|zip| (0..zip.entries.len()).map(|index| PageSource::Remote { archive: zip.clone(), index }).collect())
+        } else if matches!(ext.as_str(), "cbr" | "rar") {
+            // Pages are read one by one unless the archive is solid.
+            let index = super::rar_index::index_path(item_id);
+            match RemoteRar::open(account.range_source(item_id), Some(&index)) {
+                Ok(rar) if !rar.solid() && !rar.entries().is_empty() => Some(
+                    (0..rar.entries().len()).map(|index| PageSource::RemoteRar { archive: rar.clone(), index }).collect(),
+                ),
+                Ok(rar) => {
+                    known_size = Some(rar.len());
+                    None
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        // A file that can't be streamed (another format, a server that
+        // ignores ranges, a solid RAR) may still come page by page.
+        file.or_else(|| account.page_stream(item_id))
     };
     Opened { local, ext, cached, streamed, known_size }
 }
 
 /// Downloads an item into the cache (kept for re-reads; the cache is safe
 /// to clear).
-fn download(account: &Account, item_id: &str, ext: &str) -> Result<PathBuf, String> {
+fn download(account: &RemoteAccount, item_id: &str, ext: &str) -> Result<PathBuf, String> {
     let path = library::cache_dir().join("jellyfin").join(format!("{item_id}.{ext}"));
     if path.exists() {
         // Recently read: kept longest when the cache is trimmed.
         let _ = std::fs::File::options().append(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
     } else {
-        account.range_source(item_id).download_to(&path)?;
+        account.download_to(item_id, &path)?;
     }
     Ok(path)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn load_task(
-    account: Account,
+    account: RemoteAccount,
     series_key: String,
     issues: Vec<(String, String)>,
     extensions: HashMap<String, String>,
@@ -438,18 +461,19 @@ fn pending_task(account: Account, item_key: String, ticks: i64, played: bool, at
     })
 }
 
-/// A failed save that means the server couldn't be reached (as opposed to
-/// the server answering with an error).
+/// A failed save or sync that means the server couldn't be reached (as
+/// opposed to the server answering with an error, or a catalog too big to
+/// walk).
 fn unreachable(e: &str) -> bool {
-    !e.starts_with("HTTP")
+    !e.starts_with("HTTP") && e != fl!("opds-too-big")
 }
 
 fn session_task(report: impl std::future::Future<Output = Result<(), String>> + Send + 'static) -> Task<Message> {
     cosmic::task::future(async move { Message::Jf(JfMsg::SessionReported(report.await)) })
 }
 
-fn ping_task(url: String) -> Task<Message> {
-    cosmic::task::future(async move { Message::Jf(JfMsg::Pinged(jellyfin::ping(&url).await)) })
+fn ping_task(account: RemoteAccount) -> Task<Message> {
+    cosmic::task::future(async move { Message::Jf(JfMsg::Pinged(account.ping().await)) })
 }
 
 fn poll_task(url: String, secret: String) -> Task<Message> {
@@ -461,10 +485,16 @@ fn poll_task(url: String, secret: String) -> Task<Message> {
 }
 
 impl App {
-    /// Syncs every signed-in account (at startup and on demand).
-    pub(super) fn sync_all_jellyfin(&mut self) -> Task<Message> {
-        let accounts = self.jellyfin.accounts.clone();
+    /// Syncs every signed-in Jellyfin account and OPDS catalog (at startup
+    /// and on demand).
+    pub(super) fn sync_all_remote(&mut self) -> Task<Message> {
         let mut left_open = jellyfin::take_open();
+        // What the last sync of each catalog found, so its books open
+        // before this one is done.
+        for a in &self.opds.accounts {
+            self.jf.extensions.extend(crate::opds::extensions(&a.key()));
+        }
+        let accounts = self.remote_accounts();
         Task::batch(accounts.into_iter().map(|a| {
             self.jf.syncing.insert(a.key());
             let open = left_open.take_if(|o| o.account_key == a.key());
@@ -472,17 +502,35 @@ impl App {
         }))
     }
 
-    pub(super) fn account_for(&self, key: &str) -> Option<Account> {
-        let (account_key, _) = jellyfin::parse_key(key)?;
-        self.jellyfin.find(account_key).cloned()
+    /// Every Jellyfin account and OPDS catalog.
+    pub(super) fn remote_accounts(&self) -> Vec<RemoteAccount> {
+        let jf = self.jellyfin.accounts.iter().cloned().map(RemoteAccount::Jellyfin);
+        jf.chain(self.opds.accounts.iter().cloned().map(RemoteAccount::Opds)).collect()
     }
 
-    /// Opens a Jellyfin series at `chapter` (or where reading left off).
-    pub(super) fn open_jellyfin(&mut self, key: String, chapter: Option<usize>) -> Task<Message> {
+    /// The Jellyfin account or OPDS catalog with this account key.
+    pub(super) fn remote_account(&self, account_key: &str) -> Option<RemoteAccount> {
+        if let Some(a) = self.jellyfin.find(account_key) {
+            return Some(RemoteAccount::Jellyfin(a.clone()));
+        }
+        self.opds.find(account_key).cloned().map(RemoteAccount::Opds)
+    }
+
+    /// The account a library key (series or chapter) belongs to.
+    pub(super) fn account_for(&self, key: &str) -> Option<RemoteAccount> {
+        if let Some((account_key, _)) = jellyfin::parse_key(key) {
+            return self.jellyfin.find(account_key).cloned().map(RemoteAccount::Jellyfin);
+        }
+        let (account_key, _) = crate::opds::parse_key(key)?;
+        self.opds.find(account_key).cloned().map(RemoteAccount::Opds)
+    }
+
+    /// Opens a Jellyfin or OPDS series at `chapter` (or where reading left
+    /// off).
+    pub(super) fn open_remote(&mut self, key: String, chapter: Option<usize>) -> Task<Message> {
         let Some(account) = self.account_for(&key) else {
-            return Task::done(cosmic::Action::App(Message::LoadFailed(
-                fl!("jf-not-signed-in"),
-            )));
+            let msg = if crate::opds::is_key(&key) { fl!("opds-not-signed-in") } else { fl!("jf-not-signed-in") };
+            return Task::done(cosmic::Action::App(Message::LoadFailed(msg)));
         };
         let Some(db) = &self.db else { return Task::none() };
         let issues: Vec<(String, String)> =
@@ -493,7 +541,7 @@ impl App {
 
         // EPUBs open in the book reader from a downloaded copy: the user's
         // download if there is one, else one fetched into the cache.
-        let first_id = jellyfin::parse_key(&issues[0].0).map(|(_, id)| id.to_string()).unwrap_or_default();
+        let first_id = remote::parse_key(&issues[0].0).map(|(_, id)| id.to_string()).unwrap_or_default();
         let saved = self.dl.file(&issues[0].0).cloned();
         let is_epub = self.jf.extensions.get(&first_id).is_some_and(|e| e == "epub")
             || saved.as_ref().is_some_and(|f| f.extension().is_some_and(|e| e == "epub"));
@@ -532,7 +580,7 @@ impl App {
             if kept.is_empty() {
                 return Task::done(cosmic::Action::App(Message::LoadFailed(fl!(
                     "jf-offline-nothing-downloaded",
-                    server = account.server_name.as_str()
+                    server = account.server_name()
                 ))));
             }
             let start = want.and_then(|w| kept.iter().position(|(k, _)| *k == w)).unwrap_or(0);
@@ -634,7 +682,7 @@ impl App {
         let open = self.open_path.as_ref()?;
 
         // A book: how far through it, as a fraction.
-        if let Some((path, account)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
+        if let Some((path, RemoteAccount::Jellyfin(account))) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
             let book = self.epub_book.as_ref()?;
             let n = book.chapters.len().max(1);
             let pos = self.book_scroll.rel_y.clamp(0.0, 1.0);
@@ -652,13 +700,14 @@ impl App {
 
         // A comic: the page in the chapter on screen.
         let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
+        let RemoteAccount::Jellyfin(account) = &r.account else { return None };
         let (_, ch, pg) = self.current_chapter()?;
         let pg = pg + self.pages_shown_at(self.current_page) - 1;
         let pg = pg.min(ch.page_count.saturating_sub(1));
         let issue = ch.path.to_string_lossy();
         let (_, item_id) = jellyfin::parse_key(&issue)?;
         Some(Report {
-            account: r.account.clone(),
+            account: account.clone(),
             item_id: item_id.to_string(),
             ticks: pg as i64 * 10_000,
             played: pg + 1 >= ch.page_count,
@@ -716,15 +765,29 @@ impl App {
 
         tasks.push(self.update_reading_session(report.as_ref()));
 
+        let open = self.open_remote_account();
         let live = &mut self.jf.live;
-        if let Some(rep) = &report {
+        if let Some(account) = open {
             if !live.pinging && live.pinged_at.is_none_or(|t| t.elapsed() >= PING_EVERY) {
                 live.pinging = true;
                 live.pinged_at = Some(now);
-                tasks.push(ping_task(rep.account.url.clone()));
+                tasks.push(ping_task(account));
             }
         }
         Task::batch(tasks)
+    }
+
+    /// The account of the book or series being read, if it's from a server.
+    fn open_remote_account(&self) -> Option<RemoteAccount> {
+        if self.app_view != AppView::Reader || self.loading {
+            return None;
+        }
+        let open = self.open_path.as_ref()?;
+        if let Some((_, a)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
+            return Some(a.clone());
+        }
+        let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
+        Some(r.account.clone())
     }
 
     /// Keeps the server's dashboard in step with what's open: starts a
@@ -777,7 +840,9 @@ impl App {
 
     /// Mirrors read/unread marks from the series page to Jellyfin.
     pub(super) fn jellyfin_mark(&self, issue_keys: Vec<String>, played: bool) -> Task<Message> {
-        let Some(account) = issue_keys.first().and_then(|k| self.account_for(k)) else { return Task::none() };
+        let Some(RemoteAccount::Jellyfin(account)) = issue_keys.first().and_then(|k| self.account_for(k)) else {
+            return Task::none();
+        };
         cosmic::task::future(async move {
             let mut result = Ok(());
             let mut failed = Vec::new();
@@ -793,9 +858,9 @@ impl App {
         })
     }
 
-    /// Cover for one issue on a Jellyfin series page.
-    pub(super) fn jellyfin_issue_cover(&self, series_key: String, idx: usize, issue_key: &str) -> Task<Message> {
-        let (Some(account), Some((_, item_id))) = (self.account_for(issue_key), jellyfin::parse_key(issue_key)) else {
+    /// Cover for one issue on a Jellyfin or OPDS series page.
+    pub(super) fn remote_issue_cover(&self, series_key: String, idx: usize, issue_key: &str) -> Task<Message> {
+        let (Some(account), Some((_, item_id))) = (self.account_for(issue_key), remote::parse_key(issue_key)) else {
             return Task::none();
         };
         let path = library::chapter_cover_path(&series_key, idx);
@@ -921,7 +986,7 @@ impl App {
                         self.jf.status = Some(fl!("jf-signed-in", user = account.label()));
                         self.jf.syncing.insert(account.key());
                         self.jellyfin.upsert(account.clone());
-                        return fetch_task(account, None);
+                        return fetch_task(RemoteAccount::Jellyfin(account), None);
                     }
                     Err(e) => self.jf.status = Some(e),
                 }
@@ -946,7 +1011,7 @@ impl App {
                 ]);
             }
             JfMsg::Sync(key) => {
-                if let Some(account) = self.jellyfin.find(&key).cloned() {
+                if let Some(account) = self.remote_account(&key) {
                     self.jf.syncing.insert(key);
                     return fetch_task(account, None);
                 }
@@ -956,12 +1021,18 @@ impl App {
                 match result {
                     Ok(series) => {
                         self.jf.offline.remove(&key);
-                        let task = self.apply_jellyfin_library(&key, series);
+                        let task = self.apply_remote_library(&key, series);
+                        // Folders picked while it ran: sync again.
+                        let again = if self.op.resync.remove(&key) {
+                            self.update_jellyfin(JfMsg::Sync(key))
+                        } else {
+                            Task::none()
+                        };
                         // Which CBRs can have their page index built ahead.
-                        return Task::batch([task, self.refresh_unindexed()]);
+                        return Task::batch([task, self.refresh_unindexed(), again]);
                     }
                     Err(e) => {
-                        let server = self.jellyfin.find(&key).map(|a| a.server_name.clone()).unwrap_or_default();
+                        let server = self.remote_account(&key).map(|a| a.server_name().to_string()).unwrap_or_default();
                         if unreachable(&e) {
                             // Show what's downloaded from it until it's back.
                             self.jf.offline.insert(key);
@@ -976,7 +1047,7 @@ impl App {
                 let keys: Vec<String> = self.jf.offline.iter().filter(|k| !self.jf.syncing.contains(*k)).cloned().collect();
                 let mut tasks = Vec::new();
                 for key in keys {
-                    if let Some(account) = self.jellyfin.find(&key).cloned() {
+                    if let Some(account) = self.remote_account(&key) {
                         self.jf.syncing.insert(key);
                         tasks.push(fetch_task(account, None));
                     }
@@ -1147,7 +1218,7 @@ impl App {
 
     /// Where the open comic or book comes from, for the reader's title bar:
     /// the server's name, whether it's reachable (`None` until checked) and
-    /// a hover text with the details. `None` when it isn't from Jellyfin.
+    /// a hover text with the details. `None` when it isn't from a server.
     pub(super) fn jellyfin_source(&self) -> Option<(String, Option<bool>, String)> {
         let open = self.open_path.as_ref()?;
         let live = &self.jf.live;
@@ -1157,6 +1228,7 @@ impl App {
             let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
             let item = match self.sources.get(self.current_page) {
                 Some(PageSource::Remote { .. } | PageSource::RemoteRar { .. }) => fl!("jf-item-streamed"),
+                Some(PageSource::Web(_)) => fl!("opds-item-pages"),
                 Some(_) => fl!("jf-item-cached"),
                 None => fl!("jf-item-loading"),
             };
@@ -1168,7 +1240,9 @@ impl App {
             Some(false) => fl!("jf-offline"),
             None => fl!("jf-checking"),
         };
-        let progress = if live.saving > 0 {
+        let progress = if !account.saves_progress() {
+            fl!("opds-progress-local")
+        } else if live.saving > 0 {
             fl!("jf-progress-saving")
         } else if let Some(at) = live.saved_at {
             let secs = at.elapsed().as_secs();
@@ -1181,13 +1255,12 @@ impl App {
         } else {
             fl!("jf-progress-saved-later")
         };
-        let mut tip = format!(
-            "Jellyfin: {} ({})\n{}\n{connection}\n{progress}\n{item}",
-            account.server_name,
-            account.url,
-            fl!("jf-signed-in-as", user = account.user_name.as_str())
-        );
-        let mut label = account.server_name.clone();
+        let mut tip = format!("{}: {} ({})", account.kind(), account.server_name(), account.url());
+        if !account.user_name().is_empty() {
+            tip = format!("{tip}\n{}", fl!("jf-signed-in-as", user = account.user_name()));
+        }
+        let mut tip = format!("{tip}\n{connection}\n{progress}\n{item}");
+        let mut label = account.server_name().to_string();
         if let Some(e) = &live.error {
             tip = format!("⚠ {e}\n\n{tip}");
             label.push_str(" ⚠");
@@ -1195,10 +1268,10 @@ impl App {
         Some((label, live.online, tip))
     }
 
-    /// Stores a fetched Jellyfin library: series, chapters, read state from
-    /// the server (when newer than ours) and covers.
-    fn apply_jellyfin_library(&mut self, account_key: &str, series: Vec<RemoteSeries>) -> Task<Message> {
-        let Some(account) = self.jellyfin.find(account_key).cloned() else { return Task::none() };
+    /// Stores a fetched Jellyfin library or OPDS catalog: series, chapters,
+    /// read state from the server (when newer than ours) and covers.
+    fn apply_remote_library(&mut self, account_key: &str, series: Vec<RemoteSeries>) -> Task<Message> {
+        let Some(account) = self.remote_account(account_key) else { return Task::none() };
         let Some(db) = &self.db else { return Task::none() };
         let mut tasks = Vec::new();
         let mut by_root: HashMap<String, Vec<String>> = HashMap::new();
@@ -1258,7 +1331,7 @@ impl App {
             by_root.entry(s.library_root.clone()).or_default().push(s.key.clone());
             self.jf
                 .library_names
-                .insert(s.library_root.clone(), format!("{} · {}", s.library_name, account.server_name));
+                .insert(s.library_root.clone(), format!("{} · {}", s.library_name, account.server_name()));
 
             if let Some(item) = &s.cover_item {
                 let path = library::chapter_cover_path(&s.key, 0);
@@ -1273,16 +1346,18 @@ impl App {
             library::prune_root(db, root, keys);
         }
         let roots: HashSet<&str> = by_root.keys().map(String::as_str).collect();
-        library::prune_jellyfin_roots(db, &format!("{}{account_key}/", jellyfin::KEY_PREFIX), &roots);
+        library::prune_remote_roots(db, &account.key_prefix(), &roots);
 
         // Progress kept while the server was offline goes up now, unless
         // the server has something newer (read elsewhere meanwhile).
         let server_read: HashMap<&str, i64> =
             series.iter().flat_map(|s| s.issues.iter().map(|i| (i.key.as_str(), i.last_read))).collect();
-        for (item_key, ticks, played, at) in library::pending_progress(db, &format!("{}{account_key}/", jellyfin::KEY_PREFIX)) {
-            match server_read.get(item_key.as_str()) {
-                Some(&read) if read < at => tasks.push(pending_task(account.clone(), item_key, ticks, played, at)),
-                _ => library::clear_pending_progress(db, &item_key, at),
+        if let RemoteAccount::Jellyfin(jf) = &account {
+            for (item_key, ticks, played, at) in library::pending_progress(db, &account.key_prefix()) {
+                match server_read.get(item_key.as_str()) {
+                    Some(&read) if read < at => tasks.push(pending_task(jf.clone(), item_key, ticks, played, at)),
+                    _ => library::clear_pending_progress(db, &item_key, at),
+                }
             }
         }
         let _ = db.execute_batch("RELEASE batch");
@@ -1298,6 +1373,40 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// A server in Settings: its name, address or state, extra buttons, a
+    /// sync button and `remove` (Sign Out, Remove).
+    pub(super) fn remote_account_row<'a>(
+        &self,
+        account: &RemoteAccount,
+        extra: Vec<Element<'a, Message>>,
+        remove: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let key = account.key();
+        let syncing = self.jf.syncing.contains(&key);
+        let mut row = widget::Row::new().spacing(8).align_y(Alignment::Center).push(
+            widget::Column::new()
+                .width(Length::Fill)
+                .push(widget::text::body(account.label()))
+                .push(widget::text::caption(if syncing {
+                    fl!("jf-syncing")
+                } else if self.jf.offline.contains(&key) {
+                    fl!("jf-unreachable-short", url = account.url())
+                } else {
+                    account.url().to_string()
+                })),
+        );
+        for e in extra {
+            row = row.push(e);
+        }
+        row.push(
+            widget::button::icon(icon::from_name("view-refresh-symbolic"))
+                .tooltip(fl!("jf-sync-now"))
+                .on_press_maybe((!syncing).then(|| Message::Jf(JfMsg::Sync(key.clone())))),
+        )
+        .push(remove)
+        .into()
+    }
+
     /// Settings: signed-in servers and adding one.
     pub(super) fn build_jellyfin_section(&self) -> Element<'_, Message> {
         let mut section = widget::settings::section().header(
@@ -1310,30 +1419,8 @@ impl App {
 
         for account in &self.jellyfin.accounts {
             let key = account.key();
-            let syncing = self.jf.syncing.contains(&key);
-            section = section.add(
-                widget::Row::new()
-                    .spacing(8)
-                    .align_y(Alignment::Center)
-                    .push(
-                        widget::Column::new()
-                            .width(Length::Fill)
-                            .push(widget::text::body(account.label()))
-                            .push(widget::text::caption(if syncing {
-                                fl!("jf-syncing")
-                            } else if self.jf.offline.contains(&key) {
-                                fl!("jf-unreachable-short", url = account.url.as_str())
-                            } else {
-                                account.url.clone()
-                            })),
-                    )
-                    .push(
-                        widget::button::icon(icon::from_name("view-refresh-symbolic"))
-                            .tooltip(fl!("jf-sync-now"))
-                            .on_press_maybe((!syncing).then(|| Message::Jf(JfMsg::Sync(key.clone())))),
-                    )
-                    .push(widget::button::standard(fl!("sign-out")).on_press(Message::Jf(JfMsg::SignOut(key)))),
-            );
+            let sign_out = widget::button::standard(fl!("sign-out")).on_press(Message::Jf(JfMsg::SignOut(key)));
+            section = section.add(self.remote_account_row(&RemoteAccount::Jellyfin(account.clone()), Vec::new(), sign_out.into()));
         }
 
         if !self.jellyfin.accounts.is_empty() {
@@ -1428,7 +1515,7 @@ mod tests {
         let key = account.item_key(&item);
         let extensions = HashMap::from([(item.clone(), "cbr".to_string())]);
         let t = Instant::now();
-        let loaded = load_issues(&account, "series", &[(key, "Chapter".into())], &extensions, &HashMap::new(), Some(BIG_FETCH)).unwrap();
+        let loaded = load_issues(&RemoteAccount::Jellyfin(account.clone()), "series", &[(key, "Chapter".into())], &extensions, &HashMap::new(), Some(BIG_FETCH)).unwrap();
         println!("{} pages in {:?}, blocked: {}", loaded.sources.len(), t.elapsed(), loaded.blocked.is_some());
         let t = Instant::now();
         let page = comic::decode_source(&loaded.sources[0]).unwrap();
@@ -1437,7 +1524,7 @@ mod tests {
         if let Ok(junk) = std::env::var("NEBULA_MOCK_JUNK") {
             let key = account.item_key(&junk);
             let extensions = HashMap::from([(junk, "cbr".to_string())]);
-            let loaded = load_issues(&account, "series", &[(key, "Junk".into())], &extensions, &HashMap::new(), Some(BIG_FETCH)).unwrap();
+            let loaded = load_issues(&RemoteAccount::Jellyfin(account.clone()), "series", &[(key, "Junk".into())], &extensions, &HashMap::new(), Some(BIG_FETCH)).unwrap();
             let b = loaded.blocked.expect("should ask first");
             println!("asked first: {} bytes, nothing fetched: {}", b.size, loaded.sources.is_empty());
         }
@@ -1461,7 +1548,7 @@ mod tests {
         let issues: Vec<(String, String)> = ids.split(',').map(|id| (account.item_key(id), format!("Chapter {id}"))).collect();
         let extensions: HashMap<String, String> = ids.split(',').map(|id| (id.to_string(), "cbz".to_string())).collect();
         let t = Instant::now();
-        let loaded = load_issues(&account, "series", &issues, &extensions, &HashMap::new(), None).unwrap();
+        let loaded = load_issues(&RemoteAccount::Jellyfin(account.clone()), "series", &issues, &extensions, &HashMap::new(), None).unwrap();
         println!("{} chapters, {} pages in {:?}", loaded.chapters.len(), loaded.sources.len(), t.elapsed());
         assert_eq!(loaded.chapters.len(), issues.len());
     }

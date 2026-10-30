@@ -320,7 +320,7 @@ struct Opf {
     ncx_id: Option<String>,
 }
 
-fn attr(e: &BytesStart, name: &str) -> Option<String> {
+pub(crate) fn attr(e: &BytesStart, name: &str) -> Option<String> {
     e.attributes()
         .flatten()
         .find(|a| local_name_str(a.key.as_ref()) == name)
@@ -946,7 +946,7 @@ fn parse_xhtml_body(xhtml: &str, css: &CssHints) -> Vec<Parsed> {
 
 /// The text of a text node or of an entity reference, which quick-xml
 /// (since 0.38) reports as an event of its own; anything else is empty.
-fn event_text(ev: &Event) -> String {
+pub(crate) fn event_text(ev: &Event) -> String {
     match ev {
         Event::Text(t) => decode_text(t),
         Event::GeneralRef(r) => decode_text(&format!("&{};", &**r)),
@@ -1014,7 +1014,7 @@ fn collapse(s: &str) -> String {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-fn local_name(name: &quick_xml::name::QName) -> String {
+pub(crate) fn local_name(name: &quick_xml::name::QName) -> String {
     local_name_str(name.as_ref())
 }
 
