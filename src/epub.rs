@@ -19,7 +19,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::Reader;
+use quick_xml::{Reader, XmlVersion};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Style {
@@ -289,7 +289,7 @@ fn find_opf_path(zip: &mut zip::ZipArchive<std::fs::File>) -> Result<String, Str
             Ok(Event::Empty(e)) | Ok(Event::Start(e)) if local_name(&e.name()) == "rootfile" => {
                 for attr in e.attributes().flatten() {
                     if local_name_str(attr.key.as_ref()) == "full-path" {
-                        return Ok(attr.unescape_value().unwrap_or_default().into_owned());
+                        return Ok(attr.normalized_value(XmlVersion::default()).unwrap_or_default().into_owned());
                     }
                 }
             }
@@ -324,7 +324,7 @@ fn attr(e: &BytesStart, name: &str) -> Option<String> {
     e.attributes()
         .flatten()
         .find(|a| local_name_str(a.key.as_ref()) == name)
-        .map(|a| a.unescape_value().map(|v| v.into_owned()).unwrap_or_else(|_| {
+        .map(|a| a.normalized_value(XmlVersion::default()).map(|v| v.into_owned()).unwrap_or_else(|_| {
             a.value.to_string()
         }))
 }

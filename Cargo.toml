@@ -29,7 +29,10 @@ serde_json = "1"
 ron = "0.12"
 # Local time for the full-screen clock.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-reqwest = { version = "0.13", features = ["json", "blocking"] }
+# native-tls, as before 0.13 made rustls + aws-lc the default: the system's
+# OpenSSL on Linux (what Fedora and the Flatpak runtime expect), SChannel on
+# Windows, Security.framework on macOS. No bundled C crypto library to build.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "charset", "http2", "system-proxy", "json", "blocking", "query"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 quick-xml = "0.42"
 regex = "1"
