@@ -48,8 +48,6 @@ pub enum Look {
 
 impl Look {
     pub const ALL: [Look; 5] = [Look::Auto, Look::Cosmic, Look::Breeze, Look::Fluent, Look::Adwaita];
-    pub const LABELS: [&'static str; 5] =
-        ["Match desktop", "COSMIC", "KDE Breeze", "Windows 11", "GNOME Adwaita"];
 
     /// Picks a concrete look for `Auto`.
     pub fn resolve(self, desktop: Desktop) -> Look {
@@ -87,7 +85,6 @@ pub enum Corners {
 
 impl Corners {
     pub const ALL: [Corners; 4] = [Corners::Auto, Corners::Round, Corners::SlightlyRound, Corners::Square];
-    pub const LABELS: [&'static str; 4] = ["Match style", "Round", "Slightly round", "Square"];
 
     fn radii(self) -> Option<CornerRadii> {
         match self {

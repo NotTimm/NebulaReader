@@ -481,14 +481,14 @@ impl App {
     pub(super) fn open_jellyfin(&mut self, key: String, chapter: Option<usize>) -> Task<Message> {
         let Some(account) = self.account_for(&key) else {
             return Task::done(cosmic::Action::App(Message::LoadFailed(
-                "Not signed in to this Jellyfin server any more. Add it again in Settings.".into(),
+                fl!("jf-not-signed-in"),
             )));
         };
         let Some(db) = &self.db else { return Task::none() };
         let issues: Vec<(String, String)> =
             library::issues_for(db, &key).into_iter().map(|i| (i.path, i.name)).collect();
         if issues.is_empty() {
-            return Task::done(cosmic::Action::App(Message::LoadFailed("This series has no chapters on the server.".into())));
+            return Task::done(cosmic::Action::App(Message::LoadFailed(fl!("jf-no-chapters"))));
         }
 
         // EPUBs open in the book reader from a downloaded copy: the user's
@@ -530,9 +530,9 @@ impl App {
             let want = all.get(start).map(|i| i.path.clone());
             let kept: Vec<(String, String)> = issues.into_iter().filter(|(k, _)| self.dl.file(k).is_some()).collect();
             if kept.is_empty() {
-                return Task::done(cosmic::Action::App(Message::LoadFailed(format!(
-                    "{} can't be reached, and nothing from this series is downloaded.",
-                    account.server_name
+                return Task::done(cosmic::Action::App(Message::LoadFailed(fl!(
+                    "jf-offline-nothing-downloaded",
+                    server = account.server_name.as_str()
                 ))));
             }
             let start = want.and_then(|w| kept.iter().position(|(k, _)| *k == w)).unwrap_or(0);
@@ -575,9 +575,15 @@ impl App {
         let size = super::downloads::human_size(b.size);
         let buttons = widget::row::with_capacity(3)
             .spacing(8)
-            .push(widget::button::suggested(if first { "Download and Read" } else { "Download" }).on_press(Message::Jf(JfMsg::FetchWhole(false))))
-            .push(widget::button::standard("Don't Ask Again").on_press(Message::Jf(JfMsg::FetchWhole(true))))
-            .push(widget::button::standard(if first { "Cancel" } else { "Not Now" }).on_press(Message::Jf(JfMsg::SkipWhole)));
+            .push(
+                widget::button::suggested(if first { fl!("download-and-read") } else { fl!("download") })
+                    .on_press(Message::Jf(JfMsg::FetchWhole(false))),
+            )
+            .push(widget::button::standard(fl!("dont-ask-again")).on_press(Message::Jf(JfMsg::FetchWhole(true))))
+            .push(
+                widget::button::standard(if first { fl!("cancel") } else { fl!("not-now") })
+                    .on_press(Message::Jf(JfMsg::SkipWhole)),
+            );
         if first {
             return Some(
                 widget::column::with_capacity(4)
@@ -585,11 +591,8 @@ impl App {
                     .align_x(Alignment::Center)
                     .max_width(520.0)
                     .push(icon::from_name("folder-download-symbolic").size(48))
-                    .push(widget::text::title3(format!("Download {size}?")))
-                    .push(widget::text::body(format!(
-                        "“{}” can't be read a page at a time (it's packed as one solid block), so the whole file has to come from the server before it opens.",
-                        b.name
-                    )))
+                    .push(widget::text::title3(fl!("download-size-question", size = size.as_str())))
+                    .push(widget::text::body(fl!("solid-explainer", name = b.name.as_str())))
                     .push(buttons)
                     .into(),
             );
@@ -601,7 +604,7 @@ impl App {
                 .align_y(Alignment::Center)
                 .push(icon::from_name("folder-download-symbolic").size(16))
                 .push(
-                    widget::text::body(format!("The next chapter, “{}”, has to be downloaded whole ({size}).", b.name))
+                    widget::text::body(fl!("solid-next-chapter", name = b.name.as_str(), size = size.as_str()))
                         .width(Length::Fill),
                 )
                 .push(buttons)
@@ -808,7 +811,7 @@ impl App {
                     return Task::none();
                 }
                 self.jf.busy = true;
-                self.jf.status = Some(format!("Looking for Jellyfin at {input}…"));
+                self.jf.status = Some(fl!("jf-looking-for", address = input.as_str()));
                 return cosmic::task::future(async move {
                     match jellyfin::find_server(&input).await {
                         Ok((url, info)) => {
@@ -822,7 +825,7 @@ impl App {
             JfMsg::ServerChecked(url, result) => match result {
                 Ok((info, true)) => {
                     let name = info.server_name.clone();
-                    self.jf.status = Some(format!("Connected to {name}. Getting a sign-in code…"));
+                    self.jf.status = Some(fl!("jf-connected", server = name.as_str()));
                     return cosmic::task::future(async move {
                         let r = jellyfin::quick_connect_start(&url).await;
                         Message::Jf(JfMsg::QuickConnectStarted(url, name, r))
@@ -830,11 +833,7 @@ impl App {
                 }
                 Ok((info, false)) => {
                     self.jf.busy = false;
-                    self.jf.status = Some(format!(
-                        "{} has Quick Connect turned off, so sign in with your Jellyfin username and password. \
-                         They're used once to get a token and not saved.",
-                        info.server_name
-                    ));
+                    self.jf.status = Some(fl!("jf-no-quick-connect", server = info.server_name.as_str()));
                     self.jf.password_for = Some((url, info.server_name));
                 }
                 Err(e) => {
@@ -857,7 +856,7 @@ impl App {
                 }
                 Err(e) => {
                     self.jf.busy = false;
-                    self.jf.status = Some(format!("Couldn't start Quick Connect: {e}"));
+                    self.jf.status = Some(fl!("jf-quick-connect-failed", error = e.to_string()));
                 }
             },
             JfMsg::QuickConnectPolled(secret, result) => {
@@ -867,7 +866,7 @@ impl App {
                 match result {
                     Ok(true) => {
                         let (url, name, secret) = (p.url.clone(), p.server_name.clone(), p.secret.clone());
-                        self.jf.status = Some("Approved. Signing in…".into());
+                        self.jf.status = Some(fl!("jf-approved"));
                         return cosmic::task::future(async move {
                             Message::Jf(JfMsg::SignedIn(jellyfin::quick_connect_finish(&url, &name, &secret).await))
                         });
@@ -878,7 +877,7 @@ impl App {
                     Ok(false) => {
                         self.jf.pending = None;
                         self.jf.busy = false;
-                        self.jf.status = Some("The code expired. Click Connect to get a new one.".into());
+                        self.jf.status = Some(fl!("jf-code-expired"));
                     }
                     Err(e) => {
                         self.jf.pending = None;
@@ -899,7 +898,7 @@ impl App {
                 let user = self.jf.user_input.clone();
                 let password = std::mem::take(&mut self.jf.password_input);
                 self.jf.busy = true;
-                self.jf.status = Some("Signing in…".into());
+                self.jf.status = Some(fl!("jf-signing-in"));
                 return cosmic::task::future(async move {
                     Message::Jf(JfMsg::SignedIn(jellyfin::sign_in_with_password(&url, &name, &user, &password).await))
                 });
@@ -919,7 +918,7 @@ impl App {
                         self.jf.password_for = None;
                         self.jf.password_input.clear();
                         self.jf.url_input.clear();
-                        self.jf.status = Some(format!("Signed in as {}. Loading your books…", account.label()));
+                        self.jf.status = Some(fl!("jf-signed-in", user = account.label()));
                         self.jf.syncing.insert(account.key());
                         self.jellyfin.upsert(account.clone());
                         return fetch_task(account, None);
@@ -936,7 +935,7 @@ impl App {
                 // Its downloads go with it.
                 self.prune_downloads();
                 self.jf.offline.remove(&key);
-                self.jf.status = Some(format!("Signed out of {}.", account.server_name));
+                self.jf.status = Some(fl!("jf-signed-out", server = account.server_name.as_str()));
                 let refresh = self.refresh_views();
                 return Task::batch([
                     cosmic::task::future(async move {
@@ -966,10 +965,10 @@ impl App {
                         if unreachable(&e) {
                             // Show what's downloaded from it until it's back.
                             self.jf.offline.insert(key);
-                            self.jf.status = Some(format!("{server} can't be reached; showing your downloads from it."));
+                            self.jf.status = Some(fl!("jf-unreachable-showing-downloads", server = server.as_str()));
                             return self.refresh_views();
                         }
-                        self.jf.status = Some(format!("Couldn't load {server}: {e}"));
+                        self.jf.status = Some(fl!("jf-load-failed", server = server.as_str(), error = e.to_string()));
                     }
                 }
             }
@@ -1022,7 +1021,7 @@ impl App {
                         self.open_path = Some(PathBuf::from(&key));
                         return Task::none();
                     }
-                    return Task::done(cosmic::Action::App(Message::LoadFailed("No pages found.".into())));
+                    return Task::done(cosmic::Action::App(Message::LoadFailed(fl!("no-pages-found"))));
                 }
                 return Task::done(cosmic::Action::App(Message::Loaded(PathBuf::from(key), loaded.sources, loaded.chapters)));
             }
@@ -1073,7 +1072,7 @@ impl App {
                     }
                     Err(e) => {
                         log::warn!("jellyfin: loading more chapters: {e}");
-                        self.jf.live.error = Some(format!("Couldn't load the next chapters: {e}"));
+                        self.jf.live.error = Some(fl!("jf-next-chapters-failed", error = e.to_string()));
                     }
                 }
             }
@@ -1103,11 +1102,11 @@ impl App {
                                 library::set_pending_progress(db, item_key, *ticks, *played);
                             }
                         }
-                        live.error = Some("Server offline: progress is kept here and sent when it's back".into());
+                        live.error = Some(fl!("jf-progress-offline"));
                     }
                     Err(e) => {
                         log::warn!("jellyfin: saving progress: {e}");
-                        live.error = Some(format!("Couldn't save progress: {e}"));
+                        live.error = Some(fl!("jf-progress-failed", error = e.to_string()));
                     }
                 }
             }
@@ -1153,38 +1152,40 @@ impl App {
         let open = self.open_path.as_ref()?;
         let live = &self.jf.live;
         let (account, item) = if let Some((_, a)) = self.jf.book.as_ref().filter(|(p, _)| p == open) {
-            (a, "This book: downloaded to the cache on this computer")
+            (a, fl!("jf-item-book-cached"))
         } else {
             let r = self.remote.as_ref().filter(|r| open.to_string_lossy() == r.series_key)?;
             let item = match self.sources.get(self.current_page) {
-                Some(PageSource::Remote { .. } | PageSource::RemoteRar { .. }) => "This chapter: streamed from the server, not cached",
-                Some(_) => "This chapter: downloaded to the cache on this computer",
-                None => "This chapter: loading…",
+                Some(PageSource::Remote { .. } | PageSource::RemoteRar { .. }) => fl!("jf-item-streamed"),
+                Some(_) => fl!("jf-item-cached"),
+                None => fl!("jf-item-loading"),
             };
             (&r.account, item)
         };
 
         let connection = match live.online {
-            Some(true) => "Online",
-            Some(false) => "Offline: the server isn't answering",
-            None => "Checking the connection…",
+            Some(true) => fl!("jf-online"),
+            Some(false) => fl!("jf-offline"),
+            None => fl!("jf-checking"),
         };
         let progress = if live.saving > 0 {
-            "Progress: saving…".to_string()
+            fl!("jf-progress-saving")
         } else if let Some(at) = live.saved_at {
             let secs = at.elapsed().as_secs();
             let ago = match secs {
-                0..=59 => "just now".to_string(),
-                60..=3599 => format!("{} min ago", secs / 60),
-                _ => format!("{} h ago", secs / 3600),
+                0..=59 => fl!("jf-just-now"),
+                60..=3599 => fl!("jf-minutes-ago", minutes = secs / 60),
+                _ => fl!("jf-hours-ago", hours = secs / 3600),
             };
-            format!("Progress: saved to the server {ago}")
+            fl!("jf-progress-saved", ago = ago)
         } else {
-            "Progress: saved to the server after a few seconds on a page".to_string()
+            fl!("jf-progress-saved-later")
         };
         let mut tip = format!(
-            "Jellyfin: {} ({})\nSigned in as {}\n{connection}\n{progress}\n{item}",
-            account.server_name, account.url, account.user_name
+            "Jellyfin: {} ({})\n{}\n{connection}\n{progress}\n{item}",
+            account.server_name,
+            account.url,
+            fl!("jf-signed-in-as", user = account.user_name.as_str())
         );
         let mut label = account.server_name.clone();
         if let Some(e) = &live.error {
@@ -1319,25 +1320,25 @@ impl App {
                             .width(Length::Fill)
                             .push(widget::text::body(account.label()))
                             .push(widget::text::caption(if syncing {
-                                "Syncing…".to_string()
+                                fl!("jf-syncing")
                             } else if self.jf.offline.contains(&key) {
-                                format!("{}  ·  can't be reached, showing downloads", account.url)
+                                fl!("jf-unreachable-short", url = account.url.as_str())
                             } else {
                                 account.url.clone()
                             })),
                     )
                     .push(
                         widget::button::icon(icon::from_name("view-refresh-symbolic"))
-                            .tooltip("Sync now")
+                            .tooltip(fl!("jf-sync-now"))
                             .on_press_maybe((!syncing).then(|| Message::Jf(JfMsg::Sync(key.clone())))),
                     )
-                    .push(widget::button::standard("Sign out").on_press(Message::Jf(JfMsg::SignOut(key)))),
+                    .push(widget::button::standard(fl!("sign-out")).on_press(Message::Jf(JfMsg::SignOut(key)))),
             );
         }
 
         if !self.jellyfin.accounts.is_empty() {
             section = section.add(widget::settings::item(
-                "Ask before downloading big chapters that can't be streamed",
+                fl!("jf-ask-big-fetch"),
                 widget::toggler(self.settings.ask_before_big_fetch).on_toggle(|on| Message::Jf(JfMsg::SetAskBigFetch(on))),
             ));
             section = section.add(self.downloads_settings());
@@ -1347,30 +1348,27 @@ impl App {
             section = section.add(
                 widget::Column::new()
                     .spacing(8)
-                    .push(widget::text::body(format!("Approve this code in Jellyfin on {}:", p.server_name)))
+                    .push(widget::text::body(fl!("jf-approve-code", server = p.server_name.as_str())))
                     .push(widget::text::title2(p.code.clone()))
-                    .push(widget::text::caption(
-                        "In Jellyfin, open your profile, then Quick Connect, and enter the code. \
-                         This window signs in by itself once you've approved it.",
-                    ))
+                    .push(widget::text::caption(fl!("jf-quick-connect-help")))
                     .push(
                         widget::Row::new()
                             .spacing(8)
-                            .push(widget::button::suggested("Open Jellyfin").on_press(Message::Jf(JfMsg::OpenApprovePage)))
-                            .push(widget::button::standard("Cancel").on_press(Message::Jf(JfMsg::Cancel))),
+                            .push(widget::button::suggested(fl!("jf-open")).on_press(Message::Jf(JfMsg::OpenApprovePage)))
+                            .push(widget::button::standard(fl!("cancel")).on_press(Message::Jf(JfMsg::Cancel))),
                     ),
             );
         } else if let Some((_, server)) = &self.jf.password_for {
             section = section.add(
                 widget::Column::new()
                     .spacing(8)
-                    .push(widget::text::body(format!("Sign in to {server}")))
+                    .push(widget::text::body(fl!("jf-sign-in-to", server = server.as_str())))
                     .push(
-                        widget::text_input("Username", &self.jf.user_input)
+                        widget::text_input(fl!("username"), &self.jf.user_input)
                             .on_input(|s| Message::Jf(JfMsg::UserInput(s))),
                     )
                     .push(
-                        widget::secure_input("Password", &self.jf.password_input, None, true)
+                        widget::secure_input(fl!("password"), &self.jf.password_input, None, true)
                             .on_input(|s| Message::Jf(JfMsg::PasswordInput(s)))
                             .on_submit(|_| Message::Jf(JfMsg::PasswordSubmit)),
                     )
@@ -1378,10 +1376,10 @@ impl App {
                         widget::Row::new()
                             .spacing(8)
                             .push(
-                                widget::button::suggested("Sign in")
+                                widget::button::suggested(fl!("sign-in"))
                                     .on_press_maybe((!self.jf.busy).then_some(Message::Jf(JfMsg::PasswordSubmit))),
                             )
-                            .push(widget::button::standard("Cancel").on_press(Message::Jf(JfMsg::Cancel))),
+                            .push(widget::button::standard(fl!("cancel")).on_press(Message::Jf(JfMsg::Cancel))),
                     ),
             );
         } else {
@@ -1390,13 +1388,13 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(
-                        widget::text_input("Jellyfin address", &self.jf.url_input)
+                        widget::text_input(fl!("jf-address"), &self.jf.url_input)
                             .on_input(|s| Message::Jf(JfMsg::UrlInput(s)))
                             .on_submit(|_| Message::Jf(JfMsg::Connect))
                             .width(Length::Fill),
                     )
                     .push(
-                        widget::button::suggested("Connect")
+                        widget::button::suggested(fl!("connect"))
                             .on_press_maybe((!self.jf.busy).then_some(Message::Jf(JfMsg::Connect))),
                     ),
             );

@@ -148,7 +148,7 @@ impl IssueEntry {
         if self.number.is_empty() {
             return self.name.clone();
         }
-        if manga_style { format!("Ch. {}", self.number) } else { format!("#{}", self.number) }
+        if manga_style { fl!("issue-label-manga", number = self.number.as_str()) } else { fl!("issue-label-comic", number = self.number.as_str()) }
     }
 
     /// The best release date known: online cover date, else the file's or
@@ -1270,17 +1270,34 @@ pub fn set_meta_error(conn: &Connection, series_path: &str, err: &str) {
 }
 
 /// "2021-03-14" -> "Mar 14, 2021", "2021-03" -> "Mar 2021", "2021" -> "2021".
+/// A month's short name, 1 = January.
+fn month_name(month: usize) -> String {
+    match month {
+        1 => fl!("month-1"),
+        2 => fl!("month-2"),
+        3 => fl!("month-3"),
+        4 => fl!("month-4"),
+        5 => fl!("month-5"),
+        6 => fl!("month-6"),
+        7 => fl!("month-7"),
+        8 => fl!("month-8"),
+        9 => fl!("month-9"),
+        10 => fl!("month-10"),
+        11 => fl!("month-11"),
+        _ => fl!("month-12"),
+    }
+}
+
 pub fn pretty_date(date: &str) -> String {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let mut parts = date.trim().split('-');
     let (Some(y), m, d) = (parts.next().filter(|y| y.len() == 4), parts.next(), parts.next()) else {
         return date.to_string();
     };
-    let month = m.and_then(|m| m.parse::<usize>().ok()).and_then(|m| MONTHS.get(m.wrapping_sub(1)));
+    let month = m.and_then(|m| m.parse::<usize>().ok()).filter(|m| (1..=12).contains(m)).map(month_name);
     let day = d.and_then(|d| d.parse::<u32>().ok()).filter(|d| (1..=31).contains(d));
     match (month, day) {
-        (Some(m), Some(d)) => format!("{m} {d}, {y}"),
-        (Some(m), None) => format!("{m} {y}"),
+        (Some(m), Some(d)) => fl!("date-day", month = m, day = d, year = y),
+        (Some(m), None) => fl!("date-month", month = m, year = y),
         _ => y.to_string(),
     }
 }

@@ -44,7 +44,7 @@ impl Account {
     }
 
     pub fn label(&self) -> String {
-        format!("{} on {}", self.user_name, self.server_name)
+        fl!("jf-account", user = self.user_name.as_str(), server = self.server_name.as_str())
     }
 
     pub fn auth(&self) -> String {
@@ -221,15 +221,15 @@ async fn get_json<T: serde::de::DeserializeOwned>(url: &str, auth: &str) -> Resu
         .header("Authorization", auth)
         .send()
         .await
-        .map_err(|e| format!("couldn't reach the server: {e}"))?;
+        .map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("signed out by the server (sign in again)".into());
+        return Err(fl!("jf-signed-out-by-server"));
     }
     if !status.is_success() {
-        return Err(format!("server error: HTTP {status}"));
+        return Err(fl!("jf-server-error", status = status.to_string()));
     }
-    resp.json().await.map_err(|e| format!("unexpected reply: {e}"))
+    resp.json().await.map_err(|e| fl!("jf-unexpected-reply", error = e.to_string()))
 }
 
 async fn post_json<T: serde::de::DeserializeOwned>(url: &str, auth: &str, body: &serde_json::Value) -> Result<T, String> {
@@ -239,15 +239,15 @@ async fn post_json<T: serde::de::DeserializeOwned>(url: &str, auth: &str, body: 
         .json(body)
         .send()
         .await
-        .map_err(|e| format!("couldn't reach the server: {e}"))?;
+        .map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("not authorized".into());
+        return Err(fl!("jf-not-authorized"));
     }
     if !status.is_success() {
-        return Err(format!("server error: HTTP {status}"));
+        return Err(fl!("jf-server-error", status = status.to_string()));
     }
-    resp.json().await.map_err(|e| format!("unexpected reply: {e}"))
+    resp.json().await.map_err(|e| fl!("jf-unexpected-reply", error = e.to_string()))
 }
 
 // ── Sign-in ─────────────────────────────────────────────────────────────────
@@ -261,11 +261,11 @@ pub struct ServerInfo {
 /// Finds the Jellyfin server at what the user typed (see [`candidate_urls`]),
 /// returning the address that answered.
 pub async fn find_server(input: &str) -> Result<(String, ServerInfo), String> {
-    let mut last = "Type the address of your Jellyfin server.".to_string();
+    let mut last = fl!("jf-type-address");
     for url in candidate_urls(input) {
         match get_json::<ServerInfo>(&format!("{url}/System/Info/Public"), &auth_header(None)).await {
             Ok(info) => return Ok((url, info)),
-            Err(e) => last = format!("No Jellyfin server found at {url} ({e})."),
+            Err(e) => last = fl!("jf-not-found", url = url.as_str(), error = e),
         }
     }
     Err(last)
@@ -842,7 +842,7 @@ impl HttpRange {
             if let Some(range) = range {
                 req = req.header("Range", range);
             }
-            let resp = req.send().map_err(|e| format!("couldn't reach the server: {e}"))?;
+            let resp = req.send().map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
             let refused = matches!(resp.status().as_u16(), 403 | 404 | 405);
             if refused && i + 1 < self.urls.len() {
                 self.current.store(i + 1, Ordering::Relaxed);
@@ -959,7 +959,7 @@ pub async fn download_item(
             .header("Authorization", account.auth())
             .send()
             .await
-            .map_err(|e| format!("couldn't reach the server: {e}"))?;
+            .map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
         // Servers without /File answer 403/404/405; try /Download.
         if matches!(r.status().as_u16(), 403 | 404 | 405) {
             continue;

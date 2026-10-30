@@ -44,9 +44,9 @@ impl App {
         let status = |issue: Option<&library::IssueEntry>| {
             let i = issue?;
             if i.completed {
-                Some("✓ Read".to_string())
+                Some(fl!("read-check"))
             } else if i.in_progress() {
-                Some(format!("Page {} of {}", i.last_page + 1, i.page_count.max(1)))
+                Some(fl!("page-of", page = i.last_page + 1, pages = i.page_count.max(1)))
             } else {
                 None
             }
@@ -153,8 +153,15 @@ impl App {
 
         let series = self.reader_entry.as_ref().map(|e| e.name().to_string()).unwrap_or_default();
         let position = match current {
-            Some(i) => format!("{} {} of {}", if manga { "Ch." } else { "#" }, rows[i].number, self.reader_issues.len().max(rows.len())),
-            None => format!("{} chapters", rows.len()),
+            Some(i) => {
+                let (number, total) = (rows[i].number, self.reader_issues.len().max(rows.len()));
+                if manga {
+                    fl!("chapter-position-manga", number = number, total = total)
+                } else {
+                    fl!("chapter-position-comic", number = number, total = total)
+                }
+            }
+            None => fl!("chapter-count", count = rows.len()),
         };
 
         let mut col = widget::Column::new().spacing(0);
@@ -166,7 +173,7 @@ impl App {
                 .push(
                     widget::Column::new()
                         .width(Length::Fill)
-                        .push(widget::text::title4("Chapters"))
+                        .push(widget::text::title4(fl!("chapters")))
                         .push(widget::text::caption(if series.is_empty() { position } else { format!("{series}  ·  {position}") })),
                 )
                 .push(widget::button::icon(icon::from_name("window-close-symbolic")).on_press(Message::ToggleChapterSelect)),
@@ -210,13 +217,14 @@ impl App {
             // "Volume 3 · Chapter 17"; a chapter without a volume of its own
             // belongs to the one before it.
             let volume = row.volume.or(last_volume);
-            let number = format!("{} {}", if manga { "Chapter" } else { "#" }, row.number);
+            let number =
+                if manga { fl!("chapter-row-manga", number = row.number) } else { fl!("chapter-row-comic", number = row.number) };
             let heading = match volume {
-                Some(v) => format!("Volume {v}  ·  {number}"),
+                Some(v) => fl!("volume-heading", volume = v, chapter = number),
                 None => number,
             };
             last_volume = volume;
-            let mut facts = vec![format!("{} pages", row.pages)];
+            let mut facts = vec![fl!("page-count", count = row.pages)];
             if row.pages == 0 {
                 facts.clear();
             }
@@ -279,8 +287,12 @@ fn chapter_groups(rows: &[Row], manga: bool) -> Vec<(String, usize)> {
 
 /// [`chapter_groups`] on (number, volume) pairs, testable without widgets.
 fn group_numbers(rows: &[(usize, Option<u32>)], manga: bool) -> Vec<(String, usize)> {
-    let prefix = if manga { "Ch. " } else { "#" };
-    let range = |a: usize, b: usize| if a == b { format!("{prefix}{a}") } else { format!("{prefix}{a}–{b}") };
+    let range = |a: usize, b: usize| match (manga, a == b) {
+        (true, true) => fl!("range-one-manga", from = a),
+        (true, false) => fl!("range-many-manga", from = a, to = b),
+        (false, true) => fl!("range-one-comic", from = a),
+        (false, false) => fl!("range-many-comic", from = a, to = b),
+    };
     let with_volume = rows.iter().filter(|(_, v)| v.is_some()).count();
     if rows.len() > 1 && with_volume * 4 >= rows.len() * 3 {
         // Consecutive runs of the same volume; a chapter without one stays
@@ -300,7 +312,7 @@ fn group_numbers(rows: &[(usize, Option<u32>)], manga: bool) -> Vec<(String, usi
             .map(|(v, start, end)| {
                 let chapters = range(rows[start].0, rows[end].0);
                 let label = match v {
-                    Some(v) => format!("Volume {v}  ({chapters})"),
+                    Some(v) => fl!("volume-group", volume = v, chapters = chapters),
                     None => chapters,
                 };
                 (label, start)

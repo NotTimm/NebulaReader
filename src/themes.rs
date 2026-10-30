@@ -85,7 +85,7 @@ pub fn load(id: &str) -> Result<Colors, String> {
     }
     // Only a bare file name inside the themes folder.
     if Path::new(id).file_name().and_then(|n| n.to_str()) != Some(id) {
-        return Err("not a theme file name".into());
+        return Err(fl!("theme-bad-name"));
     }
     load_file(&dir().join(id))
 }
@@ -122,7 +122,7 @@ fn load_file(path: &Path) -> Result<Colors, String> {
         Kind::Kde => {
             let colors = crate::platform::look::parse_kde_colors(&text);
             if colors.window.is_none() && colors.accent.is_none() {
-                return Err("no colours found in this KDE colour scheme".into());
+                return Err(fl!("theme-no-colors"));
             }
             Ok(Colors::Kde(colors))
         }

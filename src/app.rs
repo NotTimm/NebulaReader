@@ -42,8 +42,41 @@ use book_view::{BookMsg, BookScroll};
 use jellyfin_view::{JfMsg, JfState, RemoteReading};
 use downloads::{DlMsg, Downloads};
 
-/// Dropdown labels for [`BgStyle::ALL`], kept in the same order.
-const BG_LABELS: [&str; 2] = ["Theme", "Black"];
+/// The modifier key named in hints: Cmd on a Mac, Ctrl elsewhere.
+const MODIFIER_KEY: &str = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
+
+/// Dropdown labels in the interface language. Dropdowns borrow their
+/// labels, so they live on the app and are rebuilt when the language
+/// changes; each list is in the order of the matching `ALL` array.
+struct Labels {
+    /// "Match system", then each language by its own name.
+    languages: Vec<String>,
+    look: Vec<String>,
+    corners: Vec<String>,
+    background: Vec<String>,
+    library_source: Vec<String>,
+    book_line_spacing: Vec<String>,
+    book_layout: Vec<String>,
+    book_width: Vec<String>,
+    book_theme: Vec<String>,
+}
+
+impl Labels {
+    fn new(languages: &[crate::i18n::Language]) -> Self {
+        Labels {
+            languages: std::iter::once(fl!("language-system")).chain(languages.iter().map(|l| l.name.clone())).collect(),
+            // The desktop styles are proper names.
+            look: vec![fl!("style-auto"), "COSMIC".into(), "KDE Breeze".into(), "Windows 11".into(), "GNOME Adwaita".into()],
+            corners: vec![fl!("corners-auto"), fl!("corners-round"), fl!("corners-slightly-round"), fl!("corners-square")],
+            background: vec![fl!("background-theme"), fl!("background-black")],
+            library_source: vec![fl!("source-all"), fl!("source-local"), "Jellyfin".into()],
+            book_line_spacing: vec![fl!("spacing-tight"), fl!("spacing-normal"), fl!("spacing-relaxed"), fl!("spacing-loose")],
+            book_layout: vec![fl!("layout-single"), fl!("layout-two"), fl!("layout-scroll")],
+            book_width: vec![fl!("width-narrow"), fl!("width-medium"), fl!("width-wide")],
+            book_theme: vec![fl!("theme-auto"), fl!("theme-paper"), fl!("theme-sepia"), fl!("theme-dark"), fl!("theme-night")],
+        }
+    }
+}
 
 // The viewer's zoom scale is a multiplier on top of the already-computed
 // fit-to-window size (ContentFit::Contain), so 1.0 *is* the fit-page view —
@@ -165,6 +198,8 @@ pub enum Message {
     /// Index into the Colors dropdown: 0 follows the system, then
     /// `App::themes`.
     SetTheme(usize),
+    /// Index into Settings → Language: 0 follows the system.
+    SetLanguage(usize),
     ImportTheme,
     ThemeFileSelected(Url),
     OpenThemesFolder,
@@ -259,6 +294,9 @@ pub struct App {
     /// Colour themes on offer, and the picked one's colours.
     themes: Vec<themes::Entry>,
     theme_labels: Vec<String>,
+    /// Translations on offer, and dropdown labels in the chosen one.
+    languages: Vec<crate::i18n::Language>,
+    labels: Labels,
     theme_colors: Option<themes::Colors>,
     theme_error: Option<String>,
     theater_mode: bool,
@@ -271,7 +309,7 @@ pub struct App {
     fit_width_leaving: bool,
     /// The brief note saying Fit to Width went on or off, and its number
     /// (so an older note's timer doesn't hide a newer one).
-    fit_note: Option<(&'static str, u64)>,
+    fit_note: Option<(String, u64)>,
     fit_note_counter: u64,
     /// Tells a mouse wheel from a touchpad scroll, for entering zoom.
     wheel: cosmic::iced::widget::image::viewer::WheelSource,
@@ -392,7 +430,7 @@ fn fullscreen_button<'a>(on: bool) -> Element<'a, Message> {
         widget::button::icon(icon::from_name("view-fullscreen-symbolic"))
             .selected(on)
             .on_press(Message::ToggleFullscreen),
-        if on { "Leave full screen (F or Esc)" } else { "Full screen (F)" },
+        if on { fl!("leave-full-screen") } else { fl!("full-screen") },
     )
 }
 
@@ -716,7 +754,7 @@ fn battery_glyph<'a>(b: crate::platform::status::Battery) -> Element<'a, Message
 
 fn comic_file_filter() -> FileFilter {
     const EXTENSIONS: [&str; 5] = ["cbz", "cbr", "zip", "rar", "epub"];
-    let mut filter = FileFilter::new("Comics & Books");
+    let mut filter = FileFilter::new(&fl!("file-filter-comics"));
     for ext in EXTENSIONS {
         #[cfg(target_os = "linux")]
         {
@@ -752,7 +790,7 @@ impl App {
     fn source_label(&self) -> Element<'_, Message> {
         let (label, online, hint) = self.jellyfin_source().unwrap_or_else(|| {
             let path = self.open_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            ("Local".to_string(), None, path)
+            (fl!("source-local"), None, path)
         });
         let mut content = widget::row::with_capacity(2).spacing(4).align_y(Alignment::Center).push(widget::text::caption(label));
         if let Some(online) = online {
@@ -816,7 +854,7 @@ impl App {
     /// Re-lists the colour themes (built-in plus the themes folder).
     fn refresh_themes(&mut self) {
         self.themes = themes::list();
-        self.theme_labels = std::iter::once("Match system".to_string())
+        self.theme_labels = std::iter::once(fl!("colors-system"))
             .chain(self.themes.iter().map(|t| t.name.clone()))
             .collect();
     }
@@ -1315,6 +1353,8 @@ impl Application for App {
             battery: None,
             themes: Vec::new(),
             theme_labels: Vec::new(),
+            languages: crate::i18n::available(),
+            labels: Labels::new(&crate::i18n::available()),
             theme_colors: settings.theme.as_deref().and_then(|id| themes::load(id).ok()),
             theme_error: None,
             theater_mode: settings.theater_mode,
@@ -1443,7 +1483,7 @@ impl Application for App {
                 self.build_settings_panel(),
                 Message::CloseContext,
             )
-            .title("Settings"),
+            .title(fl!("settings")),
             ContextPage::Info => cosmic::app::context_drawer::context_drawer(
                 if self.epub_book.is_some() {
                     self.build_epub_info_panel()
@@ -1452,17 +1492,17 @@ impl Application for App {
                 },
                 Message::CloseContext,
             )
-            .title("Details"),
+            .title(fl!("details")),
             ContextPage::Typography => cosmic::app::context_drawer::context_drawer(
                 self.build_typography_panel(),
                 Message::CloseContext,
             )
-            .title("Reading"),
+            .title(fl!("reading-panel")),
             ContextPage::Properties => cosmic::app::context_drawer::context_drawer(
                 self.build_properties_panel(),
                 Message::CloseContext,
             )
-            .title("Properties"),
+            .title(fl!("properties")),
         })
     }
 
@@ -1471,20 +1511,20 @@ impl Application for App {
             AppView::Reader if self.back_to_series => vec![
                 tip(
                     widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::GoToLibrary),
-                    "Back to series (Esc)",
+                    fl!("back-to-series"),
                 ),
                 self.source_label(),
             ],
             AppView::Reader => vec![
                 tip(
                     widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
-                    "Back to library (Esc)",
+                    fl!("back-to-library-esc"),
                 ),
                 self.source_label(),
             ],
             AppView::Series | AppView::Downloads => vec![tip(
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
-                "Back to library",
+                fl!("back-to-library"),
             )],
             // All / Local / Jellyfin, once the library has some of each.
             AppView::Library if self.has_local_and_remote() => vec![self.library_source_picker()],
@@ -1505,7 +1545,7 @@ impl Application for App {
             }
             AppView::Library => {
                 els.push(
-                    widget::search_input("Search library…", &self.library_search)
+                    widget::search_input(fl!("search-library"), &self.library_search)
                         .on_input(Message::LibrarySearchChanged)
                         .width(Length::Fixed(220.0))
                         .into(),
@@ -1515,16 +1555,16 @@ impl Application for App {
                     els.push(tip(
                         widget::button::icon(icon::from_name("folder-download-symbolic"))
                             .on_press(Message::Dl(DlMsg::OpenManager)),
-                        "Downloads",
+                        fl!("downloads"),
                     ));
                 }
                 els.push(
-                    widget::button::standard("Open File")
+                    widget::button::standard(fl!("open-file"))
                         .on_press(Message::OpenFile)
                         .into(),
                 );
                 els.push(
-                    widget::button::suggested("Add Library Folder")
+                    widget::button::suggested(fl!("add-library-folder"))
                         .on_press(Message::AddLibraryFolder)
                         .into(),
                 );
@@ -1539,38 +1579,38 @@ impl Application for App {
                 els.push(tip(
                     widget::button::icon(icon::from_name("go-previous-symbolic"))
                         .on_press(Message::Book(BookMsg::PrevChapter)),
-                    "Previous chapter",
+                    fl!("previous-chapter"),
                 ));
                 els.push(tip(
                     widget::text(format!("{} / {}", self.epub_chapter + 1, book.chapters.len())),
-                    "Chapter",
+                    fl!("chapter"),
                 ));
                 els.push(tip(
                     widget::button::icon(icon::from_name("go-next-symbolic"))
                         .on_press(Message::Book(BookMsg::NextChapter)),
-                    "Next chapter",
+                    fl!("next-chapter"),
                 ));
                 els.push(widget::divider::vertical::light().into());
                 els.push(tip(
                     widget::button::icon(icon::from_name("view-list-symbolic"))
                         .selected(self.show_chapter_select)
                         .on_press(Message::ToggleChapterSelect),
-                    "Contents (C)",
+                    fl!("contents-tip"),
                 ));
                 els.push(tip(
                     widget::button::standard("Aa").on_press(Message::Book(BookMsg::ToggleTypography)),
-                    "Text, layout and page settings (A)",
+                    fl!("typography-tip"),
                 ));
                 els.push(tip(
                     widget::button::icon(icon::from_name("dialog-information-symbolic"))
                         .on_press(Message::ToggleInfo),
-                    "Book details (I)",
+                    fl!("book-details-tip"),
                 ));
                 els.push(fullscreen_button(self.fullscreen));
                 els.push(tip(
                     widget::button::icon(icon::from_name("emblem-system-symbolic"))
                         .on_press(Message::ToggleSettings),
-                    "Settings (S)",
+                    fl!("settings-tip"),
                 ));
             }
             AppView::Reader => {
@@ -1580,7 +1620,7 @@ impl Application for App {
                         if self.chapters.len() == 1 {
                             format!("{} / {}", pg + 1, ch.page_count)
                         } else {
-                            format!("Ch.{}  ·  {} / {}", ch_idx + 1, pg + 1, ch.page_count)
+                            fl!("chapter-page-counter", chapter = ch_idx + 1, page = pg + 1, pages = ch.page_count)
                         }
                     } else {
                         format!("{} / {}", self.current_page + 1, self.sources.len())
@@ -1588,12 +1628,12 @@ impl Application for App {
 
                     els.push(tip(
                         widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::PrevPage),
-                        "Previous page (←)",
+                        fl!("previous-page"),
                     ));
-                    els.push(tip(widget::text(counter), "Page"));
+                    els.push(tip(widget::text(counter), fl!("page")));
                     els.push(tip(
                         widget::button::icon(icon::from_name("go-next-symbolic")).on_press(Message::NextPage),
-                        "Next page (→)",
+                        fl!("next-page"),
                     ));
                     els.push(widget::divider::vertical::light().into());
 
@@ -1603,36 +1643,34 @@ impl Application for App {
                             widget::button::icon(icon::from_name("view-list-symbolic"))
                                 .selected(self.show_chapter_select)
                                 .on_press(Message::ToggleChapterSelect),
-                            "Chapters (C)",
+                            fl!("chapters-tip"),
                         ));
                     }
                     els.push(tip(
                         widget::button::icon(icon::from_name("view-dual-symbolic"))
                             .selected(self.layout == Layout::Dual)
                             .on_press(Message::ToggleLayout),
-                        if self.layout == Layout::Dual { "Show one page (L)" } else { "Show two pages (L)" },
+                        if self.layout == Layout::Dual { fl!("show-one-page") } else { fl!("show-two-pages") },
                     ));
                     els.push(tip(
                         widget::button::icon(icon::from_name("zoom-in-symbolic"))
                             .selected(self.zoom_active)
                             .on_press(Message::ToggleZoom),
                         if self.zoom_active {
-                            "Stop zooming (M)"
-                        } else if cfg!(target_os = "macos") {
-                            "Zoom and pan (M, or scroll; Shift + scroll for fine steps, Cmd + scroll to move the page)"
+                            fl!("stop-zooming")
                         } else {
-                            "Zoom and pan (M, or scroll; Shift + scroll for fine steps, Ctrl + scroll to move the page)"
+                            fl!("zoom-tip", modifier = MODIFIER_KEY)
                         },
                     ));
                     els.push(tip(
                         widget::button::icon(library_view::fit_width_icon())
                             .selected(self.fit_width)
                             .on_press(Message::ToggleFitWidth),
-                        if self.fit_width { "Whole page (Space)" } else { "Fit to Width (Space)" },
+                        if self.fit_width { fl!("whole-page-tip") } else { fl!("fit-width-tip") },
                     ));
                     els.push(tip(
                         widget::button::icon(icon::from_name("edit-copy-symbolic")).on_press(Message::CopyPage),
-                        "Copy page image (P)",
+                        fl!("copy-page"),
                     ));
                     els.push(widget::divider::vertical::light().into());
                 }
@@ -1965,7 +2003,7 @@ impl App {
                         .spacing(12)
                         .align_x(Alignment::Center)
                         .push(widget::indeterminate_circular())
-                        .push(widget::text("Decoding page…")),
+                        .push(widget::text(fl!("decoding-page"))),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -1991,26 +2029,22 @@ impl App {
                     .spacing(12)
                     .align_x(Alignment::Center)
                     .push(widget::indeterminate_circular())
-                    .push(widget::text(if self.creating_index { "Creating index of CBR comic…" } else { "Loading comic…" }))
+                    .push(widget::text(if self.creating_index { fl!("creating-index") } else { fl!("loading-comic") }))
                     .into()
             } else {
                 widget::Column::new()
                     .spacing(12)
                     .align_x(Alignment::Center)
                     .push(icon::from_name("image-x-generic-symbolic").size(64))
-                    .push(widget::text::title3("Open a comic or book to start reading"))
-                    .push(widget::text(if cfg!(target_os = "macos") {
-                        "← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer, Cmd: move)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy"
-                    } else {
-                        "← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer, Ctrl: move)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy"
-                    }).size(12))
-                    .push(widget::text("You can also drag and drop a file or folder here.").size(12))
-                    .push(widget::button::suggested("Open Comic or Book").on_press(Message::OpenFile))
+                    .push(widget::text::title3(fl!("start-reading")))
+                    .push(widget::text(fl!("reader-keys", modifier = MODIFIER_KEY)).size(12))
+                    .push(widget::text(fl!("drop-hint")).size(12))
+                    .push(widget::button::suggested(fl!("open-comic-or-book")).on_press(Message::OpenFile))
                     .into()
             };
 
         // ── Backdrop (never tints the page itself) ────────────────────────────
-        let viewer_bg: Element<'_, Message> = match self.fit_note {
+        let viewer_bg: Element<'_, Message> = match &self.fit_note {
             Some((note, _)) if !self.sources.is_empty() => {
                 cosmic::iced::widget::stack![self.backdrop(viewer), fit_note(note)].into()
             }
@@ -2090,21 +2124,21 @@ impl App {
         download.into_iter().chain([
             tip(
                 widget::button::icon(icon::from_name("zoom-fit-best-symbolic")).on_press(Message::FitPage),
-                "Fit page to window",
+                fl!("fit-page"),
             ),
             tip(
                 widget::button::icon(icon::from_name("dialog-information-symbolic")).on_press(Message::ToggleInfo),
-                "Details (I)",
+                fl!("details-tip"),
             ),
             fullscreen_button(self.fullscreen),
             tip(
                 widget::button::icon(icon::from_name("emblem-system-symbolic")).on_press(Message::ToggleSettings),
-                "Settings (S)",
+                fl!("settings-tip"),
             ),
             widget::divider::vertical::light().into(),
             tip(
                 widget::button::icon(icon::from_name("document-open-symbolic")).on_press(Message::OpenFile),
-                "Open a file",
+                fl!("open-a-file"),
             ),
         ])
         .collect()
@@ -2114,20 +2148,31 @@ impl App {
         let s = &self.settings;
 
         let appearance = widget::settings::section()
-            .title("Appearance")
+            .title(fl!("appearance"))
             .add(widget::settings::item(
-                "Style",
+                fl!("language"),
                 widget::dropdown(
-                    &Look::LABELS[..],
+                    &self.labels.languages[..],
+                    Some(match &s.language {
+                        None => 0,
+                        Some(id) => self.languages.iter().position(|l| &l.id == id).map_or(0, |i| i + 1),
+                    }),
+                    Message::SetLanguage,
+                ),
+            ))
+            .add(widget::settings::item(
+                fl!("style"),
+                widget::dropdown(
+                    &self.labels.look[..],
                     Look::ALL.iter().position(|l| *l == s.look),
                     Message::SetLook,
                 ),
             ))
             .add_maybe((self.look().native_titlebar() != self.native_titlebar).then(|| {
-                widget::text::caption("The title bar changes the next time Nebula starts.")
+                widget::text::caption(fl!("title-bar-restart"))
             }))
             .add(widget::settings::item(
-                "Colors",
+                fl!("colors"),
                 widget::dropdown(
                     &self.theme_labels[..],
                     Some(match &s.theme {
@@ -2140,74 +2185,71 @@ impl App {
             .add(
                 widget::column::with_capacity(3)
                     .spacing(8)
-                    .push(widget::text::caption(
-                        "Add your own: COSMIC themes (.ron, exported from COSMIC Settings or from \
-                         cosmic-themes.org) and KDE color schemes (.colors).",
-                    ))
+                    .push(widget::text::caption(fl!("themes-hint")))
                     .push(
                         widget::row::with_capacity(2)
                             .spacing(8)
-                            .push(widget::button::standard("Import Theme…").on_press(Message::ImportTheme))
-                            .push(widget::button::standard("Open Themes Folder").on_press(Message::OpenThemesFolder)),
+                            .push(widget::button::standard(fl!("import-theme")).on_press(Message::ImportTheme))
+                            .push(widget::button::standard(fl!("open-themes-folder")).on_press(Message::OpenThemesFolder)),
                     )
-                    .push_maybe(self.theme_error.as_deref().map(|e| widget::text::caption(format!("Couldn't use that theme: {e}")))),
+                    .push_maybe(self.theme_error.as_deref().map(|e| widget::text::caption(fl!("theme-error", error = e)))),
             )
             // COSMIC Settings already sets roundness for the COSMIC style.
             .add_maybe((self.look() != Look::Cosmic).then(|| {
                 widget::settings::item(
-                    "Buttons",
+                    fl!("buttons"),
                     widget::dropdown(
-                        &Corners::LABELS[..],
+                        &self.labels.corners[..],
                         Corners::ALL.iter().position(|c| *c == s.corners),
                         Message::SetCorners,
                     ),
                 )
             }))
             .add(widget::settings::item(
-                "Background",
+                fl!("background"),
                 widget::dropdown(
-                    &BG_LABELS[..],
+                    &self.labels.background[..],
                     BgStyle::ALL.iter().position(|b| *b == s.background),
                     Message::SetBackground,
                 ),
             ))
             .add(widget::settings::item(
-                format!("Background opacity  ({:.0}%)", s.background_opacity * 100.0),
+                fl!("background-opacity", percent = format!("{:.0}", s.background_opacity * 100.0)),
                 widget::slider(0.0..=1.0, s.background_opacity, Message::SetBackgroundOpacity)
                     .step(0.05)
                     .width(Length::Fixed(180.0)),
             ))
             .add(widget::settings::item(
-                "Theater mode",
+                fl!("theater-mode"),
                 widget::toggler(self.theater_mode).on_toggle(|_| Message::ToggleTheater),
             ));
 
         let reading = widget::settings::section()
-            .title("Reading")
+            .title(fl!("reading"))
             .add(widget::settings::item(
-                "Two-page spread",
+                fl!("two-page-spread"),
                 widget::toggler(self.layout == Layout::Dual)
                     .on_toggle(|_| Message::ToggleLayout),
             ))
             .add(widget::settings::item(
-                "Clock and battery in full screen",
+                fl!("fullscreen-status"),
                 widget::toggler(s.fullscreen_status).on_toggle(Message::SetFullscreenStatus),
             ));
 
         let has_key = comicvine::api_key().is_some();
         let metadata_section = widget::settings::section()
-            .title("Metadata")
+            .title(fl!("metadata"))
             .add(widget::settings::item(
-                "Look up series online (AniList, ComicVine)",
+                fl!("fetch-metadata"),
                 widget::toggler(s.fetch_metadata).on_toggle(Message::SetFetchMetadata),
             ))
             .add(
                 widget::Column::new()
                     .spacing(6)
                     .push(widget::text::body(if has_key {
-                        "ComicVine API key: set ✓"
+                        fl!("comicvine-key-set")
                     } else {
-                        "ComicVine API key: not set — needed for Western comics (free at comicvine.gamespot.com/api)"
+                        fl!("comicvine-key-unset")
                     }))
                     .push(
                         widget::Row::new()
@@ -2215,7 +2257,7 @@ impl App {
                             .align_y(Alignment::Center)
                             .push(
                                 widget::secure_input(
-                                    if has_key { "Replace key…" } else { "Paste API key…" },
+                                    if has_key { fl!("replace-key") } else { fl!("paste-key") },
                                     &self.cv_key_input,
                                     None,
                                     true,
@@ -2224,27 +2266,27 @@ impl App {
                                 .on_submit(|_| Message::SaveComicVineKey)
                                 .width(Length::Fill),
                             )
-                            .push(widget::button::standard("Save").on_press(Message::SaveComicVineKey)),
+                            .push(widget::button::standard(fl!("save")).on_press(Message::SaveComicVineKey)),
                     ),
             )
             .add(
                 widget::Row::new()
                     .spacing(8)
-                    .push(widget::button::standard("Rescan Library").on_press(Message::RescanLibrary))
-                    .push(widget::button::standard("Refresh All Metadata").on_press(Message::RefreshAllMetadata)),
+                    .push(widget::button::standard(fl!("rescan-library")).on_press(Message::RescanLibrary))
+                    .push(widget::button::standard(fl!("refresh-metadata")).on_press(Message::RefreshAllMetadata)),
             );
 
-        let mut library_section = widget::settings::section().title("Library folders");
+        let mut library_section = widget::settings::section().title(fl!("library-folders"));
         if self.library_dirs.is_empty() {
             library_section = library_section.add(
-                widget::text("No library folders yet. Add one to have its comics scanned in automatically.")
+                widget::text(fl!("no-library-folders"))
                     .size(12),
             );
         } else {
             for dir in &self.library_dirs {
                 let mut name = dir.to_string_lossy().into_owned();
                 if self.missing_roots.contains(dir) {
-                    name.push_str("  (not found — hidden)");
+                    name = fl!("folder-not-found", folder = name);
                 }
                 library_section = library_section.add(
                     widget::Row::new()
@@ -2263,17 +2305,17 @@ impl App {
             .spacing(8)
             .align_y(Alignment::Center)
             .push(
-                widget::text_input("Type or paste a folder path…", &self.library_path_input)
+                widget::text_input(fl!("folder-path-placeholder"), &self.library_path_input)
                     .on_input(Message::LibraryPathInputChanged)
                     .on_submit(|_| Message::LibraryPathInputSubmitted)
                     .width(Length::Fill),
             )
             .push(
-                widget::button::standard("Add")
+                widget::button::standard(fl!("add"))
                     .on_press(Message::LibraryPathInputSubmitted),
             )
             .push(
-                widget::button::standard("Browse…")
+                widget::button::standard(fl!("browse"))
                     .on_press(Message::AddLibraryFolder),
             );
 
@@ -2299,25 +2341,25 @@ impl App {
         use crate::updates::{self, Install};
         let install = Install::detect();
         let version = match updates::build_commit() {
-            Some(commit) => format!("Version {} (build {commit})", updates::VERSION),
-            None => format!("Version {}", updates::VERSION),
+            Some(commit) => fl!("version-build", version = updates::VERSION, commit = commit),
+            None => fl!("version", version = updates::VERSION),
         };
 
         let mut section = widget::settings::section()
-            .title("About")
+            .title(fl!("about"))
             .add(
                 widget::column::with_capacity(3)
                     .spacing(2)
                     .push(widget::text::title4("Nebula Reader"))
                     .push(widget::text::body(version))
-                    .push(widget::text::caption(format!("Made by Tim Singel  ·  {}", install.label()))),
+                    .push(widget::text::caption(fl!("made-by", install = install.label()))),
             )
             .add(
                 widget::row::with_capacity(2)
                     .spacing(8)
                     .push(widget::button::standard("GitHub").on_press(Message::OpenUrl(updates::REPO_URL.into())))
                     .push(
-                        widget::button::standard("Release notes")
+                        widget::button::standard(fl!("release-notes"))
                             .on_press(Message::OpenUrl(updates::RELEASES_URL.into())),
                     ),
             );
@@ -2327,15 +2369,15 @@ impl App {
         }
 
         let status: Element<'_, Message> = match &self.update {
-            UpdateStatus::NotChecked => widget::text::body("Not checked yet").into(),
-            UpdateStatus::Checking => widget::text::body("Checking…").into(),
-            UpdateStatus::UpToDate => widget::text::body("You have the latest version").into(),
-            UpdateStatus::Failed(e) => widget::text::body(format!("Couldn't check: {e}")).into(),
+            UpdateStatus::NotChecked => widget::text::body(fl!("update-not-checked")).into(),
+            UpdateStatus::Checking => widget::text::body(fl!("update-checking")).into(),
+            UpdateStatus::UpToDate => widget::text::body(fl!("update-up-to-date")).into(),
+            UpdateStatus::Failed(e) => widget::text::body(fl!("update-check-failed", error = e)).into(),
             UpdateStatus::Available(release) => {
                 let (msg, action) = self.update_message(release);
                 widget::column::with_capacity(4)
                     .spacing(6)
-                    .push(widget::text::heading(format!("Version {} is available", release.version)))
+                    .push(widget::text::heading(fl!("update-available-heading", version = release.version.as_str())))
                     .push_maybe((!matches!(self.update_job, UpdateJob::Idle)).then(|| widget::text::body(msg)))
                     .push(action)
                     .push(widget::text::caption(install.how_to_update()))
@@ -2349,13 +2391,13 @@ impl App {
                     .align_y(Alignment::Center)
                     .push(widget::container(status).width(Length::Fill))
                     .push(
-                        widget::button::standard("Check now").on_press_maybe(
+                        widget::button::standard(fl!("check-now")).on_press_maybe(
                             (!matches!(self.update, UpdateStatus::Checking)).then_some(Message::CheckForUpdates),
                         ),
                     ),
             )
             .add(widget::settings::item(
-                "Check for updates on start",
+                fl!("check-on-start"),
                 widget::toggler(self.settings.check_for_updates).on_toggle(Message::SetCheckForUpdates),
             ));
         section.into()
@@ -2370,29 +2412,29 @@ impl App {
             let heading = match issue {
                 Some(i) if !i.number.is_empty() => {
                     let h = i.heading();
-                    if h.is_empty() { format!("#{}", i.number) } else { format!("#{} — {h}", i.number) }
+                    if h.is_empty() { fl!("issue-number", number = i.number.as_str()) } else { fl!("issue-heading", number = i.number.as_str(), title = h) }
                 }
-                _ if self.chapters.len() > 1 => format!("Chapter {} — {}", ch_idx + 1, ch.name),
+                _ if self.chapters.len() > 1 => fl!("chapter-heading", chapter = ch_idx + 1, name = ch.name.as_str()),
                 _ => ch.name.clone(),
             };
             col = col.push(widget::text::title4(heading));
-            col = col.push(widget::text::body(format!("Page {} of {}", pg + 1, ch.page_count)));
+            col = col.push(widget::text::body(fl!("page-of", page = pg + 1, pages = ch.page_count)));
             if let Some(i) = issue {
                 if !i.date().is_empty() {
-                    col = col.push(widget::text::caption(format!("Released {}", library::pretty_date(i.date()))));
+                    col = col.push(widget::text::caption(fl!("released", date = library::pretty_date(i.date()))));
                 }
                 for line in i.creators.lines() {
                     col = col.push(widget::text::caption(line.to_string()));
                 }
                 if self.chapters.len() > 1 {
-                    col = col.push(widget::text::caption(format!(
-                        "Issue {} of {} in this series",
-                        ch_idx + 1,
-                        self.chapters.len()
+                    col = col.push(widget::text::caption(fl!(
+                        "issue-of-series",
+                        issue = ch_idx + 1,
+                        issues = self.chapters.len()
                     )));
                 }
                 if !i.url.is_empty() {
-                    col = col.push(widget::button::link("View issue page").on_press(Message::OpenUrl(i.url.clone())));
+                    col = col.push(widget::button::link(fl!("view-issue-page")).on_press(Message::OpenUrl(i.url.clone())));
                 }
             }
             col = col.push(widget::divider::horizontal::light());
@@ -2408,17 +2450,17 @@ impl App {
                 facts.push(y.to_string());
             }
             if e.issue_count > 1 {
-                facts.push(format!("{}/{} read", e.issues_read, e.issue_count));
+                facts.push(fl!("issues-read", read = e.issues_read, total = e.issue_count));
             }
             if !facts.is_empty() {
                 col = col.push(widget::text::body(facts.join(" · ")));
             }
             let source = match e.source.as_str() {
-                "comicvine" => "Source: ComicVine".to_string(),
-                "anilist" => "Source: AniList".to_string(),
-                _ if e.meta_status == "nomatch" => "No online match".to_string(),
+                "comicvine" => fl!("source-comicvine"),
+                "anilist" => fl!("source-anilist"),
+                _ if e.meta_status == "nomatch" => fl!("no-online-match"),
                 _ if e.meta_status.starts_with("error") => e.meta_status.clone(),
-                _ => "Not looked up yet".to_string(),
+                _ => fl!("not-looked-up"),
             };
             col = col.push(widget::text::caption(source));
             if !e.genres.is_empty() {
@@ -2434,21 +2476,21 @@ impl App {
         if let Some(info) = self.comic_info.as_ref().filter(|i| !i.is_empty()) {
             col = col.push(widget::text::title4("ComicInfo.xml"));
             for (label, value) in [
-                ("Series", info.series.clone()),
-                ("Number", info.number.clone()),
-                ("Volume", info.volume.clone()),
-                ("Year", info.year.map(|y| y.to_string())),
-                ("Publisher", info.publisher.clone()),
-                ("Writer", info.writer.clone()),
-                ("Artist", info.penciller.clone()),
-                ("Inker", info.inker.clone()),
-                ("Colorist", info.colorist.clone()),
-                ("Letterer", info.letterer.clone()),
-                ("Cover", info.cover_artist.clone()),
-                ("Genre", info.genre.clone()),
+                (fl!("ci-series"), info.series.clone()),
+                (fl!("ci-number"), info.number.clone()),
+                (fl!("ci-volume"), info.volume.clone()),
+                (fl!("ci-year"), info.year.map(|y| y.to_string())),
+                (fl!("ci-publisher"), info.publisher.clone()),
+                (fl!("ci-writer"), info.writer.clone()),
+                (fl!("ci-artist"), info.penciller.clone()),
+                (fl!("ci-inker"), info.inker.clone()),
+                (fl!("ci-colorist"), info.colorist.clone()),
+                (fl!("ci-letterer"), info.letterer.clone()),
+                (fl!("ci-cover"), info.cover_artist.clone()),
+                (fl!("ci-genre"), info.genre.clone()),
             ] {
                 if let Some(v) = value {
-                    col = col.push(widget::text::caption(format!("{label}: {v}")));
+                    col = col.push(widget::text::caption(fl!("ci-field", label = label, value = v)));
                 }
             }
             if let Some(summary) = &info.summary {
@@ -2462,13 +2504,13 @@ impl App {
             let file = ch.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let parsed = naming::parse_issue(&file);
             let clean = naming::series_name_from_issue(&file);
-            col = col.push(widget::text::heading("Name parsing"));
+            col = col.push(widget::text::heading(fl!("name-parsing")));
             col = col.push(widget::text::caption(file));
-            col = col.push(widget::text::caption(format!(
-                "Series “{}” · issue {} · year {}",
-                clean.search,
-                parsed.number.as_deref().unwrap_or("—"),
-                clean.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into()),
+            col = col.push(widget::text::caption(fl!(
+                "name-parsed",
+                series = clean.search.as_str(),
+                issue = parsed.number.as_deref().unwrap_or("—"),
+                year = clean.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into())
             )));
         }
 
@@ -2513,8 +2555,8 @@ impl App {
         if self.just_updated {
             banners.push(notice_banner(
                 "emblem-ok-symbolic",
-                format!("Nebula updated to {}.", updates::VERSION),
-                widget::button::standard("What's new")
+                fl!("updated-banner", version = updates::VERSION),
+                widget::button::standard(fl!("whats-new"))
                     .on_press(Message::OpenUrl(format!("{}/tag/v{}", updates::RELEASES_URL, updates::VERSION))),
                 Some(Message::DismissUpdatedBanner),
             ));
@@ -2529,37 +2571,41 @@ impl App {
         let install = crate::updates::Install::detect();
         let in_app = crate::updater::Plan::for_release(install, release).is_some();
         let release_page = || -> Element<'_, Message> {
-            widget::button::standard("Release page").on_press(Message::OpenUrl(release.url.clone())).into()
+            widget::button::standard(fl!("release-page")).on_press(Message::OpenUrl(release.url.clone())).into()
         };
         match &self.update_job {
             UpdateJob::Idle if in_app => (
-                format!("Nebula {} is available.", release.version),
-                widget::button::suggested("Update now").on_press(Message::UpdateNow).into(),
+                fl!("update-available", version = release.version.as_str()),
+                widget::button::suggested(fl!("update-now")).on_press(Message::UpdateNow).into(),
             ),
             UpdateJob::Idle => {
-                (format!("Nebula {} is available. {}", release.version, install.how_to_update()), release_page())
+                (fl!("update-available-how", version = release.version.as_str(), how = install.how_to_update()), release_page())
             }
             UpdateJob::Downloading { done, total } => {
                 let msg = match total {
-                    Some(total) if *total > 0 => format!(
-                        "Downloading Nebula {}… {}%",
-                        release.version,
-                        done * 100 / total
+                    Some(total) if *total > 0 => fl!(
+                        "update-downloading-percent",
+                        version = release.version.as_str(),
+                        percent = done * 100 / total
                     ),
-                    _ => format!("Downloading Nebula {}… {:.1} MB", release.version, *done as f64 / 1e6),
+                    _ => fl!(
+                        "update-downloading-mb",
+                        version = release.version.as_str(),
+                        mb = format!("{:.1}", *done as f64 / 1e6)
+                    ),
                 };
                 let fraction = total.filter(|t| *t > 0).map_or(0.0, |t| *done as f32 / t as f32);
                 (msg, widget::container(library_view::progress_bar(fraction)).width(Length::Fixed(140.0)).into())
             }
             UpdateJob::Ready(_) => (
-                format!("Nebula {} is ready. Restart Nebula to finish updating.", release.version),
-                widget::button::suggested("Restart now").on_press(Message::RestartToUpdate).into(),
+                fl!("update-ready", version = release.version.as_str()),
+                widget::button::suggested(fl!("restart-now")).on_press(Message::RestartToUpdate).into(),
             ),
             UpdateJob::Failed(e) => (
-                format!("Couldn't update: {e}"),
+                fl!("update-failed", error = e.as_str()),
                 widget::row::with_capacity(2)
                     .spacing(8)
-                    .push(widget::button::standard("Try again").on_press(Message::UpdateNow))
+                    .push(widget::button::standard(fl!("try-again")).on_press(Message::UpdateNow))
                     .push(release_page())
                     .into(),
             ),
@@ -2649,7 +2695,7 @@ impl App {
                 return cosmic::task::future(async move {
                     let filter = comic_file_filter();
                     let dialog = file_chooser::open::Dialog::new()
-                        .title("Open Comic or Book").filter(filter);
+                        .title(fl!("open-comic-or-book")).filter(filter);
                     match dialog.open_file().await {
                         Ok(r) => Message::PathSelected(r.url().to_owned()),
                         Err(file_chooser::Error::Cancelled) => Message::Cancelled,
@@ -2672,12 +2718,12 @@ impl App {
                     "file" => match url.to_file_path() {
                         Ok(p) => p,
                         Err(()) => {
-                            self.error = Some(format!("invalid file path: {url}"));
+                            self.error = Some(fl!("invalid-file-path", url = url.to_string()));
                             return Task::none();
                         }
                     },
                     other => {
-                        self.error = Some(format!("unsupported scheme: {other}"));
+                        self.error = Some(fl!("unsupported-scheme", scheme = other));
                         return Task::none();
                     }
                 };
@@ -3068,12 +3114,12 @@ impl App {
                     "file" => match url.to_file_path() {
                         Ok(p) => p,
                         Err(()) => {
-                            self.error = Some(format!("invalid folder path: {url}"));
+                            self.error = Some(fl!("invalid-folder-path", url = url.to_string()));
                             return Task::none();
                         }
                     },
                     other => {
-                        self.error = Some(format!("unsupported scheme: {other}"));
+                        self.error = Some(fl!("unsupported-scheme", scheme = other));
                         return Task::none();
                     }
                 };
@@ -3089,7 +3135,7 @@ impl App {
                 }
                 let path = PathBuf::from(shellexpand_home(&text));
                 if !path.is_dir() {
-                    self.error = Some(format!("not a folder: {}", path.display()));
+                    self.error = Some(fl!("not-a-folder", path = path.display().to_string()));
                     return Task::none();
                 }
                 self.library_path_input.clear();
@@ -3226,9 +3272,18 @@ impl App {
                 let id = idx.checked_sub(1).and_then(|i| self.themes.get(i)).map(|t| t.id.clone());
                 return self.select_theme(id);
             }
+            Message::SetLanguage(idx) => {
+                let id = idx.checked_sub(1).and_then(|i| self.languages.get(i)).map(|l| l.id.clone());
+                crate::i18n::select(id.as_deref());
+                self.settings.language = id;
+                self.settings.save();
+                // Everything else is translated as it's drawn.
+                self.labels = Labels::new(&self.languages);
+                self.refresh_themes();
+            }
             Message::ImportTheme => {
                 return cosmic::task::future(async move {
-                    let mut filter = FileFilter::new("COSMIC themes and KDE colour schemes");
+                    let mut filter = FileFilter::new(&fl!("file-filter-themes"));
                     for ext in ["ron", "colors"] {
                         #[cfg(target_os = "linux")]
                         {
@@ -3248,7 +3303,7 @@ impl App {
                 });
             }
             Message::ThemeFileSelected(url) => {
-                let imported = url.to_file_path().map_err(|()| "not a local file".to_string()).and_then(|p| themes::import(&p));
+                let imported = url.to_file_path().map_err(|()| fl!("not-a-local-file")).and_then(|p| themes::import(&p));
                 match imported {
                     Ok(id) => {
                         self.refresh_themes();
@@ -3435,7 +3490,7 @@ impl App {
                 self.fit_width = !self.fit_width;
                 self.fit_note_counter += 1;
                 let note = self.fit_note_counter;
-                self.fit_note = Some((if self.fit_width { "Fit to Width" } else { "Whole Page" }, note));
+                self.fit_note = Some((if self.fit_width { fl!("fit-width-note") } else { fl!("whole-page-note") }, note));
                 let mut tasks = vec![cosmic::task::future(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
                     Message::HideFitNote(note)
@@ -3453,7 +3508,7 @@ impl App {
             }
             Message::FitWidthEased => self.fit_width_leaving = false,
             Message::HideFitNote(note) => {
-                if self.fit_note.is_some_and(|(_, n)| n == note) {
+                if self.fit_note.as_ref().is_some_and(|(_, n)| *n == note) {
                     self.fit_note = None;
                 }
             }
@@ -3593,7 +3648,7 @@ impl App {
 
 /// The brief note at the bottom of the page saying Fit to Width went on
 /// or off.
-fn fit_note(note: &'static str) -> Element<'static, Message> {
+fn fit_note(note: &str) -> Element<'_, Message> {
     widget::container(
         widget::container(widget::text(note).size(13))
             .padding([6, 14])

@@ -90,23 +90,18 @@ impl Install {
     }
 
     /// One line on how to get a newer version for this install.
-    pub fn how_to_update(self) -> &'static str {
+    pub fn how_to_update(self) -> String {
         match self {
-            Install::Flatpak => {
-                "Installed from Flathub: your software center (or `flatpak update`) brings it in. \
-                 Installed from a .flatpak file: download the new one from the release page."
-            }
-            Install::AppImage => "Download the new AppImage from the release page and replace this one.",
-            Install::Rpm => "Download the new .rpm from the release page and install it with `sudo dnf install ./nebula-reader-*.rpm`.",
-            Install::Deb => "Download the new .deb from the release page and install it with `sudo apt install ./nebula-reader_*.deb`.",
-            Install::Distro => "Your system's package manager brings in new versions (`sudo dnf upgrade` on Fedora).",
-            Install::Source => "Run ./install.sh again in your checkout; it pulls the latest code and rebuilds.",
-            Install::WindowsInstaller => {
-                "Run `winget upgrade NotTimm.NebulaReader`, or download and run the new installer from the release page."
-            }
-            Install::WindowsPortable => "Download the new .zip from the release page and replace this folder.",
-            Install::MacApp => "Download the new .dmg from the release page and drag Nebula Reader into Applications again.",
-            Install::Unknown => "Get the new version from the release page.",
+            Install::Flatpak => fl!("how-flatpak"),
+            Install::AppImage => fl!("how-appimage"),
+            Install::Rpm => fl!("how-rpm"),
+            Install::Deb => fl!("how-deb"),
+            Install::Distro => fl!("how-distro"),
+            Install::Source => fl!("how-source"),
+            Install::WindowsInstaller => fl!("how-windows-installer"),
+            Install::WindowsPortable => fl!("how-windows-portable"),
+            Install::MacApp => fl!("how-mac"),
+            Install::Unknown => fl!("how-unknown"),
         }
     }
 
@@ -116,18 +111,18 @@ impl Install {
         self != Install::Distro
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Install::Flatpak => "Flatpak",
-            Install::AppImage => "AppImage",
-            Install::Rpm => "RPM package",
-            Install::Deb => "Debian package",
-            Install::Distro => distro().unwrap_or("Distribution package"),
-            Install::Source => "Built from source",
-            Install::WindowsInstaller => "Windows installer",
-            Install::WindowsPortable => "Windows (portable)",
-            Install::MacApp => "macOS app",
-            Install::Unknown => "Unknown",
+            Install::Flatpak => "Flatpak".into(),
+            Install::AppImage => "AppImage".into(),
+            Install::Rpm => fl!("install-rpm"),
+            Install::Deb => fl!("install-deb"),
+            Install::Distro => distro().map_or_else(|| fl!("install-distro"), str::to_string),
+            Install::Source => fl!("install-source"),
+            Install::WindowsInstaller => fl!("install-windows-installer"),
+            Install::WindowsPortable => fl!("install-windows-portable"),
+            Install::MacApp => fl!("install-mac"),
+            Install::Unknown => fl!("install-unknown"),
         }
     }
 }
@@ -176,9 +171,9 @@ pub async fn check() -> Result<Option<Release>, String> {
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("couldn't reach GitHub: {e}"))?;
+        .map_err(|e| fl!("github-unreachable", error = e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(format!("GitHub answered HTTP {}", resp.status()));
+        return Err(fl!("github-http", status = resp.status().to_string()));
     }
     let release: GhRelease = resp.json().await.map_err(|e| e.to_string())?;
     let version = release.tag_name.trim_start_matches('v').to_string();

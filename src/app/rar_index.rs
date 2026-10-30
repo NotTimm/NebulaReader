@@ -163,12 +163,9 @@ impl App {
     pub(super) fn index_mark(&self, issue: &str) -> Option<Element<'_, Message>> {
         let solid = *self.indexed.get(issue)?;
         let (name, hint) = if solid {
-            (
-                "package-x-generic-symbolic",
-                "Packed as one block (solid): downloaded whole when you read it",
-            )
+            ("package-x-generic-symbolic", fl!("index-solid"))
         } else {
-            ("emblem-documents-symbolic", "Page index built: opens right away and streams page by page")
+            ("emblem-documents-symbolic", fl!("index-built"))
         };
         Some(
             widget::tooltip(
@@ -194,7 +191,7 @@ impl App {
                 let downloaded = self.dl.files();
                 let keys: Vec<String> = keys.into_iter().filter(|k| self.needs_index(k, &downloaded)).collect();
                 if keys.is_empty() {
-                    self.index_note = Some("Those chapters already have their page index.".into());
+                    self.index_note = Some(fl!("index-already-built"));
                     return self.refresh_unindexed();
                 }
                 match self.indexing.as_mut() {
@@ -282,21 +279,17 @@ impl App {
         let Some(job) = self.indexing.take() else { return Task::none() };
         let built = job.done - job.failed;
         let mut note = if job.stopped {
-            format!("Stopped after {built} of {} page indexes.", job.total)
+            fl!("index-stopped", built = built, total = job.total)
         } else if built == 1 {
-            "Page index built.".to_string()
+            fl!("index-built-one")
         } else {
-            format!("Built {built} page indexes.")
+            fl!("index-built-many", count = built)
         };
         if job.solid > 0 {
-            note.push_str(&if job.solid == 1 {
-                " 1 chapter is packed as one block, so it's fetched whole when you read it.".to_string()
-            } else {
-                format!(" {} chapters are packed as one block, so they're fetched whole when you read them.", job.solid)
-            });
+            note = format!("{note} {}", fl!("index-solid-count", count = job.solid));
         }
         if job.failed > 0 {
-            note.push_str(&format!(" {} couldn't be read from the server.", job.failed));
+            note = format!("{note} {}", fl!("index-failed", count = job.failed));
         }
         self.index_note = Some(note);
         self.refresh_unindexed()
@@ -311,12 +304,12 @@ impl App {
                     .align_y(Alignment::Center)
                     .push(widget::indeterminate_circular().size(14.0).bar_height(2.0))
                     .push(widget::text::caption(if job.total == 1 {
-                        "Creating index of CBR comic…".to_string()
+                        fl!("creating-index")
                     } else {
-                        format!("Creating indexes of CBR comics… {} of {}", (job.done + 1).min(job.total), job.total)
+                        fl!("creating-indexes", done = (job.done + 1).min(job.total), total = job.total)
                     }))
                     .push_maybe(
-                        (!job.stopped).then(|| widget::button::link("Stop").on_press(Message::Index(IdxMsg::Stop))),
+                        (!job.stopped).then(|| widget::button::link(fl!("stop")).on_press(Message::Index(IdxMsg::Stop))),
                     )
                     .into(),
             );

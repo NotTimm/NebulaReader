@@ -45,7 +45,6 @@ pub enum BookTheme {
 impl BookTheme {
     pub const ALL: [BookTheme; 5] =
         [BookTheme::Auto, BookTheme::Paper, BookTheme::Sepia, BookTheme::Dark, BookTheme::Night];
-    pub const LABELS: [&'static str; 5] = ["Auto", "Paper", "Sepia", "Dark", "Night"];
 }
 
 /// Which books the library shows when it has both local and Jellyfin ones.
@@ -59,7 +58,6 @@ pub enum LibrarySource {
 
 impl LibrarySource {
     pub const ALL: [LibrarySource; 3] = [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin];
-    pub const LABELS: [&'static str; 3] = ["All libraries", "Local", "Jellyfin"];
 }
 
 /// How a book's chapter is laid out on screen.
@@ -76,7 +74,6 @@ pub enum BookLayout {
 
 impl BookLayout {
     pub const ALL: [BookLayout; 3] = [BookLayout::Page, BookLayout::TwoPages, BookLayout::Scroll];
-    pub const LABELS: [&'static str; 3] = ["Single page", "Two pages", "Scroll"];
 }
 
 /// Text column width, as a reading measure (characters per line).
@@ -89,7 +86,6 @@ pub enum BookWidth {
 
 impl BookWidth {
     pub const ALL: [BookWidth; 3] = [BookWidth::Narrow, BookWidth::Medium, BookWidth::Wide];
-    pub const LABELS: [&'static str; 3] = ["Narrow", "Medium", "Wide"];
 
     /// Column width in ems. Average Latin glyphs are ~0.5em wide, so
     /// Medium (34em) lands near the classic ~66 characters per line.
@@ -123,7 +119,6 @@ impl BookSettings {
     pub const MIN_SIZE: u16 = 12;
     pub const MAX_SIZE: u16 = 40;
     pub const LINE_SPACINGS: [f32; 4] = [1.3, 1.5, 1.7, 1.9];
-    pub const LINE_LABELS: [&'static str; 4] = ["Tight", "Normal", "Relaxed", "Loose"];
 }
 
 impl Default for BookSettings {
@@ -174,6 +169,9 @@ pub struct Settings {
     pub last_version: Option<String>,
     /// A newer release whose banner was closed; a later one shows again.
     pub dismissed_update: Option<String>,
+    /// Interface language (an `i18n/` folder name); `None` follows the
+    /// system.
+    pub language: Option<String>,
 }
 
 impl Default for Settings {
@@ -196,6 +194,7 @@ impl Default for Settings {
             download_dir: None,
             last_version: None,
             dismissed_update: None,
+            language: None,
         }
     }
 }

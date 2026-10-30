@@ -1,6 +1,9 @@
 // No console window behind the app on Windows release builds.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+// First, so `fl!` is in scope for every module after it.
+#[macro_use]
+mod i18n;
 mod app;
 mod comic;
 mod comicinfo;
@@ -36,6 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Take on the host desktop's look (Breeze on KDE, Fluent on Windows...).
     let desktop = platform::Desktop::detect();
     let saved = settings::Settings::load();
+    // The interface language: the one picked in Settings, or the system's.
+    i18n::select(saved.language.as_deref());
     let look = saved.look.resolve(desktop);
     platform::look::init(desktop);
     log::info!("desktop {desktop:?}, look {look:?}");

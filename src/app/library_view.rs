@@ -58,28 +58,28 @@ fn card_subtitle(e: &SeriesEntry) -> String {
     if e.is_epub {
         // The author, like a bookshop label; "Book" when unknown.
         let author = e.creators.lines().next().and_then(|l| l.split_once(": ")).map(|(_, names)| names);
-        let what = author.unwrap_or("Book");
-        return if e.has_progress() { format!("{what} · ch. {}", e.last_read_chapter + 1) } else { what.to_string() };
+        let what = author.map(str::to_string).unwrap_or_else(|| fl!("book"));
+        return if e.has_progress() { fl!("book-chapter", what = what.as_str(), chapter = e.last_read_chapter + 1) } else { what };
     }
     if e.issue_count > 1 {
         if e.is_finished() {
-            return format!("{} issues · finished", e.issue_count);
+            return fl!("issues-finished", count = e.issue_count);
         }
         if e.issues_read > 0 {
-            return format!("{}/{} read", e.issues_read, e.issue_count);
+            return fl!("issues-read", read = e.issues_read, total = e.issue_count);
         }
-        return format!("{} issues", e.issue_count);
+        return fl!("issue-count", count = e.issue_count);
     }
     if e.is_finished() {
-        return "Finished".into();
+        return fl!("finished");
     }
-    if e.total_pages > 0 { format!("{} pages", e.total_pages) } else { String::new() }
+    if e.total_pages > 0 { fl!("page-count", count = e.total_pages) } else { String::new() }
 }
 
 /// "Continue" line: which issue you're on and how far.
 fn continue_label(e: &SeriesEntry) -> String {
     if e.is_epub {
-        return format!("Chapter {}", e.last_read_chapter + 1);
+        return fl!("chapter-number", chapter = e.last_read_chapter + 1);
     }
     if e.issue_count > 1 && !e.current_issue_label.is_empty() {
         let n = &e.current_issue_label;
@@ -88,7 +88,7 @@ fn continue_label(e: &SeriesEntry) -> String {
         if e.current_issue_fraction <= 0.0 {
             return label;
         }
-        return format!("{label} · {:.0}%", e.current_issue_fraction * 100.0);
+        return fl!("issue-progress", label = label, percent = format!("{:.0}", e.current_issue_fraction * 100.0));
     }
     format!("{:.0}%", e.progress_fraction() * 100.0)
 }
@@ -99,7 +99,7 @@ impl App {
     pub(super) fn library_source_picker(&self) -> Element<'_, Message> {
         let current = self.settings.library_source;
         let label = |src: LibrarySource| {
-            LibrarySource::ALL.iter().position(|s| *s == src).map_or("", |i| LibrarySource::LABELS[i])
+            LibrarySource::ALL.iter().position(|s| *s == src).map_or("", |i| self.labels.library_source[i].as_str())
         };
 
         let pill = widget::button::custom(
@@ -124,7 +124,7 @@ impl App {
                     .spacing(10)
                     .align_y(Alignment::Center)
                     .push(widget::icon(source_icon(src)).size(16))
-                    .push(widget::text::body(LibrarySource::LABELS[i]).width(Length::Fill));
+                    .push(widget::text::body(self.labels.library_source[i].as_str()).width(Length::Fill));
                 if src == current {
                     row = row.push(widget::icon(ui_icon(CHECK)).size(16));
                 }
@@ -188,8 +188,8 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(icon::from_name("dialog-warning-symbolic").size(16))
-                    .push(widget::text::caption(format!("Downloads: {e}")).width(Length::Shrink))
-                    .push(widget::button::link("Manage Downloads").on_press(Message::Dl(super::DlMsg::OpenManager)))
+                    .push(widget::text::caption(fl!("downloads-error", error = e)).width(Length::Shrink))
+                    .push(widget::button::link(fl!("manage-downloads")).on_press(Message::Dl(super::DlMsg::OpenManager)))
                     .push(
                         widget::button::icon(icon::from_name("window-close-symbolic"))
                             .on_press(Message::Dl(super::DlMsg::DismissError)),
@@ -210,10 +210,7 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(icon::from_name("network-error-symbolic").size(16))
-                    .push(widget::text::caption(format!(
-                        "{} can't be reached right now, so only your downloads from it are shown. Nebula keeps trying.",
-                        offline.join(", ")
-                    ))),
+                    .push(widget::text::caption(fl!("servers-offline", servers = offline.join(", ")))),
             );
         }
         if self.scans_pending > 0 || meta_left > 0 {
@@ -223,10 +220,7 @@ impl App {
             // lookups.
             if self.scans_pending > 0 {
                 status = status.push(widget::indeterminate_circular().size(14.0).bar_height(2.0));
-                status = status.push(widget::text::caption(format!(
-                    "Scanning library… ({} left)",
-                    self.scans_pending
-                )));
+                status = status.push(widget::text::caption(fl!("scanning-library", left = self.scans_pending)));
             }
             if meta_left > 0 {
                 let total = self.meta_done + meta_left;
@@ -234,8 +228,11 @@ impl App {
                 status = status.push(
                     widget::determinate_circular(self.meta_done as f32 / total as f32).size(14.0).bar_height(2.0),
                 );
-                status = status.push(widget::text::caption(format!(
-                    "Looking up metadata… {percent}% ({meta_left} of {total} left)"
+                status = status.push(widget::text::caption(fl!(
+                    "looking-up-metadata-progress",
+                    percent = percent,
+                    left = meta_left,
+                    total = total
                 )));
             }
             col = col.push(status);
@@ -257,9 +254,9 @@ impl App {
 
         if visible.is_empty() {
             let msg = if self.library_search.is_empty() {
-                "Add a library folder in Settings, open a file, or drag one in."
+                fl!("library-empty-hint")
             } else {
-                "Nothing matches that search."
+                fl!("no-search-match")
             };
             col = col.push(
                 widget::container(
@@ -268,18 +265,18 @@ impl App {
                         .align_x(Alignment::Center)
                         .push(icon::from_name("library-symbolic").size(64))
                         .push(widget::text::title3(if self.library_search.is_empty() {
-                            "Your library is empty"
+                            fl!("library-empty")
                         } else {
-                            "No results"
+                            fl!("no-results")
                         }))
                         .push(widget::text::body(msg))
                         .push(
                             widget::Row::new()
                                 .spacing(8)
-                                .push(widget::button::standard("Open File").on_press(Message::OpenFile))
-                                .push(widget::button::standard("Open Folder").on_press(Message::OpenFolder))
+                                .push(widget::button::standard(fl!("open-file")).on_press(Message::OpenFile))
+                                .push(widget::button::standard(fl!("open-folder")).on_press(Message::OpenFolder))
                                 .push(
-                                    widget::button::suggested("Add Library Folder")
+                                    widget::button::suggested(fl!("add-library-folder"))
                                         .on_press(Message::AddLibraryFolder),
                                 ),
                         ),
@@ -306,7 +303,7 @@ impl App {
                 for e in recent.into_iter().take(10) {
                     row = row.push(self.series_card(e, true));
                 }
-                body = body.push(widget::text::title3("Continue Reading")).push(
+                body = body.push(widget::text::title3(fl!("continue-reading"))).push(
                     widget::scrollable::horizontal(row.padding([0, 0, 12, 0])),
                 );
             }
@@ -352,7 +349,7 @@ impl App {
             .collect();
         if !other.is_empty() {
             other.sort_by_key(|e| std::cmp::Reverse(e.last_opened));
-            sections.push((if sections.is_empty() { "Library".into() } else { "Opened Elsewhere".into() }, other));
+            sections.push((if sections.is_empty() { fl!("library") } else { fl!("opened-elsewhere") }, other));
         }
 
         for (name, items) in sections {
@@ -507,7 +504,7 @@ impl App {
             _ => {}
         }
         if let Some(v) = series.volume {
-            facts.push(format!("Vol. {v}"));
+            facts.push(fl!("volume", volume = v));
         }
         let read = issues.iter().filter(|i| i.completed).count();
         if one_shot {
@@ -516,18 +513,18 @@ impl App {
                     facts.push(crate::library::pretty_date(issue.date()));
                 }
                 if issue.page_count > 0 {
-                    facts.push(format!("{} pages", issue.page_count));
+                    facts.push(fl!("page-count", count = issue.page_count));
                 }
                 if issue.completed {
-                    facts.push("Read".into());
+                    facts.push(fl!("read"));
                 } else if issue.in_progress() {
-                    facts.push(format!("Page {} of {}", issue.last_page + 1, issue.page_count.max(1)));
+                    facts.push(fl!("page-of", page = issue.last_page + 1, pages = issue.page_count.max(1)));
                 }
             }
         } else {
-            facts.push(format!("{} {}", issues.len(), if manga { "chapters" } else { "issues" }));
+            facts.push(if manga { fl!("chapter-count", count = issues.len()) } else { fl!("issue-count", count = issues.len()) });
             if read > 0 {
-                facts.push(format!("{read} read"));
+                facts.push(fl!("read-count", count = read));
             }
         }
 
@@ -541,23 +538,23 @@ impl App {
         }
 
         if !series.display_title.is_empty() && series.display_title != series.title {
-            details = details.push(widget::text::caption(format!("On disk as “{}”", series.title)));
+            details = details.push(widget::text::caption(fl!("on-disk-as", name = series.title.as_str())));
         }
 
         let source_line = match series.source.as_str() {
-            "comicvine" => "Matched on ComicVine".to_string(),
-            "anilist" => "Matched on AniList".to_string(),
-            _ if series.meta_status == "nomatch" => "No online match — using the folder name".to_string(),
-            _ if series.meta_status.starts_with("error") => format!("Lookup failed: {}", &series.meta_status[6..].trim()),
+            "comicvine" => fl!("matched-comicvine"),
+            "anilist" => fl!("matched-anilist"),
+            _ if series.meta_status == "nomatch" => fl!("no-match-folder-name"),
+            _ if series.meta_status.starts_with("error") => fl!("lookup-failed", error = series.meta_status[6..].trim()),
             _ if self.meta_running && self.meta_current.as_deref() == Some(series.path.as_str()) => {
-                "Looking up metadata…".to_string()
+                fl!("looking-up-metadata")
             }
-            _ => "Not looked up yet".to_string(),
+            _ => fl!("not-looked-up"),
         };
         let mut source_row = widget::Row::new().spacing(8).align_y(Alignment::Center).push(widget::text::caption(source_line));
         if !series.source_url.is_empty() {
             source_row = source_row.push(
-                widget::button::link("View page").on_press(Message::OpenUrl(series.source_url.clone())),
+                widget::button::link(fl!("view-page")).on_press(Message::OpenUrl(series.source_url.clone())),
             );
         }
         details = details.push(source_row);
@@ -575,11 +572,11 @@ impl App {
         // Primary action: continue where you left off, or start.
         let next = next_issue(issues);
         let primary_label = match next {
-            Some(i) if one_shot && i.in_progress() => "Continue Reading".to_string(),
-            Some(i) if i.in_progress() => format!("Continue {}", i.label(manga)),
-            Some(i) if read > 0 => format!("Read {}", i.label(manga)),
-            Some(_) => "Start Reading".to_string(),
-            None => "Read Again".to_string(),
+            Some(i) if one_shot && i.in_progress() => fl!("continue-reading"),
+            Some(i) if i.in_progress() => fl!("continue-issue", issue = i.label(manga)),
+            Some(i) if read > 0 => fl!("read-issue", issue = i.label(manga)),
+            Some(_) => fl!("start-reading-button"),
+            None => fl!("read-again"),
         };
         let primary_idx = next.map(|i| i.idx).unwrap_or(0);
         let mut actions = widget::Row::new()
@@ -588,7 +585,8 @@ impl App {
                 widget::button::suggested(primary_label)
                     .on_press(Message::OpenEntry { key: series.path.clone(), chapter: Some(primary_idx) }),
             );
-        let (mark_read, mark_unread) = if one_shot { ("Mark Read", "Mark Unread") } else { ("Mark All Read", "Mark All Unread") };
+        let (mark_read, mark_unread) =
+            if one_shot { (fl!("mark-read-one"), fl!("mark-unread-one")) } else { (fl!("mark-all-read"), fl!("mark-all-unread")) };
         if read < issues.len() {
             actions = actions.push(widget::button::standard(mark_read).on_press(Message::MarkSeriesRead(true)));
         }
@@ -618,14 +616,14 @@ impl App {
                 .spacing(8)
                 .align_y(Alignment::Center)
                 .push(
-                    widget::text_input("Search online as…", &self.series_search_input)
+                    widget::text_input(fl!("search-online-as"), &self.series_search_input)
                         .on_input(Message::SeriesSearchInput)
                         .on_submit(|_| Message::RematchSeries)
                         .width(Length::Fixed(260.0)),
                 )
-                .push(widget::button::standard("Re-match").on_press(Message::RematchSeries))
+                .push(widget::button::standard(fl!("rematch")).on_press(Message::RematchSeries))
                 .push_maybe((!series.source.is_empty()).then(|| {
-                    widget::button::text("Use Folder Name").on_press(Message::ClearSeriesMatch)
+                    widget::button::text(fl!("use-folder-name")).on_press(Message::ClearSeriesMatch)
                 })),
         );
 
@@ -666,7 +664,7 @@ impl App {
             meta.push(crate::library::pretty_date(issue.date()));
         }
         if issue.page_count > 0 {
-            meta.push(format!("{} pages", issue.page_count));
+            meta.push(fl!("page-count", count = issue.page_count));
         }
         // Show the file name only when it adds something: not for an
         // official title, and not for manga-tui chapter files ("Ch 3 Vol
@@ -677,16 +675,16 @@ impl App {
         }
 
         let status: Element<'_, Message> = if issue.completed {
-            widget::text::caption("✓ Read").into()
+            widget::text::caption(fl!("read-check")).into()
         } else if issue.in_progress() {
             widget::Column::new()
                 .spacing(2)
                 .width(Length::Fixed(120.0))
                 .push(progress_bar(issue.fraction()))
-                .push(widget::text::caption(format!("Page {} of {}", issue.last_page + 1, issue.page_count.max(1))))
+                .push(widget::text::caption(fl!("page-of", page = issue.last_page + 1, pages = issue.page_count.max(1))))
                 .into()
         } else {
-            widget::text::caption("Unread").into()
+            widget::text::caption(fl!("unread")).into()
         };
 
         let toggle = widget::tooltip(
@@ -696,7 +694,7 @@ impl App {
                 "object-select-symbolic"
             }))
             .on_press(Message::ToggleIssueRead(issue.id, !issue.completed)),
-            widget::text(if issue.completed { "Mark unread" } else { "Mark read" }),
+            widget::text(if issue.completed { fl!("mark-unread") } else { fl!("mark-read") }),
             widget::tooltip::Position::Left,
         );
 
@@ -738,7 +736,7 @@ impl App {
             let items = widget::menu::items(
                 &std::collections::HashMap::new(),
                 vec![widget::menu::Item::Button(
-                    "Build Page Index",
+                    fl!("build-page-index"),
                     None,
                     super::rar_index::IssueAction::BuildIndex,
                 )],

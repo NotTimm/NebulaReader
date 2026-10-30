@@ -143,7 +143,7 @@ impl App {
         };
 
         let Some(chapter) = book.chapters.get(self.epub_chapter) else {
-            return widget::text("This book has no chapters.").into();
+            return widget::text(fl!("no-chapters")).into();
         };
 
         let paged = bs.layout != BookLayout::Scroll;
@@ -272,7 +272,7 @@ impl App {
             Some(next) if !paged => {
                 page = page.push(
                     widget::container(
-                        widget::button::standard(format!("Next: {}  →", truncate(&next.title, 40)))
+                        widget::button::standard(fl!("next-chapter-button", title = truncate(&next.title, 40)))
                             .on_press(Message::Book(BookMsg::NextChapter)),
                     )
                     .width(Length::Fill)
@@ -283,7 +283,7 @@ impl App {
             Some(_) => {}
             None => {
                 page = page.push(
-                    widget::container(widget::text("The End").size(size * 1.1).font(font))
+                    widget::container(widget::text(fl!("the-end")).size(size * 1.1).font(font))
                         .width(Length::Fill)
                         .center_x(Length::Fill),
                 );
@@ -337,9 +337,9 @@ impl App {
         let left_label = if chapter.words < 50 {
             String::new()
         } else if mins <= 1 {
-            "Less than a minute left in chapter".to_string()
+            fl!("less-than-minute-left")
         } else {
-            format!("{mins} min left in chapter")
+            fl!("minutes-left", minutes = mins)
         };
         let status = widget::Row::new()
             .padding([4.0, size])
@@ -352,9 +352,9 @@ impl App {
             .push_maybe(pages.as_ref().filter(|p| p.count() > 0).map(|p| {
                 let first = p.page_at(self.book_scroll.rel_y);
                 let label = if p.step() == 2 && first + 1 < p.count() {
-                    format!("   Pages {}–{} of {}", first + 1, first + 2, p.count())
+                    format!("   {}", fl!("pages-of", first = first + 1, last = first + 2, pages = p.count()))
                 } else {
-                    format!("   Page {} of {}", first + 1, p.count())
+                    format!("   {}", fl!("page-of", page = first + 1, pages = p.count()))
                 };
                 widget::text(label).size(12)
             }))
@@ -408,12 +408,12 @@ impl App {
             .padding([6, 12])
             .align_y(Alignment::Center)
             .push(
-                widget::text::caption("Scroll or pinch to zoom · drag to move · Esc to go back")
+                widget::text::caption(fl!("image-hint"))
                     .width(Length::Fill),
             )
             .push(tip(
-                widget::button::standard("Back to book").on_press(Message::Book(BookMsg::CloseImage)),
-                "Back to the page (Esc)",
+                widget::button::standard(fl!("back-to-book")).on_press(Message::Book(BookMsg::CloseImage)),
+                fl!("back-to-page"),
             ));
         let viewer = widget::image::viewer(h.clone())
             .content_fit(ContentFit::Contain)
@@ -441,11 +441,11 @@ impl App {
                 .spacing(8)
                 .align_y(Alignment::Center)
                 .padding(12)
-                .push(widget::text::title4("Contents").width(Length::Fill))
+                .push(widget::text::title4(fl!("contents")).width(Length::Fill))
                 .push(tip(
                     widget::button::icon(icon::from_name("window-close-symbolic"))
                         .on_press(Message::ToggleChapterSelect),
-                    "Close contents (C)",
+                    fl!("close-contents"),
                 )),
         );
         col = col.push(widget::divider::horizontal::light());
@@ -495,18 +495,18 @@ impl App {
         }
         col = col.push(widget::divider::horizontal::light());
         let total = book.total_words();
-        col = col.push(widget::text::caption(format!(
-            "{} chapters · about {} words · ~{} h to read",
-            book.chapters.len(),
-            (total / 1000) * 1000,
-            ((total as f32 / WORDS_PER_MINUTE) / 60.0).round().max(1.0)
+        col = col.push(widget::text::caption(fl!(
+            "book-stats",
+            chapters = book.chapters.len(),
+            words = (total / 1000) * 1000,
+            hours = ((total as f32 / WORDS_PER_MINUTE) / 60.0).round().max(1.0)
         )));
         if let Some(chapter) = book.chapters.get(self.epub_chapter) {
-            col = col.push(widget::text::body(format!(
-                "Chapter {} of {}: {}",
-                self.epub_chapter + 1,
-                book.chapters.len(),
-                chapter.title
+            col = col.push(widget::text::body(fl!(
+                "chapter-of",
+                chapter = self.epub_chapter + 1,
+                chapters = book.chapters.len(),
+                title = chapter.title.as_str()
             )));
         }
         widget::container(widget::scrollable(col)).width(Length::Fixed(300.0)).height(Length::Fill).into()
@@ -520,7 +520,7 @@ impl App {
             .align_y(Alignment::Center)
             .push(tip(
                 widget::button::standard("A−").on_press(Message::Book(BookMsg::FontSmaller)),
-                "Smaller text (Ctrl −)",
+                fl!("smaller-text"),
             ))
             .push(
                 widget::slider(
@@ -533,7 +533,7 @@ impl App {
             )
             .push(tip(
                 widget::button::standard("A+").on_press(Message::Book(BookMsg::FontBigger)),
-                "Larger text (Ctrl +)",
+                fl!("larger-text"),
             ));
 
         let spacing_idx = BookSettings::LINE_SPACINGS
@@ -541,13 +541,13 @@ impl App {
             .position(|s| (s - bs.line_spacing).abs() < 0.01);
 
         let section = widget::settings::section()
-            .title("Text")
-            .add(widget::settings::item(format!("Size  ({} px)", bs.font_size), widget::text::caption("Ctrl + / Ctrl −")))
+            .title(fl!("text"))
+            .add(widget::settings::item(fl!("text-size", size = bs.font_size), widget::text::caption("Ctrl + / Ctrl −")))
             .add(size_row)
             .add(widget::settings::item(
-                "Typeface",
+                fl!("typeface"),
                 widget::dropdown(
-                    &["Serif", "Sans"][..],
+                    vec![fl!("font-serif"), fl!("font-sans")],
                     Some(match bs.font {
                         BookFont::Serif => 0,
                         BookFont::Sans => 1,
@@ -556,46 +556,44 @@ impl App {
                 ),
             ))
             .add(widget::settings::item(
-                "Line spacing",
-                widget::dropdown(&BookSettings::LINE_LABELS[..], spacing_idx, |i| {
+                fl!("line-spacing"),
+                widget::dropdown(&self.labels.book_line_spacing[..], spacing_idx, |i| {
                     Message::Book(BookMsg::SetSpacing(i))
                 }),
             ))
             .add(widget::settings::item(
-                "Justify text",
+                fl!("justify-text"),
                 widget::toggler(bs.justify).on_toggle(|v| Message::Book(BookMsg::SetJustify(v))),
             ));
 
         let layout = widget::settings::section()
-            .title("Page")
+            .title(fl!("page-section"))
             .add(widget::settings::item(
-                "Layout",
+                fl!("layout"),
                 widget::dropdown(
-                    &BookLayout::LABELS[..],
+                    &self.labels.book_layout[..],
                     BookLayout::ALL.iter().position(|l| *l == bs.layout),
                     |i| Message::Book(BookMsg::SetLayout(i)),
                 ),
             ))
             .add(widget::settings::item(
-                "Line width",
+                fl!("line-width"),
                 widget::dropdown(
-                    &BookWidth::LABELS[..],
+                    &self.labels.book_width[..],
                     BookWidth::ALL.iter().position(|w| *w == bs.width),
                     |i| Message::Book(BookMsg::SetWidth(i)),
                 ),
             ))
             .add(widget::settings::item(
-                "Theme",
+                fl!("theme"),
                 widget::dropdown(
-                    &BookTheme::LABELS[..],
+                    &self.labels.book_theme[..],
                     BookTheme::ALL.iter().position(|t| *t == bs.theme),
                     |i| Message::Book(BookMsg::SetTheme(i)),
                 ),
             ));
 
-        let help = widget::settings::section().title("Keys").add(widget::text::caption(
-            "→ / Space / Page Down, or click the right edge: next page  ·  ← / Page Up, or click the left edge: previous page  ·  Mouse wheel: turn pages (scrolls in Scroll layout)  ·  C: contents  ·  F: full screen  ·  Ctrl 0: default size",
-        ));
+        let help = widget::settings::section().title(fl!("keys")).add(widget::text::caption(fl!("book-keys")));
 
         widget::settings::view_column(vec![section.into(), layout.into(), help.into()]).into()
     }

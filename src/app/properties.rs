@@ -46,7 +46,7 @@ impl menu::Action for CardAction {
 pub struct Props {
     pub key: String,
     pub name: String,
-    pub rows: Vec<(&'static str, String)>,
+    pub rows: Vec<(String, String)>,
     /// The first page's size in pixels, read in the background.
     pub page_size: Option<String>,
     /// Its folder, for "Show in Folder".
@@ -62,9 +62,9 @@ impl App {
 
         let one_shot = e.issue_count <= 1;
         let mut items = vec![
-            Item::Button(if one_shot { "Show Details" } else { "Show Series" }, None, CardAction::OpenPage),
+            Item::Button(if one_shot { fl!("show-details") } else { fl!("show-series") }, None, CardAction::OpenPage),
             Item::Button(
-                if e.has_progress() && !e.is_finished() { "Continue Reading" } else { "Read" },
+                if e.has_progress() && !e.is_finished() { fl!("continue-reading") } else { fl!("read") },
                 None,
                 CardAction::Read,
             ),
@@ -78,38 +78,38 @@ impl App {
             if single {
                 let downloaded = if one_shot { self.dl.has_series(&e.path) } else { self.dl.has(&e.last_issue_path) };
                 if downloaded {
-                    items.push(Item::Button("Remove Download", None, CardAction::RemoveIssueDownload));
+                    items.push(Item::Button(fl!("remove-download"), None, CardAction::RemoveIssueDownload));
                 } else {
-                    let label = if one_shot || e.is_epub { "Download Book" } else { "Download Issue" };
+                    let label = if one_shot || e.is_epub { fl!("download-book") } else { fl!("download-issue") };
                     items.push(Item::Button(label, None, CardAction::DownloadIssue));
                 }
             } else {
-                items.push(Item::Button("Download All", None, CardAction::Download));
+                items.push(Item::Button(fl!("download-all"), None, CardAction::Download));
                 if self.dl.has_series(&e.path) {
-                    items.push(Item::Button("Remove Downloads", None, CardAction::RemoveDownloads));
+                    items.push(Item::Button(fl!("remove-downloads"), None, CardAction::RemoveDownloads));
                 }
             }
         }
         items.push(Item::Divider);
         if !e.is_finished() {
-            items.push(Item::Button("Mark as Read", None, CardAction::MarkRead));
+            items.push(Item::Button(fl!("mark-as-read"), None, CardAction::MarkRead));
         }
         if e.has_progress() || e.is_finished() {
-            items.push(Item::Button("Mark as Unread", None, CardAction::MarkUnread));
+            items.push(Item::Button(fl!("mark-as-unread"), None, CardAction::MarkUnread));
         }
         if local_folder(e).is_some() {
-            items.push(Item::Button("Show in Folder", None, CardAction::ShowInFolder));
+            items.push(Item::Button(fl!("show-in-folder"), None, CardAction::ShowInFolder));
         }
         // Jellyfin CBRs whose pages haven't been indexed yet.
         if self.unindexed.contains_key(&e.path) {
             items.push(Item::Button(
-                if one_shot { "Build Page Index" } else { "Build Page Indexes" },
+                if one_shot { fl!("build-page-index") } else { fl!("build-page-indexes") },
                 None,
                 CardAction::BuildIndex,
             ));
         }
         items.push(Item::Divider);
-        items.push(Item::Button("Properties", None, CardAction::Properties));
+        items.push(Item::Button(fl!("properties"), None, CardAction::Properties));
         menu::items(&HashMap::new(), items)
     }
 
@@ -178,25 +178,25 @@ impl App {
         let issues = self.series_issues(&e.path);
         let remote = crate::jellyfin::is_key(&e.path);
         let manga = super::library_view::is_manga(&issues);
-        let mut rows: Vec<(&'static str, String)> = Vec::new();
+        let mut rows: Vec<(String, String)> = Vec::new();
 
         let kind = match (remote, e.kind) {
-            (true, _) if e.issue_count > 1 => "Series on a Jellyfin server",
-            (true, _) if e.is_epub => "Book on a Jellyfin server",
-            (true, _) => "Comic on a Jellyfin server",
-            (false, SeriesKind::Dir) => "Series (a folder)",
-            (false, SeriesKind::Group) => "Series (files grouped by name)",
-            (false, SeriesKind::File) if e.is_epub => "Book (EPUB)",
-            (false, SeriesKind::File) => "Single file",
+            (true, _) if e.issue_count > 1 => fl!("kind-jellyfin-series"),
+            (true, _) if e.is_epub => fl!("kind-jellyfin-book"),
+            (true, _) => fl!("kind-jellyfin-comic"),
+            (false, SeriesKind::Dir) => fl!("kind-folder-series"),
+            (false, SeriesKind::Group) => fl!("kind-group-series"),
+            (false, SeriesKind::File) if e.is_epub => fl!("kind-epub"),
+            (false, SeriesKind::File) => fl!("kind-single-file"),
         };
-        rows.push(("Type", kind.into()));
+        rows.push((fl!("prop-type"), kind));
 
         // Formats by file extension: "CBZ × 12, CBR × 2".
         let mut formats: BTreeMap<String, usize> = BTreeMap::new();
         for i in &issues {
             let file = self.dl.file(&i.path).cloned().unwrap_or_else(|| PathBuf::from(&i.path));
             let ext = if !remote && file.is_dir() {
-                "Image folder".to_string()
+                fl!("image-folder")
             } else {
                 let item = crate::jellyfin::parse_key(&i.path).map(|(_, id)| id);
                 item.and_then(|id| self.jf.extensions.get(id).cloned())
@@ -214,39 +214,42 @@ impl App {
                 .map(|(f, n)| if issues.len() > 1 { format!("{f} × {n}") } else { f.clone() })
                 .collect::<Vec<_>>()
                 .join(", ");
-            rows.push(("Format", text));
+            rows.push((fl!("prop-format"), text));
         }
 
         if remote {
             let account = crate::jellyfin::parse_key(&e.path).and_then(|(a, _)| self.jellyfin.find(a));
             if let Some(a) = account {
-                rows.push(("Server", format!("{} ({})", a.server_name, a.url)));
+                rows.push((fl!("prop-server"), format!("{} ({})", a.server_name, a.url)));
             }
             if let Some(lib) = self.jf.library_names.get(&e.library_root) {
-                rows.push(("Library", lib.clone()));
+                rows.push((fl!("prop-library"), lib.clone()));
             }
         } else {
             let location = match e.kind {
                 SeriesKind::Group => e.library_root.clone(),
                 _ => e.path.clone(),
             };
-            rows.push(("Location", location));
+            rows.push((fl!("prop-location"), location));
         }
 
         if issues.len() > 1 {
-            rows.push((if manga { "Chapters" } else { "Issues" }, issues.len().to_string()));
+            rows.push((if manga { fl!("prop-chapters") } else { fl!("prop-issues") }, issues.len().to_string()));
         }
         let known: Vec<usize> = issues.iter().map(|i| i.page_count).filter(|&n| n > 0).collect();
         if !known.is_empty() {
             let pages: usize = known.iter().sum();
             let all = known.len() == issues.len();
-            rows.push(("Pages", if all { pages.to_string() } else { format!("{pages} in {} of {} opened so far", known.len(), issues.len()) }));
+            rows.push((
+                fl!("prop-pages"),
+                if all { pages.to_string() } else { fl!("prop-pages-partial", pages = pages, known = known.len(), total = issues.len()) },
+            ));
         }
 
         if !remote {
             let bytes: u64 = issues.iter().map(|i| size_on_disk(Path::new(&i.path))).sum();
             if bytes > 0 {
-                rows.push(("Size", human_size(bytes)));
+                rows.push((fl!("prop-size"), human_size(bytes)));
             }
         } else {
             let downloaded: Vec<u64> =
@@ -254,38 +257,45 @@ impl App {
             if !downloaded.is_empty() {
                 let size = human_size(downloaded.iter().sum());
                 rows.push((
-                    "Downloaded",
-                    if issues.len() > 1 { format!("{} of {} · {size}", downloaded.len(), issues.len()) } else { size },
+                    fl!("prop-downloaded"),
+                    if issues.len() > 1 {
+                        fl!("prop-downloaded-of", count = downloaded.len(), total = issues.len(), size = size)
+                    } else {
+                        size
+                    },
                 ));
             }
         }
 
         let read = issues.iter().filter(|i| i.completed).count();
         if issues.len() > 1 {
-            rows.push(("Read", format!("{read} of {} · {:.0}%", issues.len(), e.progress_fraction() * 100.0)));
+            rows.push((
+                fl!("prop-read"),
+                fl!("prop-read-of", read = read, total = issues.len(), percent = format!("{:.0}", e.progress_fraction() * 100.0)),
+            ));
         } else if let Some(i) = issues.first() {
             let state = if i.completed {
-                "Finished".to_string()
+                fl!("finished")
             } else if i.in_progress() {
-                format!("Page {} of {}", i.last_page + 1, i.page_count.max(1))
+                fl!("page-of", page = i.last_page + 1, pages = i.page_count.max(1))
             } else {
-                "Not started".to_string()
+                fl!("not-started")
             };
-            rows.push(("Read", state));
+            rows.push((fl!("prop-read"), state));
         }
         if e.date_added > 0 {
-            rows.push(("Added", day(e.date_added)));
+            rows.push((fl!("prop-added"), day(e.date_added)));
         }
         if e.last_opened > 0 {
-            rows.push(("Last opened", day(e.last_opened)));
+            rows.push((fl!("prop-last-opened"), day(e.last_opened)));
         }
         rows.push((
-            "Metadata",
+            fl!("prop-metadata"),
             match e.source.as_str() {
                 "anilist" => "AniList".into(),
                 "comicvine" => "ComicVine".into(),
-                _ if !e.description.is_empty() => "From the files".into(),
-                _ => "None".into(),
+                _ if !e.description.is_empty() => fl!("metadata-from-files"),
+                _ => fl!("metadata-none"),
             },
         ));
 
@@ -327,10 +337,11 @@ impl App {
     pub(super) fn build_properties_panel(&self) -> Element<'_, Message> {
         let Some(p) = &self.properties else { return widget::Space::new().into() };
         let mut section = widget::settings::section();
-        let mut rows: Vec<(&str, &str)> = p.rows.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let mut rows: Vec<(String, &str)> = p.rows.iter().map(|(k, v)| (k.clone(), v.as_str())).collect();
         if let Some(size) = &p.page_size {
-            let at = rows.iter().position(|(k, _)| *k == "Pages").map_or(rows.len(), |i| i + 1);
-            rows.insert(at, ("Page size", size.as_str()));
+            let pages = fl!("prop-pages");
+            let at = rows.iter().position(|(k, _)| *k == pages).map_or(rows.len(), |i| i + 1);
+            rows.insert(at, (fl!("prop-page-size"), size.as_str()));
         }
         for (label, value) in rows {
             section = section.add(
@@ -347,9 +358,9 @@ impl App {
             .push(
                 widget::row::with_capacity(2)
                     .spacing(8)
-                    .push(widget::button::standard("Open Page").on_press(Message::OpenSeriesPage(p.key.clone())))
+                    .push(widget::button::standard(fl!("open-page")).on_press(Message::OpenSeriesPage(p.key.clone())))
                     .push_maybe(p.folder.as_ref().map(|dir| {
-                        widget::button::standard("Show in Folder").on_press(Message::OpenUrl(dir.to_string_lossy().into_owned()))
+                        widget::button::standard(fl!("show-in-folder")).on_press(Message::OpenUrl(dir.to_string_lossy().into_owned()))
                     })),
             )
             .width(Length::Fill)

@@ -1,0 +1,7 @@
+# Interface translations: Fluent files in i18n/<language>/nebula_reader.ftl
+# (see i18n/README.md). English is the fallback and the reference.
+fallback_language = "en"
+
+[fluent]
+assets_dir = "i18n"
+domain = "nebula_reader"

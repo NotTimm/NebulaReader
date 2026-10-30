@@ -37,6 +37,11 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 quick-xml = "0.42"
 regex = "1"
 minisign-verify = "0.3"
+# Interface translations (src/i18n.rs, i18n/): Fluent, as libcosmic and the
+# COSMIC apps use it.
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
 
 # Fork of pop-os/libcosmic with these patches on top of pop-os/libcosmic:
 # 1. Forwards winit's trackpad pinch gesture (WindowEvent::PinchGesture)
@@ -78,11 +83,13 @@ minisign-verify = "0.3"
 # 14. In image::Viewer, Ctrl (Cmd on a Mac) + a mouse wheel scrolls a
 #    zoomed page (with Shift, sideways) instead of zooming; a touchpad's
 #    Ctrl + scroll still zooms.
+# 15. `cosmic::localize` is public, with `localize::select`, so libcosmic's
+#    own strings (Close, Cancel...) follow the app's language setting.
 # Kept in sync with upstream by merging (never rebasing): run
 # tools/libcosmic-drift.sh and see "The libcosmic fork" in docs/DEVELOPING.md.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "756cd0f629937900654ac991b6c9f904c09975a9"
+rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -90,7 +97,7 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "settings"] }
 
@@ -99,7 +106,7 @@ ashpd = { version = "0.13", default-features = false, features = ["tokio", "sett
 libc = "0.2"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).
@@ -134,6 +141,8 @@ image.opt-level = 3
 
 [dev-dependencies]
 minisign = "0.10.0"
+# Checks the translation files parse (src/i18n.rs tests).
+fluent-syntax = "0.12"
 
 # cosmic-settings-daemon (behind libcosmic's cosmic-launch, not built here)
 # asks for these from pop-os/libcosmic. Take them from the fork instead, so
@@ -141,8 +150,8 @@ minisign = "0.10.0"
 # tarball) refuses the same crate from two sources. Keep the rev in step
 # with the libcosmic dependency above.
 [patch."https://github.com/pop-os/libcosmic"]
-build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
-cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
-cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
-iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
-iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "756cd0f629937900654ac991b6c9f904c09975a9" }
+build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003" }
+cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003" }
+cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003" }
+iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003" }
+iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5062b8b0e1dc25bcf23e495cda66a26c75c44003" }

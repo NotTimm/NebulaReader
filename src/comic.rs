@@ -516,8 +516,12 @@ pub(crate) fn display_name(raw: &str) -> String {
         let issue = crate::naming::parse_issue(raw);
         if let Some(number) = issue.number {
             return match issue.subtitle {
-                Some(sub) => format!("Ch. {number} · {sub}"),
-                None => format!("Ch. {number}"),
+                Some(sub) => fl!(
+                    "chapter-with-subtitle",
+                    chapter = fl!("issue-label-manga", number = number.as_str()),
+                    subtitle = sub
+                ),
+                None => fl!("issue-label-manga", number = number.as_str()),
             };
         }
     }
@@ -544,7 +548,7 @@ pub fn collect_sources(path: &Path) -> Result<(Vec<PageSource>, Vec<ChapterInfo>
         };
 
         if pages.is_empty() {
-            return Err(format!("no image pages found in {}", path.display()));
+            return Err(fl!("no-image-pages-in", path = path.display().to_string()));
         }
 
         let page_count = pages.len();
@@ -554,12 +558,12 @@ pub fn collect_sources(path: &Path) -> Result<(Vec<PageSource>, Vec<ChapterInfo>
     }
 
     if !path.is_dir() {
-        return Err(format!("{} is neither a file nor a directory", path.display()));
+        return Err(fl!("not-file-or-folder", path = path.display().to_string()));
     }
 
     let issues = list_issue_files(path);
     if issues.is_empty() {
-        return Err(format!("no comic chapters or images found under {}", path.display()));
+        return Err(fl!("no-chapters-under", path = path.display().to_string()));
     }
     let paths: Vec<PathBuf> = issues.into_iter().map(|i| i.path).collect();
     collect_sources_for(&paths)
@@ -622,7 +626,7 @@ pub fn collect_sources_for(issues: &[PathBuf]) -> Result<(Vec<PageSource>, Vec<C
     }
 
     if pages.is_empty() {
-        return Err("no image pages found".to_string());
+        return Err(fl!("no-image-pages"));
     }
     Ok((pages, chapters))
 }
@@ -696,7 +700,7 @@ pub fn count_pages(issue: &Path) -> Result<usize, String> {
     } else if is_rar_name(&name) {
         Ok(rar_image_names(issue)?.len())
     } else {
-        Err(format!("not a comic: {}", issue.display()))
+        Err(fl!("not-a-comic", path = issue.display().to_string()))
     }
 }
 
@@ -731,7 +735,7 @@ pub fn first_page(issue: &Path) -> Result<Page, String> {
             .map_err(|e| format!("extract {first}: {e}"))?;
         return decode_image(&first, &data);
     }
-    Err(format!("not a comic: {}", issue.display()))
+    Err(fl!("not-a-comic", path = issue.display().to_string()))
 }
 
 /// Looks for an embedded `ComicInfo.xml` at the top level of `path` (a

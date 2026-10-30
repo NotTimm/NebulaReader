@@ -112,7 +112,7 @@ pub fn verify(public_key: &str, data: &[u8], signature: &str, file_name: &str) -
     key.verify(data, &sig, false)
         .map_err(|_| "the download isn't signed with Nebula's release key".to_string())?;
     if sig.trusted_comment() != format!("file:{file_name}") {
-        return Err(format!("the signature is for another file ({})", sig.trusted_comment()));
+        return Err(fl!("update-signature-mismatch", file = sig.trusted_comment()));
     }
     Ok(())
 }
@@ -195,13 +195,13 @@ async fn fetch_and_stage(
         .map_err(|e| format!("couldn't download the update: {e}"))?;
     let total = resp.content_length();
     if total.is_some_and(|t| t > MAX_DOWNLOAD) {
-        return Err("the update is unexpectedly large".into());
+        return Err(fl!("update-too-large"));
     }
     let mut data = Vec::with_capacity(total.unwrap_or(0) as usize);
     while let Some(chunk) = resp.chunk().await.map_err(|e| format!("the download was cut off: {e}"))? {
         data.extend_from_slice(&chunk);
         if data.len() as u64 > MAX_DOWNLOAD {
-            return Err("the update is unexpectedly large".into());
+            return Err(fl!("update-too-large"));
         }
         progress(data.len() as u64, total);
     }
@@ -234,7 +234,7 @@ fn stage(plan: &Plan, data: &[u8]) -> Result<PathBuf, String> {
             extract_zip(data, &dir)?;
             let exe_name = plan.exe.file_name().ok_or("no exe name")?;
             if !dir.join(exe_name).is_file() {
-                return Err(format!("the update has no {}", exe_name.to_string_lossy()));
+                return Err(fl!("update-missing-exe", file = exe_name.to_string_lossy()));
             }
             Ok(dir)
         }
@@ -254,7 +254,7 @@ fn stage(plan: &Plan, data: &[u8]) -> Result<PathBuf, String> {
                 .output()
                 .map_err(|e| format!("couldn't run tar: {e}"))?;
             if !out.status.success() {
-                return Err(format!("couldn't unpack the update: {}", String::from_utf8_lossy(&out.stderr).trim()));
+                return Err(fl!("update-unpack-failed", error = String::from_utf8_lossy(&out.stderr).trim().to_string()));
             }
             let _ = fs::remove_file(&archive);
             let bundle = fs::read_dir(&dir)
@@ -264,7 +264,7 @@ fn stage(plan: &Plan, data: &[u8]) -> Result<PathBuf, String> {
                 .ok_or("the update has no .app")?;
             let exe_name = plan.exe.file_name().ok_or("no exe name")?;
             if !bundle.join("Contents/MacOS").join(exe_name).is_file() {
-                return Err("the update's app has no program in it".into());
+                return Err(fl!("update-no-program"));
             }
             Ok(bundle)
         }
@@ -276,9 +276,7 @@ fn stage(plan: &Plan, data: &[u8]) -> Result<PathBuf, String> {
 fn check_mac_location(app: &Path) -> Result<(), String> {
     let s = app.to_string_lossy();
     if s.contains("/AppTranslocation/") || s.starts_with("/Volumes/") {
-        return Err("Nebula is running from the disk image or Downloads, where it can't update itself. \
-                    Drag Nebula Reader into Applications, open it from there and try again."
-            .into());
+        return Err(fl!("update-mac-location"));
     }
     Ok(())
 }
@@ -338,7 +336,7 @@ fn swap_in(from: &Path, to: &Path) -> Result<(), String> {
                         let _ = fs::rename(&old, &dst);
                     }
                 }
-                return Err(format!("couldn't replace {}: {e}", dst.display()));
+                return Err(fl!("update-replace-failed", file = dst.display().to_string(), error = e.to_string()));
             }
         }
     }
@@ -406,7 +404,7 @@ pub fn apply(staged: &Staged) -> Result<(), String> {
             swap_in(&staged.path, &plan.app)?;
             let _ = fs::remove_dir_all(&staged.path);
             run_after_exit_windows(&relaunch_script(&plan.exe))
-                .map_err(|e| format!("Nebula was updated but couldn't restart itself ({e}); start it again"))
+                .map_err(|e| fl!("update-restart-failed", error = e.to_string()))
         }
         Kind::MacApp => {
             let staging = staged.path.parent().ok_or("no staging folder")?;
@@ -459,7 +457,7 @@ fn swap_bundle(new: &Path, app: &Path, old: &Path) -> Result<(), String> {
     fs::rename(app, old).map_err(|e| format!("couldn't move the old app aside: {e}"))?;
     if let Err(e) = fs::rename(new, app) {
         let _ = fs::rename(old, app);
-        return Err(format!("couldn't put the new app in place: {e}"));
+        return Err(fl!("update-place-failed", error = e.to_string()));
     }
     Ok(())
 }

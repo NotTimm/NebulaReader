@@ -195,13 +195,13 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
     }
 
     if chapters.is_empty() {
-        return Err(format!("no readable chapters found in {}", path.display()));
+        return Err(fl!("no-readable-chapters", path = path.display().to_string()));
     }
 
     // Untitled chapters get a positional name.
     for (i, ch) in chapters.iter_mut().enumerate() {
         if ch.title.is_empty() {
-            ch.title = format!("Section {}", i + 1);
+            ch.title = fl!("section-number", number = i + 1);
         }
     }
 

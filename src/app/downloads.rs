@@ -177,7 +177,7 @@ fn groups(db: &rusqlite::Connection, done: &HashMap<String, library::Download>, 
         .into_iter()
         .map(|(series, downloads)| {
             let entry = library::get_series(db, series);
-            let name = entry.as_ref().map(|e| e.name().to_string()).unwrap_or_else(|| "No longer in the library".into());
+            let name = entry.as_ref().map(|e| e.name().to_string()).unwrap_or_else(|| fl!("dl-not-in-library"));
             let issues = library::issues_for(db, series);
             let manga = super::library_view::is_manga(&issues);
             let mut items: Vec<(usize, DlItem)> = downloads
@@ -248,11 +248,7 @@ impl App {
                     }
                 }
                 if unreachable > 0 {
-                    self.dl.error = Some(format!(
-                        "{unreachable} {} on a drive that isn't connected. Connect it to remove {}.",
-                        if unreachable == 1 { "download is" } else { "downloads are" },
-                        if unreachable == 1 { "it" } else { "them" },
-                    ));
+                    self.dl.error = Some(fl!("dl-unreachable", count = unreachable));
                 }
                 self.dl.reload(db);
                 return self.refresh_views();
@@ -306,7 +302,7 @@ impl App {
                 self.set_show_context(false);
                 self.series_page = None;
                 self.app_view = super::AppView::Downloads;
-                self.set_header_title("Downloads".into());
+                self.set_header_title(fl!("downloads"));
             }
             DlMsg::DismissError => self.dl.error = None,
             DlMsg::ToggleGroup(series) => {
@@ -316,7 +312,7 @@ impl App {
             }
             DlMsg::ChooseFolder => {
                 return cosmic::task::future(async move {
-                    let dialog = cosmic::dialog::file_chooser::open::Dialog::new().title("Download Folder");
+                    let dialog = cosmic::dialog::file_chooser::open::Dialog::new().title(fl!("dl-choose-folder"));
                     match dialog.open_folder().await {
                         Ok(r) => Message::Dl(DlMsg::FolderChosen(r.url().to_owned())),
                         Err(_) => Message::Dl(DlMsg::Tick),
@@ -325,7 +321,7 @@ impl App {
             }
             DlMsg::FolderChosen(url) => match url.to_file_path() {
                 Ok(path) => return self.set_download_folder(Some(path)),
-                Err(()) => self.dl.error = Some(format!("not a local folder: {url}")),
+                Err(()) => self.dl.error = Some(fl!("dl-not-local-folder", url = url.to_string())),
             },
             DlMsg::UseDefaultFolder => return self.set_download_folder(None),
             DlMsg::Moved(moved, errors) => {
@@ -350,11 +346,7 @@ impl App {
                     self.dl.reload(db);
                 }
                 if let Some(first) = errors.first() {
-                    self.dl.error = Some(format!(
-                        "{} {} couldn't be moved and stayed in the old folder: {first}",
-                        errors.len(),
-                        if errors.len() == 1 { "download" } else { "downloads" },
-                    ));
+                    self.dl.error = Some(fl!("dl-move-failed", count = errors.len(), error = first.as_str()));
                 }
                 return Task::batch([self.pump_downloads(), self.refresh_views()]);
             }
@@ -369,16 +361,13 @@ impl App {
         let root = match &self.settings.download_dir {
             Some(dir) => {
                 if !dir.is_dir() {
-                    return Err(format!(
-                        "The download folder {} isn't available. Connect its drive, or pick another folder on the Downloads page.",
-                        dir.display()
-                    ));
+                    return Err(fl!("dl-folder-unavailable", folder = dir.display().to_string()));
                 }
                 dir.join("Nebula Reader")
             }
             None => jellyfin::default_download_root(),
         };
-        std::fs::create_dir_all(&root).map_err(|e| format!("can't use the download folder: {e}"))?;
+        std::fs::create_dir_all(&root).map_err(|e| fl!("dl-folder-unusable", error = e.to_string()))?;
         Ok(root)
     }
 
@@ -393,7 +382,7 @@ impl App {
     /// Switches the download folder and moves what's downloaded there.
     fn set_download_folder(&mut self, dir: Option<PathBuf>) -> Task<Message> {
         if self.dl.busy() || self.dl.moving || !self.dl.queue.is_empty() {
-            self.dl.error = Some("Wait for the downloads to finish before changing the folder.".into());
+            self.dl.error = Some(fl!("dl-wait-to-change"));
             return Task::none();
         }
         if dir == self.settings.download_dir {
@@ -404,7 +393,7 @@ impl App {
             None => jellyfin::default_download_root(),
         };
         if let Err(e) = std::fs::create_dir_all(&root)
-            .map_err(|e| format!("can't use that folder: {e}"))
+            .map_err(|e| fl!("dl-that-folder-unusable", error = e.to_string()))
             .and_then(|()| crate::platform::disk::check_writable(&root))
         {
             self.dl.error = Some(e);
@@ -460,7 +449,7 @@ impl App {
             let ext = self.jf.extensions.get(item_id).filter(|e| !e.is_empty()).cloned().unwrap_or_else(|| "cbz".into());
             let dir = root.join(account_key);
             if let Err(e) = std::fs::create_dir_all(&dir) {
-                self.dl.error = Some(format!("can't use the download folder: {e}"));
+                self.dl.error = Some(fl!("dl-folder-unusable", error = e.to_string()));
                 self.dl.queue.clear();
                 break;
             }
@@ -520,7 +509,7 @@ impl App {
                 widget::button::icon(icon::from_name("folder-download-symbolic"))
                     .on_press(Message::Dl(DlMsg::Download(vec![(issue_key.to_string(), series_key.to_string())])))
                     .into(),
-                "Download for reading offline".into(),
+                fl!("dl-tip-download"),
             ),
             DlState::Queued => (
                 widget::button::custom(widget::indeterminate_circular().size(16.0).bar_height(2.0))
@@ -528,7 +517,7 @@ impl App {
                     .padding(8)
                     .on_press(Message::Dl(DlMsg::Remove(vec![issue_key.to_string()])))
                     .into(),
-                "Waiting to download (click to cancel)".into(),
+                fl!("dl-tip-queued"),
             ),
             DlState::Running(f) => (
                 widget::button::custom(widget::determinate_circular(f).size(16.0).bar_height(2.0))
@@ -536,17 +525,17 @@ impl App {
                     .padding(8)
                     .on_press(Message::Dl(DlMsg::Remove(vec![issue_key.to_string()])))
                     .into(),
-                format!("Downloading… {:.0}% (click to cancel)", f * 100.0),
+                fl!("dl-tip-running", percent = format!("{:.0}", f * 100.0)),
             ),
             DlState::Done => (
                 widget::button::icon(icon::from_name("emblem-ok-symbolic"))
                     .on_press(Message::Dl(DlMsg::Remove(vec![issue_key.to_string()])))
                     .into(),
-                "Downloaded (click to remove the download)".into(),
+                fl!("dl-tip-done"),
             ),
             DlState::Unavailable => (
                 widget::button::icon(icon::from_name("drive-removable-media-symbolic")).into(),
-                "Downloaded to a drive that isn't connected".into(),
+                fl!("dl-on-missing-drive"),
             ),
         };
         widget::tooltip(button, widget::text(hint), hint_at).into()
@@ -564,19 +553,19 @@ impl App {
             .into()
         };
         match self.dl.state(issue_key) {
-            DlState::None => widget::button::standard("Download Book")
+            DlState::None => widget::button::standard(fl!("download-book"))
                 .leading_icon(icon::from_name("folder-download-symbolic"))
                 .on_press(Message::Dl(DlMsg::Download(vec![(issue_key.to_string(), series_key.to_string())])))
                 .into(),
-            DlState::Queued => busy(widget::indeterminate_circular().size(14.0).bar_height(2.0).into(), "Waiting… (Cancel)".into()),
+            DlState::Queued => busy(widget::indeterminate_circular().size(14.0).bar_height(2.0).into(), fl!("dl-waiting-cancel")),
             DlState::Running(f) => busy(
                 widget::determinate_circular(f).size(14.0).bar_height(2.0).into(),
-                format!("Downloading {:.0}% (Cancel)", f * 100.0),
+                fl!("dl-running-cancel", percent = format!("{:.0}", f * 100.0)),
             ),
-            DlState::Done => widget::button::standard("Remove Download").on_press(remove).into(),
+            DlState::Done => widget::button::standard(fl!("remove-download")).on_press(remove).into(),
             DlState::Unavailable => widget::tooltip(
-                widget::button::standard("Downloaded").leading_icon(icon::from_name("drive-removable-media-symbolic")),
-                widget::text("Downloaded to a drive that isn't connected"),
+                widget::button::standard(fl!("downloaded")).leading_icon(icon::from_name("drive-removable-media-symbolic")),
+                widget::text(fl!("dl-on-missing-drive")),
                 widget::tooltip::Position::Bottom,
             )
             .into(),
@@ -594,11 +583,11 @@ impl App {
         let have: Vec<String> =
             issue_keys.iter().filter(|k| !matches!(self.dl.state(k), DlState::None | DlState::Unavailable)).cloned().collect();
         if !missing.is_empty() {
-            let label = if have.is_empty() { "Download All".to_string() } else { format!("Download {} More", missing.len()) };
+            let label = if have.is_empty() { fl!("download-all") } else { fl!("download-more", count = missing.len()) };
             out.push(widget::button::standard(label).on_press(Message::Dl(DlMsg::Download(missing))).into());
         }
         if !have.is_empty() {
-            out.push(widget::button::standard("Remove Downloads").on_press(Message::Dl(DlMsg::Remove(have))).into());
+            out.push(widget::button::standard(fl!("remove-downloads")).on_press(Message::Dl(DlMsg::Remove(have))).into());
         }
         out
     }
@@ -613,7 +602,7 @@ impl App {
                 .spacing(8)
                 .align_y(Alignment::Center)
                 .push(widget::determinate_circular(overall).size(14.0).bar_height(2.0))
-                .push(widget::text::caption(format!("Downloading {} of {total}… {:.0}%", done + 1, current * 100.0)))
+                .push(widget::text::caption(fl!("dl-progress", current = done + 1, total = total, percent = format!("{:.0}", current * 100.0))))
                 .into(),
         )
     }
@@ -623,14 +612,14 @@ impl App {
     pub(super) fn downloads_settings<'a>(&self) -> Element<'a, Message> {
         let (count, bytes) = self.dl.totals();
         let summary = if count == 0 {
-            "No downloads yet. Use the download buttons on a Jellyfin series or book to read it offline.".to_string()
+            fl!("dl-none-yet-settings")
         } else {
-            format!("Downloads: {count} {} · {}", if count == 1 { "item" } else { "items" }, human_size(bytes))
+            fl!("dl-summary-settings", count = count, size = human_size(bytes))
         };
         widget::column::with_capacity(2)
             .spacing(8)
             .push(widget::text::body(summary))
-            .push(widget::button::standard("Manage Downloads").on_press(Message::Dl(DlMsg::OpenManager)))
+            .push(widget::button::standard(fl!("manage-downloads")).on_press(Message::Dl(DlMsg::OpenManager)))
             .width(Length::Fill)
             .into()
     }
@@ -644,10 +633,10 @@ impl App {
         }
 
         let (count, bytes) = self.dl.totals();
-        col = col.push(widget::text::title2("Downloads")).push(widget::text::body(if count == 0 {
-            "Nothing downloaded yet. Jellyfin series and books have a Download button on their page, and downloads can be read when the server can't be reached.".to_string()
+        col = col.push(widget::text::title2(fl!("downloads"))).push(widget::text::body(if count == 0 {
+            fl!("dl-none-yet")
         } else {
-            format!("{count} {} · {} in all", if count == 1 { "item" } else { "items" }, human_size(bytes))
+            fl!("dl-summary", count = count, size = human_size(bytes))
         }));
 
         // ── Location ──────────────────────────────────────────────────────
@@ -656,36 +645,32 @@ impl App {
         let available = chosen.is_none_or(Path::is_dir);
         let mut place = widget::Column::new()
             .spacing(6)
-            .push(widget::text::heading("Download folder"))
+            .push(widget::text::heading(fl!("dl-folder")))
             .push(widget::text::body(shown.display().to_string()));
         if !available {
-            place = place.push(widget::text::caption(
-                "This folder isn't available. Connect its drive, or pick another folder. New downloads wait until then; nothing is lost.",
-            ));
+            place = place.push(widget::text::caption(fl!("dl-folder-missing")));
         } else {
             let probe = if shown.is_dir() { shown.clone() } else { chosen.map(Path::to_path_buf).unwrap_or(shown.clone()) };
             let probe = if probe.is_dir() { probe } else { crate::platform::data_dir() };
             if let Some(free) = crate::platform::disk::free_space(&probe) {
-                place = place.push(widget::text::caption(format!("{} free on this drive", human_size(free))));
+                place = place.push(widget::text::caption(fl!("dl-free-space", size = human_size(free))));
             }
             if chosen.is_some() && crate::platform::disk::other_drive(&probe) == Some(true) {
-                place = place.push(widget::text::caption(
-                    "On a separate drive. Each file is only kept once it's completely saved, so unplugging mid-download loses just that file — but eject the drive from your file manager before unplugging it.",
-                ));
+                place = place.push(widget::text::caption(fl!("dl-separate-drive")));
             }
         }
         let locked = self.dl.busy() || self.dl.moving || !self.dl.queue.is_empty();
         place = place.push(
             widget::row::with_capacity(3)
                 .spacing(8)
-                .push(widget::button::standard("Change Folder…").on_press_maybe((!locked).then_some(Message::Dl(DlMsg::ChooseFolder))))
+                .push(widget::button::standard(fl!("change-folder")).on_press_maybe((!locked).then_some(Message::Dl(DlMsg::ChooseFolder))))
                 .push_maybe(chosen.map(|_| {
-                    widget::button::standard("Use Default Folder").on_press_maybe((!locked).then_some(Message::Dl(DlMsg::UseDefaultFolder)))
+                    widget::button::standard(fl!("use-default-folder")).on_press_maybe((!locked).then_some(Message::Dl(DlMsg::UseDefaultFolder)))
                 }))
-                .push(widget::button::standard("Open Folder").on_press_maybe(available.then_some(Message::Dl(DlMsg::OpenFolder)))),
+                .push(widget::button::standard(fl!("open-folder")).on_press_maybe(available.then_some(Message::Dl(DlMsg::OpenFolder)))),
         );
         if count > 0 {
-            place = place.push(widget::text::caption("Changing the folder moves your downloads there."));
+            place = place.push(widget::text::caption(fl!("dl-change-moves")));
         }
         col = col.push(place);
 
@@ -696,7 +681,7 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(widget::indeterminate_circular().size(14.0).bar_height(2.0))
-                    .push(widget::text::body("Moving downloads to the new folder…")),
+                    .push(widget::text::body(fl!("dl-moving"))),
             );
         }
         if let Some(status) = self.download_status() {
@@ -707,7 +692,7 @@ impl App {
                     .spacing(12)
                     .align_y(Alignment::Center)
                     .push(status)
-                    .push(widget::button::standard("Cancel").on_press(Message::Dl(DlMsg::Remove(stop)))),
+                    .push(widget::button::standard(fl!("cancel")).on_press(Message::Dl(DlMsg::Remove(stop)))),
             );
         }
         col = col.push(widget::divider::horizontal::default());
@@ -724,7 +709,7 @@ impl App {
         }
         if !self.dl.present.is_empty() {
             list = list.push(widget::Space::new().height(12)).push(
-                widget::button::destructive("Remove All Downloads").on_press(Message::Dl(DlMsg::RemoveAll)),
+                widget::button::destructive(fl!("remove-all-downloads")).on_press(Message::Dl(DlMsg::RemoveAll)),
             );
         }
         col = col.push(widget::scrollable(list.padding([0, 12, 24, 0])).height(Length::Fill));
@@ -735,11 +720,11 @@ impl App {
         let expanded = self.dl.expanded.contains(&g.series);
         let missing = g.items.iter().filter(|i| !i.present).count();
         let mut facts = vec![
-            if g.items.len() == 1 && g.items[0].key == g.series { "1 file".to_string() } else { format!("{} chapters", g.items.len()) },
+            if g.items.len() == 1 && g.items[0].key == g.series { fl!("one-file") } else { fl!("chapter-count", count = g.items.len()) },
             human_size(g.size),
         ];
         if missing > 0 {
-            facts.push(if missing == g.items.len() { "drive not connected".into() } else { format!("{missing} on a drive not connected") });
+            facts.push(if missing == g.items.len() { fl!("drive-not-connected") } else { fl!("dl-some-missing", count = missing) });
         }
         let present: Vec<String> = g.items.iter().filter(|i| i.present).map(|i| i.key.clone()).collect();
         let in_library = self.db.as_ref().is_some_and(|db| library::get_series(db, &g.series).is_some());
@@ -755,8 +740,8 @@ impl App {
                     .push(widget::text::heading(g.name.clone()))
                     .push(widget::text::caption(facts.join("  ·  "))),
             )
-            .push_maybe(in_library.then(|| widget::button::standard("Open").on_press(Message::OpenSeriesPage(g.series.clone()))))
-            .push(widget::button::standard("Remove").on_press_maybe((!present.is_empty()).then(|| Message::Dl(DlMsg::Remove(present)))));
+            .push_maybe(in_library.then(|| widget::button::standard(fl!("open")).on_press(Message::OpenSeriesPage(g.series.clone()))))
+            .push(widget::button::standard(fl!("remove")).on_press_maybe((!present.is_empty()).then(|| Message::Dl(DlMsg::Remove(present)))));
         widget::mouse_area(row)
             .on_press(Message::Dl(DlMsg::ToggleGroup(g.series.clone())))
             .interaction(cosmic::iced::mouse::Interaction::Pointer)
@@ -768,7 +753,7 @@ impl App {
 fn download_item_row(item: &DlItem) -> Element<'_, Message> {
     let mut facts = vec![human_size(item.size)];
     if !item.present {
-        facts.push("drive not connected".into());
+        facts.push(fl!("drive-not-connected"));
     }
     widget::row::with_capacity(3)
         .spacing(12)
