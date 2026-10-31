@@ -59,7 +59,7 @@ creating-index = Creating index of CBR comic…
 loading-comic = Loading comic…
 start-reading = Open a comic or book to start reading
 # $modifier: Ctrl, or Cmd on a Mac.
-reader-keys = ← → page  ·  Space fit to width  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer, { $modifier }: move)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy
+reader-keys = ← → page  ·  Space fit to width  ·  ↑ ↓ scroll  ·  C chapters  ·  L layout  ·  M zoom  ·  scroll or pinch to zoom (Shift: finer, { $modifier }: move)  ·  T theater  ·  F fullscreen  ·  I info  ·  P copy
 drop-hint = You can also drag and drop a file or folder here.
 open-comic-or-book = Open Comic or Book
 file-filter-comics = Comics & Books

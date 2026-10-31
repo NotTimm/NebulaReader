@@ -107,8 +107,9 @@ the way so you can read.
   shows whole, and your zoom comes back on the page after it.
 - Fit to Width (`Space`, or its button in the header bar) makes a comic
   page as wide as the window, from its top, with a quick snap; scroll
-  down to read the rest. It stays on as you turn pages, each starting at
-  its top, and `Space` again shows the whole page.
+  down to read the rest (or hold `↓` / `↑`, so the keyboard alone will
+  do). It stays on as you turn pages, each starting at its top, and
+  `Space` again shows the whole page.
 - CBRs open right away: the pages are listed from the archive's headers,
   and it's unpacked in the background as you reach it, then cached, so
   page turns stay instant.
@@ -248,7 +249,7 @@ also how apps reach the COSMIC Store).
 |---|---|---|
 | Next / previous page | `→` `←` `Page Down` `Page Up` | `→` `←` `Page Down` `Page Up` `Space` (`Shift Space` back), mouse wheel, or click the page edge |
 | Fit to Width | `Space` (scroll down the page; `Space` again for the whole page) | |
-| Scroll a line | | `↓` `↑` |
+| Scroll down / up | `↓` `↑` (held) while zoomed or fitted to width | `↓` `↑` a line |
 | Contents / chapters | `C` | `C` |
 | Full screen | `F` (`Esc` to leave) | `F` (`Esc` to leave) |
 | Reading settings | `S` | `A`; text size `Ctrl +` / `Ctrl −`, `Ctrl 0` to reset (`Cmd` on a Mac) |

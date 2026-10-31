@@ -107,7 +107,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-10-30.
+the owner's laptop). Last updated 2026-10-31.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -220,6 +220,11 @@ the owner's laptop). Last updated 2026-10-30.
   theme polling every 5 s instead of change signals, library grid
   rebuilt on every message, Jellyfin library fetch one folder at a time,
   scans re-open known archives with no concurrency cap.
+- Arrow scrolling (patch 16, 2026-10-31, unreleased): holding Up/Down
+  scrolls a zoomed or fitted comic page (`KeyScroll` in the fork's
+  viewer: 0.9 screenfuls/s, 450–1400 px/s, starts at 60%, 150 ms ramp,
+  0.1 s glide). The speed is the owner's to tune by feel; untried in the
+  running app.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
 - Translations (2026-10-30, unreleased): Fluent via i18n-embed
   (`src/i18n.rs`, `i18n/<lang>/nebula_reader.ftl`, `i18n.toml`); every
@@ -270,7 +275,7 @@ the owner's laptop). Last updated 2026-10-30.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `5062b8b` (patches 1–15, see Cargo.toml),
+- libcosmic: fork pinned at `e5db6d4` (patches 1–16, see Cargo.toml),
   merged with upstream through `95236a94` (2026-10-27; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
