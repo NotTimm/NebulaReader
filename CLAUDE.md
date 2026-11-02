@@ -279,6 +279,21 @@ the owner's laptop). Last updated 2026-11-01.
   1000+ books (`Confirm`). Tested against Gutenberg's real feed shapes
   (trimmed copies in opds tests); the owner is trying the look and feel
   with `cargo run`. Gutenberg's server is slow and sometimes answers 504.
+  Tried by the owner on Gutenberg 2026-11-01 (issue #12 has the log).
+  Connect tries the address without and then with its trailing slash
+  (Gutenberg 403s `/ebooks.opds`). Facets (`Feed::facets`, sort/filter
+  button rows, `OpdsMsg::Facet` replaces the trail's last URL) are built
+  but untried: Gutenberg sends none. To test without touching the
+  installed copy: `env XDG_CONFIG_HOME=~/.nebula-dev/config
+  XDG_DATA_HOME=~/.nebula-dev/data XDG_CACHE_HOME=~/.nebula-dev/cache
+  nice -n 19 cargo run -j 4` (config has a `cosmic` symlink for the theme).
+- Book reader (2026-11-01): EPUB files holding several chapters are split
+  at the contents' anchors (`RawToc::fragment`, `Parsed::Anchor`, at the
+  shallowest level pointing into the file), so Gutenberg's Moby Dick is
+  143 chapters, not 13. A touchpad swipe turns one page (`State::swipe`
+  in `paged.rs`: locked until a 220 ms pause); fractional wheel lines
+  (Windows touchpads) count as a swipe. "Opening book…" while an EPUB
+  loads (`App::opening_book`).
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing
