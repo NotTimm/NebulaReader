@@ -1500,7 +1500,8 @@ impl App {
                 };
                 col = col.push(widget::row::with_capacity(2).align_y(Alignment::Center).push(toggle).push(item(s.title.clone(), WikiMsg::JumpTo(Some(i)))));
             } else if s.level > 2 && parent.is_some_and(|p| self.wiki.toc_open.contains(&p)) {
-                let indent = 24.0 + 12.0 * (s.level as f32 - 3.0);
+                // Past the arrows' column, so subsections sit inside their section.
+                let indent = 24.0 + 14.0 + 12.0 * (s.level as f32 - 3.0);
                 col = col.push(
                     widget::row::with_capacity(2)
                         .push(widget::Space::new().width(Length::Fixed(indent)))
