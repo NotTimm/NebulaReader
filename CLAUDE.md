@@ -109,7 +109,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-11-01.
+the owner's laptop). Last updated 2026-11-02.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -284,6 +284,17 @@ the owner's laptop). Last updated 2026-11-01.
   wordmark (trademarks); User-Agent names the app. English only.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
+- Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows
+  (comic reader, Wikipedia viewer) because a precision touchpad's pinch is
+  wheel messages with `MK_CONTROL` in the message but not Ctrl in the
+  keyboard state, and winit reads `GetKeyState`. `platform/pinch.rs`
+  hooks the WNDPROC (on `WindowOpened`) and marks Ctrl down for that one
+  message, delta kept off a whole notch so it reads as touchpad. Type-
+  checked only: the owner is to try it on Windows.
+- Wikipedia floats: `FloatFlow::place` narrows a paragraph for every float
+  over its whole height (re-measured until stable), not only at its first
+  line (Tropical Storm Linda's table ran over text). Wikipedia can't be
+  reached from cloud sessions (proxy 403).
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
 - Translations (2026-10-30, unreleased): Fluent via i18n-embed
   (`src/i18n.rs`, `i18n/<lang>/nebula_reader.ftl`, `i18n.toml`); every
