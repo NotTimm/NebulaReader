@@ -131,6 +131,10 @@ pub struct BookSettings {
     pub theme: BookTheme,
     pub justify: bool,
     pub layout: BookLayout,
+    /// The page lets the window's background show through (frosted glass
+    /// on COSMIC): with the System theme it's the window's own, with the
+    /// others their colour, tinting it.
+    pub frosted: bool,
 }
 
 impl BookSettings {
@@ -149,6 +153,7 @@ impl Default for BookSettings {
             theme: BookTheme::Auto,
             justify: true,
             layout: BookLayout::Page,
+            frosted: false,
         }
     }
 }

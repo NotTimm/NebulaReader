@@ -292,6 +292,7 @@ page-section = Página
 layout = Diseño
 line-width = Ancho de línea
 theme = Tema
+frosted-glass = Vidrio esmerilado
 keys = Teclas
 book-keys = → / Espacio / Av Pág, o clic en el borde derecho: página siguiente  ·  ← / Re Pág, o clic en el borde izquierdo: página anterior  ·  Rueda del ratón: pasar páginas (desplaza en el diseño de desplazamiento)  ·  C: índice  ·  F: pantalla completa  ·  Ctrl 0: tamaño predeterminado
 

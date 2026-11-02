@@ -46,6 +46,7 @@ pub enum BookMsg {
     SetWidth(usize),
     SetTheme(usize),
     SetJustify(bool),
+    SetFrosted(bool),
     SetLayout(usize),
     /// Show a book image full-window, zoomable (maps, photos).
     OpenImage(usize),
@@ -68,6 +69,9 @@ pub(super) struct BookScroll {
     pub viewport_h: f32,
     pub content_h: f32,
 }
+
+/// How much of a reading theme's colour a frosted page keeps.
+const FROSTED_TINT: f32 = 0.75;
 
 struct Palette {
     bg: Color,
@@ -381,13 +385,20 @@ impl App {
         });
 
         let (bg, fg) = (pal.bg, pal.fg);
+        // Frosted glass: the System theme leaves the page to the window's
+        // own background; the others tint it with their colour.
+        let page_bg = match (self.settings.book.frosted, self.settings.book.theme) {
+            (false, _) => Some(bg),
+            (true, BookTheme::Auto) => None,
+            (true, _) => Some(Color { a: FROSTED_TINT, ..bg }),
+        };
         let content: Element<'_, Message> = widget::container(
             widget::Column::new().push(reading).push(status),
         )
         .width(Length::Fill)
         .height(Length::Fill)
         .style(move |_: &cosmic::Theme| widget::container::Style {
-            background: Some(Background::Color(bg)),
+            background: page_bg.map(Background::Color),
             text_color: Some(fg),
             ..Default::default()
         })
@@ -606,6 +617,10 @@ impl App {
                     BookTheme::ALL.iter().position(|t| *t == bs.theme),
                     |i| Message::Book(BookMsg::SetTheme(i)),
                 ),
+            ))
+            .add(widget::settings::item(
+                fl!("frosted-glass"),
+                widget::toggler(bs.frosted).on_toggle(|v| Message::Book(BookMsg::SetFrosted(v))),
             ));
 
         let help = widget::settings::section().title(fl!("keys")).add(widget::text::caption(fl!("book-keys")));
@@ -764,6 +779,10 @@ impl App {
             }
             BookMsg::SetJustify(v) => {
                 self.settings.book.justify = v;
+                self.settings.save();
+            }
+            BookMsg::SetFrosted(v) => {
+                self.settings.book.frosted = v;
                 self.settings.save();
             }
             BookMsg::ToggleTypography => {

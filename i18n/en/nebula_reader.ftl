@@ -302,6 +302,7 @@ page-section = Page
 layout = Layout
 line-width = Line width
 theme = Theme
+frosted-glass = Frosted glass
 keys = Keys
 book-keys = → / Space / Page Down, or click the right edge: next page  ·  ← / Page Up, or click the left edge: previous page  ·  Mouse wheel: turn pages (scrolls in Scroll layout)  ·  C: contents  ·  F: full screen  ·  Ctrl 0: default size
 
