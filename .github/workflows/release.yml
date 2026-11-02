@@ -20,6 +20,10 @@
 #   microsoft/winget-pkgs. It does nothing until the WINGET_TOKEN secret is
 #   set (a classic token with `public_repo` scope), and it needs the
 #   package's first version to be in winget already (see README).
+# - Betas (a version like 0.2.0-beta.1) become GitHub pre-releases and skip
+#   the copr and winget jobs. The app's update check asks for the latest
+#   release, which GitHub never answers with a pre-release, so nobody is
+#   offered a beta.
 #
 # Besides the signing key, only the default GITHUB_TOKEN is needed
 # (contents: write, for the release).
@@ -581,6 +585,8 @@ jobs:
   copr:
     name: Build on COPR
     needs: [version, release]
+    # Betas (a version with a hyphen) stay on GitHub only.
+    if: needs.version.outputs.prerelease != 'true'
     runs-on: ubuntu-24.04
     env:
       COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
@@ -600,6 +606,8 @@ jobs:
   winget:
     name: Submit to winget
     needs: [version, release]
+    # Betas (a version with a hyphen) stay on GitHub only.
+    if: needs.version.outputs.prerelease != 'true'
     runs-on: ubuntu-24.04
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
