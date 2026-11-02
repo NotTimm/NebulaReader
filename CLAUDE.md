@@ -294,6 +294,17 @@ the owner's laptop). Last updated 2026-11-01.
   in `paged.rs`: locked until a 220 ms pause); fractional wheel lines
   (Windows touchpads) count as a swipe. "Opening book…" while an EPUB
   loads (`App::opening_book`).
+  Links in book text (`Inline::link`, resolved to `file#id` or a web
+  address; `EpubBook::anchors`/`chapter_for_link`): inside the book they
+  open the chapter the anchor is in, at its first page; web and mailto
+  links ask first (libcosmic `dialog()`, `App::book_link`), with "always
+  for this book" kept in `Settings::open_links_from`. The paged view
+  forwards mouse events to the text through its page windows
+  (`State::column_cursor`), so a link takes the click before the page
+  edges do, in one- and two-page layouts. Not yet: a link to a place
+  inside a chapter (footnotes) opens that chapter's first page, not the
+  spot. Debug builds optimise the text-layout crates (Cargo.toml
+  `[profile.dev.package]`), so `cargo run` reads books at a usable speed.
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing

@@ -356,6 +356,9 @@ pub struct App {
     book_pages: paged::Pages,
     /// A book image opened full-window, by index into `epub_images`.
     book_image: Option<usize>,
+    /// A web link clicked in a book, waiting for "open it?": the address,
+    /// and whether to stop asking for this book.
+    book_link: Option<(String, bool)>,
     // pointer / touch state
     modifiers: keyboard::Modifiers,
     touches: HashSet<touch::Finger>,
@@ -1399,6 +1402,7 @@ impl Application for App {
             book_saved_pos: 0.0,
             book_pages: paged::Pages::default(),
             book_image: None,
+            book_link: None,
             modifiers: keyboard::Modifiers::default(),
             touches: HashSet::new(),
             chapter_covers: HashMap::new(),
@@ -1485,6 +1489,23 @@ impl Application for App {
 
         app.refresh_themes();
         (app, Task::batch(tasks))
+    }
+
+    fn dialog(&self) -> Option<Element<'_, Message>> {
+        let (url, always) = self.book_link.as_ref().filter(|_| self.app_view == AppView::Reader)?;
+        Some(
+            widget::dialog()
+                .title(fl!("open-link-title"))
+                .body(url.clone())
+                .control(
+                    widget::checkbox(*always)
+                        .label(fl!("open-link-always"))
+                        .on_toggle(|on| Message::Book(BookMsg::LinkAlways(on))),
+                )
+                .primary_action(widget::button::suggested(fl!("open-link")).on_press(Message::Book(BookMsg::LinkOpen)))
+                .secondary_action(widget::button::standard(fl!("cancel")).on_press(Message::Book(BookMsg::LinkCancel)))
+                .into(),
+        )
     }
 
     fn context_drawer(&self) -> Option<cosmic::app::context_drawer::ContextDrawer<'_, Message>> {
@@ -1848,6 +1869,14 @@ impl Application for App {
 impl App {
     fn handle_key(&mut self, key: Key) -> Task<Message> {
         if self.app_view == AppView::Reader && self.epub_book.is_some() {
+            // The "open this link?" dialog: Esc says no, Enter yes.
+            if self.book_link.is_some() {
+                return match key {
+                    Key::Named(Named::Escape) => self.update(Message::Book(BookMsg::LinkCancel)),
+                    Key::Named(Named::Enter) => self.update(Message::Book(BookMsg::LinkOpen)),
+                    _ => Task::none(),
+                };
+            }
             if self.book_image.is_some() {
                 if matches!(key, Key::Named(Named::Escape | Named::Backspace)) {
                     self.book_image = None;

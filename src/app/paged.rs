@@ -140,6 +140,19 @@ const SWIPE_GAP: std::time::Duration = std::time::Duration::from_millis(220);
 const SWIPE_DISTANCE: f32 = 60.0;
 
 impl State {
+    /// Where the pointer is in the column, through the page window it's
+    /// over (the windows show the column shifted to each page's start).
+    fn column_cursor(&self, bounds: Rectangle, cursor: mouse::Cursor) -> mouse::Cursor {
+        let Some(p) = cursor.position() else { return mouse::Cursor::Unavailable };
+        self.windows
+            .iter()
+            .find_map(|(w, start)| {
+                let on_screen = Rectangle { x: bounds.x + w.x, y: bounds.y + w.y, ..*w };
+                on_screen.contains(p).then(|| Point::new(p.x - w.x, p.y - w.y + start))
+            })
+            .map_or(mouse::Cursor::Unavailable, mouse::Cursor::Available)
+    }
+
     /// Takes a touchpad scroll of `y` pixels: whether it turns the page, and
     /// which way (`true` = forward).
     fn swipe(&mut self, y: f32, now: std::time::Instant) -> Option<bool> {
@@ -349,8 +362,8 @@ impl<Message: Clone> Widget<Message, cosmic::Theme, cosmic::Renderer> for Paged<
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _renderer: &cosmic::Renderer,
-        _clipboard: &mut dyn Clipboard,
+        renderer: &cosmic::Renderer,
+        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
@@ -378,6 +391,29 @@ impl<Message: Clone> Widget<Message, cosmic::Theme, cosmic::Renderer> for Paged<
                 })
                 .collect();
         }
+        // The text under the pointer gets the event first, at its place in
+        // the column: a link takes the click, and only then do the edges
+        // turn the page.
+        if let Event::Mouse(mouse::Event::CursorMoved { .. } | mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_)) = event {
+            let in_column = state.column_cursor(bounds, cursor);
+            if let Some(child) = layout.children().next() {
+                self.content.as_widget_mut().update(
+                    &mut tree.children[0],
+                    event,
+                    child,
+                    in_column,
+                    renderer,
+                    clipboard,
+                    shell,
+                    &Rectangle::INFINITE,
+                );
+                if shell.is_event_captured() {
+                    return;
+                }
+            }
+        }
+        let state = tree.state.downcast_mut::<State>();
+
         // Click or tap the left or right edge to turn the page.
         let edge = |p: Point| {
             let rel = (p.x - bounds.x) / bounds.width.max(1.0);
@@ -437,10 +473,23 @@ impl<Message: Clone> Widget<Message, cosmic::Theme, cosmic::Renderer> for Paged<
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
-        _renderer: &cosmic::Renderer,
+        renderer: &cosmic::Renderer,
     ) -> mouse::Interaction {
         let bounds = layout.bounds();
         let state = tree.state.downcast_ref::<State>();
+        // Over a link: the hand, wherever on the page it is.
+        if let Some(child) = layout.children().next() {
+            let inner = self.content.as_widget().mouse_interaction(
+                &tree.children[0],
+                child,
+                state.column_cursor(bounds, cursor),
+                &Rectangle::INFINITE,
+                renderer,
+            );
+            if inner == mouse::Interaction::Pointer {
+                return inner;
+            }
+        }
         match cursor.position_over(bounds) {
             Some(p) => {
                 let rel = (p.x - bounds.x) / bounds.width.max(1.0);

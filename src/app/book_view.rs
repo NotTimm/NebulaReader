@@ -53,6 +53,12 @@ pub enum BookMsg {
     ToggleTypography,
     /// The page layout changed (resize, new chapter, new font); just redraw.
     Repaginated,
+    /// A link in the text: a place in the book or a web address.
+    Link(String),
+    /// The "open this link?" dialog: stop asking for this book, open, or not.
+    LinkAlways(bool),
+    LinkOpen,
+    LinkCancel,
 }
 
 /// Where the book view's scrollable currently is.
@@ -95,7 +101,7 @@ fn base_font(f: BookFont) -> Font {
 }
 
 /// Styled spans for one block of inline runs.
-fn spans<'a>(runs: &'a [Inline], font: Font, size: f32, extra_italic: bool) -> Vec<Span<'a, (), Font>> {
+fn spans<'a>(runs: &'a [Inline], font: Font, size: f32, extra_italic: bool) -> Vec<Span<'a, String, Font>> {
     runs.iter()
         .map(|run| {
             let mut f = font;
@@ -105,13 +111,22 @@ fn spans<'a>(runs: &'a [Inline], font: Font, size: f32, extra_italic: bool) -> V
             if run.style.bold {
                 f.weight = Weight::Bold;
             }
-            if run.style.small_caps {
+            let s = if run.style.small_caps {
                 span(run.text.to_uppercase()).font(f).size(size * 0.82)
             } else {
                 span(run.text.as_str()).font(f)
+            };
+            // Links are underlined and open where they point.
+            match &run.link {
+                Some(target) => s.underline(true).link(target.clone()),
+                None => s,
             }
         })
         .collect()
+}
+
+fn link_msg(target: String) -> Message {
+    Message::Book(BookMsg::Link(target))
 }
 
 fn heading_scale(level: u8) -> f32 {
@@ -165,7 +180,7 @@ impl App {
                     let hs = size * heading_scale(*level);
                     let mut f = font;
                     f.weight = if *level <= 2 { Weight::Normal } else { Weight::Semibold };
-                    let el = rich_text(spans(runs, f, hs, false))
+                    let el = rich_text(spans(runs, f, hs, false)).on_link_click(link_msg)
                         .size(hs)
                         .line_height(LineHeight::Relative(1.25))
                         .align_x(cosmic::iced::widget::text::Alignment::Center)
@@ -186,7 +201,7 @@ impl App {
                         Align::Right => cosmic::iced::widget::text::Alignment::Right,
                         Align::Default => justify,
                     };
-                    let el = rich_text(sp)
+                    let el = rich_text(sp).on_link_click(link_msg)
                         .size(size)
                         .line_height(body_lh)
                         .align_x(align_x)
@@ -198,7 +213,7 @@ impl App {
                 }
                 Block::Quote(runs) => {
                     let el = widget::container(
-                        rich_text(spans(runs, font, size * 0.95, true))
+                        rich_text(spans(runs, font, size * 0.95, true)).on_link_click(link_msg)
                             .size(size * 0.95)
                             .line_height(body_lh)
                             .align_x(justify)
@@ -212,7 +227,7 @@ impl App {
                     let el = widget::Row::new()
                         .spacing(size * 0.5)
                         .push(widget::text("•").size(size).font(font))
-                        .push(rich_text(spans(runs, font, size, false)).size(size).line_height(body_lh).width(Length::Fill))
+                        .push(rich_text(spans(runs, font, size, false)).on_link_click(link_msg).size(size).line_height(body_lh).width(Length::Fill))
                         .padding([0.0, 0.0, 0.0, size])
                         .into();
                     (el, BoxKind::Lines(size * bs.line_spacing), size * 0.25, true)
@@ -639,6 +654,42 @@ impl App {
                 self.persist_book_position();
             }
             BookMsg::Repaginated => {}
+            BookMsg::LinkAlways(on) => {
+                if let Some((_, always)) = self.book_link.as_mut() {
+                    *always = on;
+                }
+            }
+            BookMsg::LinkCancel => self.book_link = None,
+            BookMsg::LinkOpen => {
+                let Some((url, always)) = self.book_link.take() else { return Task::none() };
+                if always {
+                    if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
+                        if !self.settings.open_links_from.contains(&key) {
+                            self.settings.open_links_from.push(key);
+                            self.settings.save();
+                        }
+                    }
+                }
+                crate::platform::open_url(&url);
+            }
+            BookMsg::Link(target) => {
+                if target.contains("://") || target.starts_with("mailto:") {
+                    // Out of the book: ask first, unless this book's links
+                    // are always opened.
+                    let key = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned());
+                    if key.is_some_and(|k| self.settings.open_links_from.contains(&k)) {
+                        crate::platform::open_url(&target);
+                    } else {
+                        self.book_link = Some((target, false));
+                    }
+                    return Task::none();
+                }
+                // A place in the book: its chapter, from the first page.
+                if let Some(ch) = book.chapter_for_link(&target) {
+                    self.show_chapter_select = false;
+                    return self.go_to_chapter(ch, 0.0);
+                }
+            }
             BookMsg::OpenImage(i) => self.book_image = Some(i),
             BookMsg::CloseImage => self.book_image = None,
             BookMsg::SetLayout(i) => {

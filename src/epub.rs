@@ -33,6 +33,9 @@ pub struct Style {
 pub struct Inline {
     pub text: String,
     pub style: Style,
+    /// Where it links to: a place in the book (`OEBPS/ch3.xhtml#note-2`,
+    /// see [`EpubBook::chapter_for_link`]) or a web address.
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -82,6 +85,9 @@ pub struct EpubBook {
     pub cover: Option<Vec<u8>>,
     pub chapters: Vec<EpubChapter>,
     pub toc: Vec<TocEntry>,
+    /// Places links can point to, `file` or `file#id`, and the chapter
+    /// each is in.
+    pub anchors: HashMap<String, usize>,
     /// Encoded image bytes referenced by [`Block::Image`]; the app turns
     /// each into one image handle up front, not per frame.
     pub images: Vec<Vec<u8>>,
@@ -91,6 +97,28 @@ impl EpubBook {
     pub fn total_words(&self) -> usize {
         self.chapters.iter().map(|c| c.words).sum()
     }
+
+    /// The chapter a link inside the book goes to: the one its anchor is
+    /// in, else the start of its file.
+    pub fn chapter_for_link(&self, target: &str) -> Option<usize> {
+        self.anchors.get(target).or_else(|| self.anchors.get(target.split('#').next()?)).copied()
+    }
+}
+
+/// A link's target from a file at `base`: a web address as it is, a place
+/// in the book as `file#id`.
+fn resolve_link(base: &str, href: &str) -> String {
+    let href = href.trim();
+    if href.contains("://") || href.starts_with("mailto:") {
+        return href.to_string();
+    }
+    let (file, fragment) = href.split_once('#').unwrap_or((href, ""));
+    let path = if file.is_empty() {
+        base.to_string()
+    } else {
+        join_epub_path(Path::new(base).parent().unwrap_or(Path::new("")), file)
+    };
+    if fragment.is_empty() { path } else { format!("{path}#{fragment}") }
 }
 
 pub fn is_epub_name(name: &str) -> bool {
@@ -159,7 +187,7 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
         let file_title = entries.iter().find(|t| t.fragment.is_none()).map(|t| t.title.clone());
         let mut parts: Vec<(Option<String>, Vec<Block>)> = vec![(file_title, Vec::new())];
         let mut anchor_part: Vec<(String, usize)> = Vec::new();
-        for block in parse_xhtml_body(&xhtml, &css, &wanted) {
+        for block in parse_xhtml_body(&xhtml, &chapter_path, &css, &wanted) {
             match block {
                 Parsed::Anchor(id) => {
                     if let Some(title) = split_at.get(id.as_str()) {
@@ -172,6 +200,7 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
                     }
                     anchor_part.push((id, parts.len() - 1));
                 }
+                Parsed::Id(id) => anchor_part.push((id, parts.len() - 1)),
                 Parsed::Block(b) => parts.last_mut().unwrap().1.push(b),
                 Parsed::ImageSrc(src) => {
                     let p = join_epub_path(&chapter_dir, &src);
@@ -248,6 +277,13 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
             (chapter < chapters.len()).then_some(TocEntry { title: t.title, chapter, level: t.level })
         })
         .collect();
+    // Where links can go: each file's start and each id in it.
+    let mut anchors: HashMap<String, usize> = chapter_for_path.clone();
+    for ((path, id), chapter) in &chapter_for_anchor {
+        if *chapter < chapters.len() {
+            anchors.insert(format!("{path}#{id}"), *chapter);
+        }
+    }
     if toc.is_empty() {
         toc = chapters
             .iter()
@@ -266,6 +302,7 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
         cover,
         chapters,
         toc,
+        anchors,
         images,
     })
 }
@@ -758,6 +795,8 @@ enum Parsed {
     /// An element with one of the ids asked for: where a chapter the
     /// table of contents points to starts.
     Anchor(String),
+    /// Any other element's id: somewhere a link can go.
+    Id(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -773,6 +812,8 @@ struct Frame {
     hints: Hints,
     /// Is this element block-level (starts/ends a block)?
     block: Option<Kind>,
+    /// A link (`<a href>`): its resolved target.
+    link: Option<String>,
 }
 
 fn block_kind(name: &str) -> Option<Kind> {
@@ -794,6 +835,8 @@ fn block_kind(name: &str) -> Option<Kind> {
 
 struct BodyParser<'c> {
     css: &'c CssHints,
+    /// The file being read, for resolving links.
+    base: &'c str,
     /// Ids to report where they are (table-of-contents targets).
     anchors: &'c std::collections::HashSet<String>,
     out: Vec<Parsed>,
@@ -833,15 +876,22 @@ impl BodyParser<'_> {
                 continue;
             }
             let has_content = !self.spans.is_empty();
-            let mut text = String::new();
+            let link = self.stack.iter().rev().find_map(|f| f.link.clone());
+            // The space between two runs goes with the first, unless that's
+            // a link and this isn't (a link's underline stops at its words).
             if self.pending_space && has_content {
-                text.push(' ');
+                match self.spans.last_mut() {
+                    Some(last) if last.link.is_some() && last.link != link => {
+                        self.spans.push(Inline { text: " ".into(), style, link: None })
+                    }
+                    Some(last) => last.text.push(' '),
+                    None => {}
+                }
             }
             self.pending_space = false;
-            text.push_str(piece);
             match self.spans.last_mut() {
-                Some(last) if last.style == style => last.text.push_str(&text),
-                _ => self.spans.push(Inline { text, style }),
+                Some(last) if last.style == style && last.link == link => last.text.push_str(piece),
+                _ => self.spans.push(Inline { text: piece.to_string(), style, link }),
             }
         }
     }
@@ -899,12 +949,12 @@ impl BodyParser<'_> {
 
     fn open(&mut self, e: &BytesStart, empty: bool) {
         let name = local_name(&e.name()).to_ascii_lowercase();
-        if !self.anchors.is_empty() {
-            if let Some(id) = attr(e, "id").or_else(|| if name == "a" { attr(e, "name") } else { None }) {
-                if self.anchors.contains(&id) {
-                    self.flush();
-                    self.out.push(Parsed::Anchor(id));
-                }
+        if let Some(id) = attr(e, "id").or_else(|| if name == "a" { attr(e, "name") } else { None }) {
+            if self.anchors.contains(&id) {
+                self.flush();
+                self.out.push(Parsed::Anchor(id));
+            } else {
+                self.out.push(Parsed::Id(id));
             }
         }
         match name.as_str() {
@@ -933,7 +983,8 @@ impl BodyParser<'_> {
         }
         if !empty {
             let hints = self.css.for_element(e);
-            self.stack.push(Frame { name, hints, block });
+            let link = if name == "a" { attr(e, "href").filter(|h| !h.trim().is_empty()).map(|h| resolve_link(self.base, &h)) } else { None };
+            self.stack.push(Frame { name, hints, block, link });
         }
     }
 
@@ -947,13 +998,13 @@ impl BodyParser<'_> {
     }
 }
 
-fn parse_xhtml_body(xhtml: &str, css: &CssHints, anchors: &std::collections::HashSet<String>) -> Vec<Parsed> {
+fn parse_xhtml_body(xhtml: &str, base: &str, css: &CssHints, anchors: &std::collections::HashSet<String>) -> Vec<Parsed> {
     let mut reader = Reader::from_str(xhtml);
     reader.config_mut().trim_text(false);
     reader.config_mut().check_end_names = false;
     let mut buf = Vec::new();
 
-    let mut p = BodyParser { css, anchors, out: Vec::new(), stack: Vec::new(), spans: Vec::new(), pending_space: false };
+    let mut p = BodyParser { css, base, anchors, out: Vec::new(), stack: Vec::new(), spans: Vec::new(), pending_space: false };
     let mut in_body = false;
     let mut skip_depth = 0usize; // inside <head>/<style>/<script>
 
@@ -1155,9 +1206,9 @@ mod tests {
             ),
             (
                 "OEBPS/a.xhtml",
-                r#"<html><body><p>Title page.</p>
+                r##"<html><body><p>Title page. <a href="#link-c2">Chapter 2</a> <a href="https://www.gutenberg.org">Gutenberg</a></p>
 <h2 id="c1">CHAPTER 1</h2><p>Call me Ishmael.</p><p id="s1">A section.</p><p>More of one.</p>
-<div><a id="c2"></a></div><h2>CHAPTER 2</h2><p>The carpet-bag.</p></body></html>"#,
+<div><a id="c2"></a></div><h2 id="link-c2">CHAPTER 2</h2><p>The carpet-bag.</p></body></html>"##,
             ),
         ];
         let path = std::env::temp_dir().join(format!("nebula-split-{}.epub", std::process::id()));
@@ -1177,6 +1228,23 @@ mod tests {
         assert_eq!(book.chapters[1].words, 10);
         let toc: Vec<(&str, usize, usize)> = book.toc.iter().map(|t| (t.title.as_str(), t.chapter, t.level)).collect();
         assert_eq!(toc, [("Front", 0, 0), ("Chapter 1", 1, 0), ("A section", 1, 1), ("Chapter 2", 2, 0)]);
+
+        // The title page's links: one into the book, one to the web.
+        let Block::Paragraph { spans, .. } = &book.chapters[0].blocks[0] else { panic!("not a paragraph") };
+        let runs: Vec<(&str, Option<&str>)> = spans.iter().map(|s| (s.text.as_str(), s.link.as_deref())).collect();
+        assert_eq!(
+            runs,
+            [
+                ("Title page. ", None),
+                ("Chapter 2", Some("OEBPS/a.xhtml#link-c2")),
+                (" ", None),
+                ("Gutenberg", Some("https://www.gutenberg.org"))
+            ]
+        );
+        assert_eq!(book.chapter_for_link("OEBPS/a.xhtml#link-c2"), Some(2));
+        assert_eq!(book.chapter_for_link("OEBPS/a.xhtml#s1"), Some(1));
+        // An unknown id in a known file: that file's start.
+        assert_eq!(book.chapter_for_link("OEBPS/a.xhtml#nowhere"), Some(0));
     }
 
     #[test]
@@ -1210,7 +1278,7 @@ mod tests {
             <h2 class="h2"><a id="p"/>3</h2>
             <p class="noindent"><span class="stickup">T</span>he afternoon &amp; <span class="txit">Hai bude</span> atom&nbsp;robitnikom.</p>
             <p>Second   line<br/>broken.</p></body></html>"#;
-        let blocks: Vec<Block> = parse_xhtml_body(html, &css, &Default::default())
+        let blocks: Vec<Block> = parse_xhtml_body(html, "", &css, &Default::default())
             .into_iter()
             .filter_map(|p| match p { Parsed::Block(b) => Some(b), _ => None })
             .collect();
