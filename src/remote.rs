@@ -132,6 +132,15 @@ impl Account {
         }
     }
 
+    /// Whether to try reading this account's files in parts (HTTP ranges):
+    /// Jellyfin always can; an OPDS server unless it was seen not to.
+    pub fn try_ranges(&self) -> bool {
+        match self {
+            Account::Jellyfin(_) => true,
+            Account::Opds(a) => opds::try_ranges(&a.key()),
+        }
+    }
+
     /// Pages served one by one as images, for items the server renders
     /// itself (OPDS page streaming). Blocking: may fetch a manifest.
     pub fn page_stream(&self, item_id: &str) -> Option<Vec<PageSource>> {

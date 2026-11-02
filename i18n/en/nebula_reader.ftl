@@ -664,3 +664,7 @@ wiki-license = CC BY-SA 4.0
 wiki-view-on = View on Wikipedia
 wiki-viewer-hint = ← → for the page's other pictures · scroll or pinch to zoom · Esc to close
 wiki-close = Close
+opds-reads-ranges = Reading: pages stream straight from the files
+opds-reads-pages = Reading: the server sends pages one at a time
+opds-reads-whole = Reading: books are downloaded whole first (this server doesn't send parts of files)
+opds-reads-unknown = Reading: checked when you open a book

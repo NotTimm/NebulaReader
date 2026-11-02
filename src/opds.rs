@@ -246,11 +246,19 @@ impl Account {
     /// An item's file, for streaming its pages or fetching it whole.
     pub fn file(&self, item_id: &str) -> HttpFile {
         let url = self.links(item_id).and_then(|l| l.file).unwrap_or_default();
-        HttpFile { auth: self.auth_for(&url), url }
+        HttpFile { auth: self.auth_for(&url), url, account_key: self.key() }
     }
 
     /// Its pages as images from the server, when it has page streaming.
     pub fn page_stream(&self, item_id: &str) -> Option<Vec<PageSource>> {
+        let pages = self.page_stream_inner(item_id);
+        if pages.is_some() {
+            remember_page_stream(&self.key());
+        }
+        pages
+    }
+
+    fn page_stream_inner(&self, item_id: &str) -> Option<Vec<PageSource>> {
         let links = self.links(item_id)?;
         let page = |url: String| PageSource::Web(Arc::new(WebPage { auth: self.auth_for(&url), url }));
         if let Some(p) = links.pages.filter(|p| p.count > 0) {
@@ -387,6 +395,7 @@ impl Accounts {
         self.accounts.retain(|a| a.key() != key);
         self.save();
         forget_links(key);
+        forget_abilities(key);
     }
 }
 
@@ -502,6 +511,100 @@ fn remember_links(account_key: &str, map: HashMap<String, Links>) {
     }
 }
 
+// ── What a server can do ───────────────────────────────────────────────────
+//
+// OPDS doesn't say what a server can do, and a server's name or version
+// wouldn't say whether its files can be read in parts (that's down to its
+// web server, or a proxy in front). So it's learned from reading: the
+// first range request shows whether the server sends parts of files, the
+// first book with page streaming shows that it has it. It's kept per
+// account, so later books skip a test that's known to fail.
+
+/// What a library's server was seen to do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Abilities {
+    /// Sends parts of files (HTTP ranges): pages stream from CBZ/CBR files.
+    pub ranges: Option<bool>,
+    /// Has page streaming (pages sent as images).
+    pub page_stream: bool,
+    /// When `ranges` was learned (Unix seconds).
+    pub checked: i64,
+}
+
+/// "Doesn't send parts of files" is tried again after this long, in case
+/// the server was updated or set up differently.
+const RECHECK_SECS: i64 = 7 * 24 * 3600;
+
+fn abilities_store() -> &'static RwLock<HashMap<String, Abilities>> {
+    static S: OnceLock<RwLock<HashMap<String, Abilities>>> = OnceLock::new();
+    S.get_or_init(|| {
+        let loaded = if cfg!(test) {
+            HashMap::new()
+        } else {
+            std::fs::read(abilities_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        };
+        RwLock::new(loaded)
+    })
+}
+
+fn abilities_path() -> std::path::PathBuf {
+    crate::library::cache_dir().join("opds").join("servers.json")
+}
+
+fn update_abilities(account_key: &str, change: impl FnOnce(&mut Abilities)) {
+    let Ok(mut store) = abilities_store().write() else { return };
+    let before = store.get(account_key).copied();
+    change(store.entry(account_key.to_string()).or_default());
+    if store.get(account_key).copied() == before || cfg!(test) {
+        return;
+    }
+    let path = abilities_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_vec(&*store) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+fn remember_ranges(account_key: &str, ranges: bool) {
+    let now = now_secs();
+    update_abilities(account_key, |a| {
+        // Only a change (or a stale answer) is news.
+        if a.ranges != Some(ranges) || now - a.checked > RECHECK_SECS / 2 {
+            a.ranges = Some(ranges);
+            a.checked = now;
+        }
+    });
+}
+
+fn remember_page_stream(account_key: &str) {
+    update_abilities(account_key, |a| a.page_stream = true);
+}
+
+/// What's known about an account's server.
+pub fn abilities(account_key: &str) -> Abilities {
+    abilities_store().read().ok().and_then(|s| s.get(account_key).copied()).unwrap_or_default()
+}
+
+/// Whether to try reading an account's files in parts: unless its server
+/// was seen not to send them, recently.
+pub fn try_ranges(account_key: &str) -> bool {
+    let a = abilities(account_key);
+    a.ranges != Some(false) || now_secs() - a.checked > RECHECK_SECS
+}
+
+/// Forgets what was learned (the account was added again, or removed), so
+/// the next book checks again.
+pub fn forget_abilities(account_key: &str) {
+    update_abilities(account_key, |a| *a = Abilities::default());
+}
+
 /// Adds one book's links to what's known (a book just downloaded from a
 /// catalog, before the sync that lists it has run).
 pub fn add_links(account_key: &str, item_id: &str, l: Links) {
@@ -590,6 +693,9 @@ fn download_client() -> &'static reqwest::Client {
 pub struct HttpFile {
     url: String,
     auth: Option<(String, String)>,
+    /// The account it's from, to remember whether its server sends parts
+    /// of files.
+    account_key: String,
 }
 
 impl HttpFile {
@@ -606,7 +712,13 @@ impl HttpFile {
 
     fn get(&self, range: String) -> Result<reqwest::blocking::Response, String> {
         let resp = self.send(Some(&range))?;
-        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        // A whole file instead of the part asked for: it ignores ranges.
+        // (An error isn't an answer either way.)
+        let partial = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+        if partial || resp.status().is_success() {
+            remember_ranges(&self.account_key, partial);
+        }
+        if !partial {
             return Err(format!("server didn't return a byte range (HTTP {})", resp.status()));
         }
         Ok(resp)
@@ -2012,6 +2124,28 @@ Summary:
         let feed = parse_feed(json, &url::Url::parse("https://c.example/all").unwrap()).unwrap();
         let f = &feed.facets[0];
         assert_eq!((f.title.as_str(), f.facets.len(), f.facets[0].active, f.facets[1].count), ("Sort", 2, true, Some(9)));
+    }
+
+    #[test]
+    fn remembers_what_a_server_can_do() {
+        let key = "opds-test-abilities";
+        forget_abilities(key);
+        // Nothing known: try ranges.
+        assert!(try_ranges(key));
+        assert_eq!(abilities(key), Abilities::default());
+        // It ignored a range: don't ask again.
+        remember_ranges(key, false);
+        assert!(!try_ranges(key));
+        // Unless that was long ago.
+        update_abilities(key, |a| a.checked -= RECHECK_SECS + 1);
+        assert!(try_ranges(key));
+        // It sends ranges after all, and has page streaming.
+        remember_ranges(key, true);
+        remember_page_stream(key);
+        let a = abilities(key);
+        assert_eq!((a.ranges, a.page_stream), (Some(true), true));
+        forget_abilities(key);
+        assert_eq!(abilities(key), Abilities::default());
     }
 
     #[test]

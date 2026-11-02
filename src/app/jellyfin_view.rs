@@ -377,7 +377,10 @@ fn open_streamed(
     let streamed = if local.is_some() || cached.exists() {
         None
     } else {
-        let file = if matches!(ext.as_str(), "cbz" | "zip") {
+        // A server known not to send parts of files isn't asked again.
+        let file = if !account.try_ranges() {
+            None
+        } else if matches!(ext.as_str(), "cbz" | "zip") {
             RemoteZip::open(account.range_source(item_id))
                 .ok()
                 .filter(|z| !z.entries.is_empty())

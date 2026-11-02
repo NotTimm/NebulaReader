@@ -458,6 +458,8 @@ impl App {
                     return Task::none();
                 };
                 account.kind = kind;
+                // Added again: what its server can do is checked afresh.
+                opds::forget_abilities(&account.key());
                 // Added again the same way: keep its folders and downloads.
                 if let Some(old) = self.opds.find(&account.key()) {
                     account.roots = old.roots.clone();
@@ -972,6 +974,10 @@ impl App {
                 vec![open.into()],
                 remove.into(),
             ));
+            // How its books are read, as learned from reading them.
+            if !account.is_catalog() {
+                section = section.add(widget::text::caption(reading_line(opds::abilities(&account.key()))));
+            }
         }
         // Download settings live with Jellyfin's when there's a Jellyfin
         // server; here when there are only catalogs.
@@ -1754,6 +1760,16 @@ fn quick_facet_row<'a>(key: &str, group: &FacetGroup) -> Element<'a, Message> {
     }
     col.push(widget::flex_row(buttons).row_spacing(6).column_spacing(6))
         .into()
+}
+
+/// "Reading: …" for a library's row in Settings.
+fn reading_line(a: opds::Abilities) -> String {
+    match (a.ranges, a.page_stream) {
+        (Some(true), _) => fl!("opds-reads-ranges"),
+        (_, true) => fl!("opds-reads-pages"),
+        (Some(false), false) => fl!("opds-reads-whole"),
+        (None, false) => fl!("opds-reads-unknown"),
+    }
 }
 
 /// Add to Library / Remove from Library for one folder.
