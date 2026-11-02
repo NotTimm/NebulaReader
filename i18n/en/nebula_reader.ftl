@@ -407,6 +407,7 @@ opds-not-signed-in = This catalog isn't in Settings any more. Add it again there
 # The page for browsing a catalog and picking folders.
 opds-loading = Loading…
 opds-folder-failed = Couldn't open this folder: { $error }
+opds-web-page = This is a web page, not part of the catalog.
 opds-search = Search { $catalog }
 opds-search-results = Results for “{ $query }”
 opds-pick-help = Folders you add are synced into your library like a Jellyfin library: each folder of books becomes a series. Everything else stays here to browse and search.

@@ -393,6 +393,7 @@ opds-too-big = una carpeta de la biblioteca tiene demasiado contenido para sincr
 opds-not-signed-in = Este catálogo ya no está en Ajustes. Vuelve a añadirlo allí.
 opds-loading = Cargando…
 opds-folder-failed = No se pudo abrir esta carpeta: { $error }
+opds-web-page = Esto es una página web, no parte del catálogo.
 opds-search = Buscar en { $catalog }
 opds-search-results = Resultados de «{ $query }»
 opds-pick-help = Las carpetas que añadas se sincronizan con tu biblioteca como una biblioteca de Jellyfin: cada carpeta de libros se convierte en una serie. Todo lo demás se queda aquí para explorarlo y buscarlo.

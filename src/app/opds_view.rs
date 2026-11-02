@@ -715,12 +715,19 @@ impl App {
             col = col.push(widget::text::caption(fl!("opds-untested")));
         }
         if let Some(e) = &b.error {
+            // A "folder" that's really a web page (Gutenberg lists its
+            // Facebook and Mastodon pages as feeds): offer the browser.
+            let web_page = *e == fl!("opds-not-a-catalog");
+            let message = if web_page { fl!("opds-web-page") } else { fl!("opds-folder-failed", error = e.as_str()) };
             col = col.push(
-                widget::row::with_capacity(2)
+                widget::row::with_capacity(3)
                     .spacing(8)
                     .align_y(Alignment::Center)
-                    .push(icon::from_name("dialog-warning-symbolic").size(16))
-                    .push(widget::text::body(fl!("opds-folder-failed", error = e.as_str()))),
+                    .push(icon::from_name(if web_page { "web-browser-symbolic" } else { "dialog-warning-symbolic" }).size(16))
+                    .push(widget::text::body(message))
+                    .push_maybe(web_page.then(|| {
+                        widget::button::standard(fl!("opds-open-in-browser")).on_press(Message::Opds(OpdsMsg::OpenInBrowser(url.clone())))
+                    })),
             );
         }
 
