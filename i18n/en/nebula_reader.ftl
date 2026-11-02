@@ -399,6 +399,7 @@ opds-folder-count = { $count ->
 opds-remove = Remove
 opds-no-file = this book has no file Nebula can get
 opds-sign-in-refused = the catalog refused the username or password
+opds-access-refused = the catalog refused to answer (check the address, or whether it needs a username)
 opds-not-a-catalog = that address isn't an OPDS catalog
 opds-no-search = this catalog can't be searched
 opds-too-big = a folder in the library has too much in it to sync whole; take it out and add smaller folders inside it

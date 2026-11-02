@@ -386,6 +386,7 @@ opds-folder-count = { $count ->
 opds-remove = Quitar
 opds-no-file = este libro no tiene ningún archivo que Nebula pueda obtener
 opds-sign-in-refused = el catálogo rechazó el usuario o la contraseña
+opds-access-refused = el catálogo se negó a responder (revisa la dirección, o si necesita un nombre de usuario)
 opds-not-a-catalog = esa dirección no es un catálogo OPDS
 opds-no-search = en este catálogo no se puede buscar
 opds-too-big = una carpeta de la biblioteca tiene demasiado contenido para sincronizarla entera; quítala y añade carpetas más pequeñas de dentro

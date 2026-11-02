@@ -672,7 +672,8 @@ pub async fn fetch_feed(account: &Account, url: &str) -> Result<Feed, String> {
     let resp = account.get(url).send().await.map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(format!("HTTP {}: {}", status.as_u16(), fl!("opds-sign-in-refused")));
+        let why = if account.user.is_empty() { fl!("opds-access-refused") } else { fl!("opds-sign-in-refused") };
+        return Err(format!("HTTP {}: {why}", status.as_u16()));
     }
     if !status.is_success() {
         return Err(format!("HTTP {status}"));
@@ -685,12 +686,7 @@ pub async fn fetch_feed(account: &Account, url: &str) -> Result<Feed, String> {
 /// Checks an address is a catalog and gets its name: what's typed, then
 /// with `https://` or `http://` in front when it has no scheme.
 pub async fn connect(input: &str, user: &str, password: &str) -> Result<Account, String> {
-    let input = input.trim().trim_end_matches('/');
-    let candidates: Vec<String> = if input.contains("://") {
-        vec![input.to_string()]
-    } else {
-        vec![format!("https://{input}"), format!("http://{input}")]
-    };
+    let candidates = connect_candidates(input);
     let mut last = fl!("opds-not-a-catalog");
     for url in candidates {
         let account = Account { url: url.clone(), user: user.trim().to_string(), password: password.to_string(), ..Default::default() };
@@ -700,6 +696,23 @@ pub async fn connect(input: &str, user: &str, password: &str) -> Result<Account,
         }
     }
     Err(last)
+}
+
+/// The addresses to try for what was typed: without a trailing slash
+/// first (the address catalogs added before were kept as), then as typed,
+/// since some catalogs only answer one way (Project Gutenberg refuses
+/// `/ebooks.opds` but serves `/ebooks.opds/`).
+fn connect_candidates(input: &str) -> Vec<String> {
+    let typed = input.trim();
+    let trimmed = typed.trim_end_matches('/');
+    let mut forms = vec![trimmed.to_string()];
+    if typed != trimmed {
+        forms.push(typed.to_string());
+    }
+    if typed.contains("://") {
+        return forms;
+    }
+    ["https", "http"].iter().flat_map(|scheme| forms.iter().map(move |f| format!("{scheme}://{f}"))).collect()
 }
 
 /// The address to search a catalog for `query`, when it can be searched.
@@ -1892,6 +1905,16 @@ Summary:
     fn html_summaries_become_paragraphs() {
         assert_eq!(markup_text("<p>One  two</p><p>three<br/>four</p>", true), "One two\n\nthree\n\nfour");
         assert_eq!(markup_text("plain <b>bold</b> text", true), "plain bold text");
+    }
+
+    #[test]
+    fn tries_the_address_with_and_without_its_slash() {
+        assert_eq!(
+            connect_candidates(" https://www.gutenberg.org/ebooks.opds/ "),
+            ["https://www.gutenberg.org/ebooks.opds", "https://www.gutenberg.org/ebooks.opds/"]
+        );
+        assert_eq!(connect_candidates("komga.example/opds"), ["https://komga.example/opds", "http://komga.example/opds"]);
+        assert_eq!(connect_candidates("c.example/"), ["https://c.example", "https://c.example/", "http://c.example", "http://c.example/"]);
     }
 
     #[test]
