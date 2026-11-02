@@ -24,9 +24,10 @@ use cosmic::{app::Task, Element};
 use super::{App, AppView, Message};
 use crate::comic::{self, ChapterInfo, PageSource};
 use crate::jellyfin::{self, Account, RemoteSeries};
-use crate::remote::{self, Account as RemoteAccount};
 use crate::library::{self, IssueRow, ScannedSeries, SeriesKind};
 use crate::naming;
+use crate::opds;
+use crate::remote::{self, Account as RemoteAccount};
 use crate::remote_rar::RemoteRar;
 use crate::remote_zip::RemoteZip;
 
@@ -1276,6 +1277,14 @@ impl App {
         let Some(db) = &self.db else { return Task::none() };
         let mut tasks = Vec::new();
         let mut by_root: HashMap<String, Vec<String>> = HashMap::new();
+        let opds_saved_by_item: HashMap<String, opds::SavedBook> = match &account {
+            RemoteAccount::Opds(a) if a.is_catalog() => a
+                .saved
+                .iter()
+                .map(|b| (opds::book_id(&b.id), b.clone()))
+                .collect(),
+            _ => HashMap::new(),
+        };
         // Everything below is written as one commit, not one per row.
         let _ = db.execute_batch("SAVEPOINT batch");
 
@@ -1325,6 +1334,24 @@ impl App {
                 })
                 .collect();
             let _ = library::sync_issues(db, &s.key, &rows);
+            if !opds_saved_by_item.is_empty() {
+                let description = s
+                    .issues
+                    .iter()
+                    .filter_map(|i| opds_saved_by_item.get(&i.item_id))
+                    .map(|b| b.summary.trim())
+                    .filter(|s| !s.is_empty())
+                    .max_by_key(|s| s.len());
+                if let Some(description) = description {
+                    let _ = library::apply_fallback_metadata(
+                        db,
+                        &s.key,
+                        description,
+                        "opds",
+                        account.url(),
+                    );
+                }
+            }
             for i in &s.issues {
                 self.jf.extensions.insert(i.item_id.clone(), i.extension.clone());
                 let _ = library::apply_remote_progress(db, &s.key, &i.key, i.page, i.played, i.last_read);

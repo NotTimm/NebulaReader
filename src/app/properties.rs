@@ -297,6 +297,7 @@ impl App {
             match e.source.as_str() {
                 "anilist" => "AniList".into(),
                 "comicvine" => "ComicVine".into(),
+                "opds" => "OPDS".into(),
                 _ if !e.description.is_empty() => fl!("metadata-from-files"),
                 _ => fl!("metadata-none"),
             },

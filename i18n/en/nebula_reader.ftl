@@ -561,6 +561,7 @@ prop-added = Added
 prop-last-opened = Last opened
 prop-metadata = Metadata
 metadata-from-files = From the files
+metadata-from-opds = From the OPDS catalog
 metadata-none = None
 prop-page-size = Page size
 open-page = Open Page

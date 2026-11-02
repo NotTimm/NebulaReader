@@ -954,6 +954,28 @@ pub fn apply_match(
     Ok(())
 }
 
+/// For remote sources that already carry usable metadata (for example OPDS
+/// catalog downloads), fill in series metadata only when no explicit online
+/// match has set it yet.
+pub fn apply_fallback_metadata(
+    conn: &Connection,
+    series_path: &str,
+    description: &str,
+    source: &str,
+    source_url: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE series SET
+             description = CASE WHEN description = '' THEN ?2 ELSE description END,
+             source      = CASE WHEN source = '' THEN ?3 ELSE source END,
+             source_url  = CASE WHEN source_url = '' THEN ?4 ELSE source_url END
+         WHERE path = ?1",
+        params![series_path, description, source, source_url],
+    )
+    .map_err(|e| format!("apply_fallback_metadata: {e}"))?;
+    Ok(())
+}
+
 /// Records that a lookup ran without a usable match (or failed).
 pub fn mark_meta(conn: &Connection, series_path: &str, status: &str, clear_match: bool) {
     let now = now_unix();

@@ -744,6 +744,7 @@ impl App {
         let source_line = match series.source.as_str() {
             "comicvine" => fl!("matched-comicvine"),
             "anilist" => fl!("matched-anilist"),
+            "opds" => fl!("metadata-from-opds"),
             _ if series.meta_status == "nomatch" => fl!("no-match-folder-name"),
             _ if series.meta_status.starts_with("error") => {
                 fl!("lookup-failed", error = series.meta_status[6..].trim())
