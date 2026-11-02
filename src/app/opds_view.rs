@@ -987,6 +987,7 @@ fn edition_label(book: &Book) -> String {
 /// first: one you sign in to is probably your own server.
 fn add_as_choice<'a>(account: &opds::Account) -> Element<'a, Message> {
     let recommended = if account.user.is_empty() { Kind::Catalog } else { Kind::Library };
+    let radius = cosmic::theme::active().cosmic().corner_radii.radius_s;
     let card = |kind: Kind| -> Element<'a, Message> {
         let (title, body) = match kind {
             Kind::Library => (fl!("opds-add-as-library"), fl!("opds-add-as-library-help")),
@@ -1001,8 +1002,9 @@ fn add_as_choice<'a>(account: &opds::Account) -> Element<'a, Message> {
         if kind == recommended {
             content = content.push(widget::text::caption_heading(fl!("opds-recommended")));
         }
+        // A card, rounded like the settings around it, not a pill.
         widget::button::custom(content)
-            .class(cosmic::theme::Button::Standard)
+            .class(cosmic::theme::Button::ListItem(radius))
             .width(Length::Fill)
             .on_press(Message::Opds(OpdsMsg::AddAs(kind)))
             .into()
