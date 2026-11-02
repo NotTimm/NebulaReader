@@ -80,6 +80,8 @@ pub enum WikiMsg {
     /// A link: `wiki:<Title>` or a web address.
     Link(String),
     ToggleToc,
+    /// The contents shown or hidden, keeping this place in view.
+    TocToggled(Option<Anchor>),
     /// Shows or hides a section's subsections in the contents.
     ToggleTocSection(usize),
     /// Scrolls to a section (`None`: the top).
@@ -354,6 +356,19 @@ mod tests {
     }
 
     #[test]
+    fn a_place_on_the_page_survives_rewrapping() {
+        // Section 1 has no heading; 3 ends at the page's end.
+        let before = Layout { sections: vec![Some(0.0), None, Some(1000.0), Some(3000.0)], offset: 2500.0, height: 4000.0 };
+        let a = before.anchor().unwrap();
+        assert_eq!(a, Anchor { section: 2, through: 0.75 });
+        // Wider: everything shorter.
+        let after = Layout { sections: vec![Some(0.0), None, Some(800.0), Some(2000.0)], offset: 0.0, height: 2600.0 };
+        assert_eq!(after.resolve(a), Some(1700.0));
+        let end = Layout { offset: 3500.0, ..before.clone() };
+        assert_eq!(after.resolve(end.anchor().unwrap()), Some(2300.0));
+    }
+
+    #[test]
     fn double_click_takes_the_word() {
         let t = "The cat’s café, 1990.";
         assert_eq!(&t[..][word_at(t, 6).0..word_at(t, 6).1], "cat’s");
@@ -423,6 +438,92 @@ impl Operation<Option<f32>> for FindSection {
             (Some(s), Some(c)) => Some((s.y - c.y - 8.0).max(0.0)),
             _ => None,
         })
+    }
+}
+
+/// Where every section starts on the page (from the top of the content;
+/// `None` for one without a heading) and how far down it's scrolled.
+#[derive(Clone, Debug, Default)]
+struct Layout {
+    sections: Vec<Option<f32>>,
+    offset: f32,
+    height: f32,
+}
+
+/// A place on the page that survives the text re-wrapping: a section and
+/// how far through it (0 at its heading, 1 at the next).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Anchor {
+    section: usize,
+    through: f32,
+}
+
+impl Layout {
+    /// Where the section that holds `y` starts and ends.
+    fn span(&self, i: usize) -> Option<(f32, f32)> {
+        let start = self.sections.get(i).copied().flatten()?;
+        let end = self.sections[i + 1..].iter().flatten().next().copied().unwrap_or(self.height);
+        Some((start, end.max(start)))
+    }
+
+    fn anchor(&self) -> Option<Anchor> {
+        let (section, _) = self.sections.iter().enumerate().filter_map(|(i, y)| Some((i, (*y)?))).take_while(|(_, y)| *y <= self.offset).last()?;
+        let (start, end) = self.span(section)?;
+        let through = if end > start { ((self.offset - start) / (end - start)).clamp(0.0, 1.0) } else { 0.0 };
+        Some(Anchor { section, through })
+    }
+
+    fn resolve(&self, a: Anchor) -> Option<f32> {
+        let (start, end) = self.span(a.section)?;
+        Some(start + a.through * (end - start))
+    }
+}
+
+/// Measures the page's sections (see [`Layout`]).
+struct MeasureSections {
+    ids: Vec<widget::Id>,
+    found: Vec<Option<Rectangle>>,
+    content: Option<Rectangle>,
+    offset: f32,
+}
+
+impl MeasureSections {
+    fn new(count: usize) -> Self {
+        Self { ids: (0..count).map(section_id).collect(), found: vec![None; count], content: None, offset: 0.0 }
+    }
+}
+
+impl Operation<Option<Layout>> for MeasureSections {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<Layout>>)) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&widget::Id>, bounds: Rectangle) {
+        if let Some(i) = id.and_then(|id| self.ids.iter().position(|x| x == id)) {
+            self.found[i] = Some(bounds);
+        }
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        content_bounds: Rectangle,
+        translation: Vector,
+        _state: &mut dyn cosmic::iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&scroll_id()) {
+            self.content = Some(content_bounds);
+            self.offset = translation.y;
+        }
+    }
+
+    fn finish(&self) -> Outcome<Option<Layout>> {
+        Outcome::Some(self.content.map(|c| Layout {
+            sections: self.found.iter().map(|b| b.map(|b| b.y - c.y)).collect(),
+            offset: self.offset,
+            height: c.height,
+        }))
     }
 }
 
@@ -912,7 +1013,22 @@ impl App {
                 }
                 crate::platform::open_url(&target);
             }
-            WikiMsg::ToggleToc => self.wiki.toc_hidden = !self.wiki.toc_hidden,
+            WikiMsg::ToggleToc => {
+                // The article gets wider or narrower and its text wraps
+                // anew: find the place being read first, to stay on it.
+                let Some(a) = self.wiki.article.as_ref().filter(|_| matches!(self.wiki.page, Some(WikiPage::Article(_)))) else {
+                    self.wiki.toc_hidden = !self.wiki.toc_hidden;
+                    return Task::none();
+                };
+                return cosmic::iced::runtime::task::widget(MeasureSections::new(a.sections.len()))
+                    .map(|l| cosmic::Action::App(Message::Wiki(WikiMsg::TocToggled(l.and_then(|l| l.anchor())))));
+            }
+            WikiMsg::TocToggled(anchor) => {
+                self.wiki.toc_hidden = !self.wiki.toc_hidden;
+                let (Some(anchor), Some(a)) = (anchor, self.wiki.article.as_ref()) else { return Task::none() };
+                return cosmic::iced::runtime::task::widget(MeasureSections::new(a.sections.len()))
+                    .map(move |l| cosmic::Action::App(Message::Wiki(WikiMsg::ScrollTo(l.and_then(|l| l.resolve(anchor))))));
+            }
             WikiMsg::SetLanguage(i) => {
                 let Some((code, _)) = wikipedia::LANGUAGES.get(i) else { return Task::none() };
                 if *code == wikipedia::language() {
@@ -1042,7 +1158,11 @@ impl App {
                 let op = FindSection { target: section_id(i), section: None, content: None };
                 return cosmic::iced::runtime::task::widget(op).map(|y| cosmic::Action::App(Message::Wiki(WikiMsg::ScrollTo(y))));
             }
-            WikiMsg::ScrollTo(Some(y)) => return scroll_mod::scroll_to(scroll_id(), AbsoluteOffset { x: None, y: Some(y) }),
+            WikiMsg::ScrollTo(Some(y)) => {
+                // A jump isn't a scroll the page reports: remember it here.
+                self.wiki.offset = y;
+                return scroll_mod::scroll_to(scroll_id(), AbsoluteOffset { x: None, y: Some(y) });
+            }
             WikiMsg::ScrollTo(None) => {}
             WikiMsg::OpenOnWikipedia => {
                 if let Some(WikiPage::Article(title)) = &self.wiki.page {
