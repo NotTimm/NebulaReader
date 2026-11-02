@@ -140,6 +140,24 @@ image-webp.opt-level = 3
 fdeflate.opt-level = 3
 miniz_oxide.opt-level = 3
 image.opt-level = 3
+# Text: shaping and laying out a book chapter is mostly these, and
+# unoptimised they make page turns and chapter changes in books crawl.
+cosmic-text.opt-level = 3
+swash.opt-level = 3
+harfrust.opt-level = 3
+rustybuzz.opt-level = 3
+skrifa.opt-level = 3
+read-fonts.opt-level = 3
+font-types.opt-level = 3
+ttf-parser.opt-level = 3
+fontdb.opt-level = 3
+unicode-linebreak.opt-level = 3
+unicode-bidi.opt-level = 3
+unicode-segmentation.opt-level = 3
+yazi.opt-level = 3
+zeno.opt-level = 3
+cryoglyph.opt-level = 3
+etagere.opt-level = 3
 
 [dev-dependencies]
 minisign = "0.10.0"
