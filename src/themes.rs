@@ -26,12 +26,24 @@ use crate::platform::look::HostColors;
 const BUILTIN: &[(&str, &str)] = &[
     ("cosmic-dark", include_str!("../res/themes/cosmic-dark.ron")),
     ("cosmic-light", include_str!("../res/themes/cosmic-light.ron")),
-    ("catppuccin-mocha", include_str!("../res/themes/catppuccin-mocha.ron")),
     ("catppuccin-latte", include_str!("../res/themes/catppuccin-latte.ron")),
-    ("nord", include_str!("../res/themes/nord.ron")),
+    ("catppuccin-frappe", include_str!("../res/themes/catppuccin-frappe.ron")),
+    ("catppuccin-macchiato", include_str!("../res/themes/catppuccin-macchiato.ron")),
+    ("catppuccin-mocha", include_str!("../res/themes/catppuccin-mocha.ron")),
+    ("coffee", include_str!("../res/themes/coffee.ron")),
+    ("coffee-cream", include_str!("../res/themes/coffee-cream.ron")),
     ("dracula", include_str!("../res/themes/dracula.ron")),
+    ("everforest-dark", include_str!("../res/themes/everforest-dark.ron")),
     ("gruvbox-dark", include_str!("../res/themes/gruvbox-dark.ron")),
+    ("gruvbox-light", include_str!("../res/themes/gruvbox-light.ron")),
+    ("kanagawa", include_str!("../res/themes/kanagawa.ron")),
+    ("nord", include_str!("../res/themes/nord.ron")),
+    ("one-dark", include_str!("../res/themes/one-dark.ron")),
+    ("rose-pine", include_str!("../res/themes/rose-pine.ron")),
+    ("rose-pine-dawn", include_str!("../res/themes/rose-pine-dawn.ron")),
+    ("solarized-dark", include_str!("../res/themes/solarized-dark.ron")),
     ("solarized-light", include_str!("../res/themes/solarized-light.ron")),
+    ("tokyo-night", include_str!("../res/themes/tokyo-night.ron")),
 ];
 
 /// One theme the user can pick.
@@ -149,6 +161,9 @@ fn pretty_name(stem: &str) -> String {
         .collect::<Vec<String>>()
         .join(" ")
         .replace("Cosmic", "COSMIC")
+        // File names can't easily carry the accents these are known by.
+        .replace("Frappe", "Frappé")
+        .replace("Rose Pine", "Rosé Pine")
 }
 
 #[cfg(test)]

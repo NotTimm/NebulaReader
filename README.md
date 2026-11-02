@@ -171,8 +171,11 @@ round or square (COSMIC takes that from COSMIC Settings).
 #### Themes
 
 **Settings → Appearance → Colors** switches from your system's colours to
-a theme. Built in: COSMIC Dark and Light, Catppuccin Mocha and Latte,
-Nord, Dracula, Gruvbox Dark and Solarized Light.
+a theme. Built in: COSMIC Dark and Light; Catppuccin Latte, Frappé,
+Macchiato and Mocha; Coffee and Coffee Cream (warm browns); Dracula;
+Everforest Dark; Gruvbox Dark and Light; Kanagawa; Nord; One Dark; Rosé
+Pine and Rosé Pine Dawn; Solarized Dark and Light; and Tokyo Night. The
+list scrolls when there are more than fit.
 
 Bring your own in a format you may already have:
 
