@@ -1033,6 +1033,16 @@ impl App {
     }
 
     /// Rebuilds the theme from the style, corners and colour theme.
+    /// Whether every issue is a server's EPUB (by its file type from the
+    /// last sync).
+    fn remote_books_only(&self, issues: &[library::IssueEntry]) -> bool {
+        !issues.is_empty()
+            && issues.iter().all(|i| {
+                crate::remote::parse_key(&i.path)
+                    .is_some_and(|(_, item)| self.jf.extensions.get(item).is_some_and(|e| e.eq_ignore_ascii_case("epub")))
+            })
+    }
+
     fn apply_theme(&self) -> Task<Message> {
         cosmic::command::set_theme(look::theme(
             self.look(),
@@ -1381,11 +1391,14 @@ impl App {
                 self.meta_done += 1;
                 continue;
             };
-            if entry.is_epub {
+            let issues = library::issues_for(db, &key);
+            // Books aren't comics: AniList and ComicVine would match a
+            // novel to its manga adaptation. A server's books are EPUBs by
+            // their file type, as local ones are by their path.
+            if entry.is_epub || self.remote_books_only(&issues) {
                 self.meta_done += 1;
                 continue;
             }
-            let issues = library::issues_for(db, &key);
             let query = build_query(&entry, &issues);
             if query.search.trim().is_empty() {
                 // Nothing to search with (yet) — let a later scan retry.
@@ -1899,11 +1912,13 @@ impl Application for App {
                         .on_press(Message::Book(BookMsg::PrevChapter)),
                     fl!("previous-chapter"),
                 ));
+                // Chapters, said so: a bare "10 / 19" read as pages. The
+                // page in the chapter is in the status line below the text.
                 els.push(tip(
-                    widget::text(format!(
-                        "{} / {}",
-                        self.epub_chapter + 1,
-                        book.chapters.len()
+                    widget::text(fl!(
+                        "book-chapter-counter",
+                        chapter = self.epub_chapter + 1,
+                        chapters = book.chapters.len()
                     )),
                     fl!("chapter"),
                 ));

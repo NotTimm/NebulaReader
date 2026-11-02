@@ -21,6 +21,7 @@ typography-tip = Texto, diseño y página (A)
 book-details-tip = Detalles del libro (I)
 settings-tip = Ajustes (S)
 chapter-page-counter = Cap. { $chapter }  ·  { $page } / { $pages }
+book-chapter-counter = Capítulo { $chapter } de { $chapters }
 previous-page = Página anterior (←)
 page = Página
 next-page = Página siguiente (→)

@@ -975,6 +975,9 @@ pub struct Book {
     pub summary: String,
     /// The series it says it's in, and its number there.
     pub series: Option<(String, Option<f32>)>,
+    /// The series' own feed, when the catalog links it (Komga does): two
+    /// series with the same name are told apart by it.
+    pub series_link: Option<String>,
     pub links: Links,
     /// Where it can be bought or borrowed instead, when it can't be read.
     pub external: Option<String>,
@@ -1411,6 +1414,9 @@ fn json_book(p: &serde_json::Value, base: &url::Url) -> Option<Book> {
         series: as_list(&m["belongsTo"]["series"])
             .first()
             .and_then(|s| Some((name_of(s)?, s["position"].as_f64().map(|n| n as f32)))),
+        series_link: as_list(&m["belongsTo"]["series"])
+            .first()
+            .and_then(|s| as_list(&s["links"]).into_iter().find_map(|l| l["href"].as_str().and_then(|h| join(base, h)))),
         ..Default::default()
     };
     let mut rank = u8::MAX;
@@ -1697,6 +1703,11 @@ impl Walk {
 ///   title ("Saga #12" → "Saga"), or on its own when there's none.
 fn series_for(book: &Book, feed_url: &str, feed_title: &str, root_url: &str, in_root: bool) -> (String, String, bool) {
     if let Some((name, _)) = book.series.as_ref().filter(|(n, _)| !n.trim().is_empty()) {
+        // The catalog's own series, by its link: one series wherever its
+        // books are found, and never merged with another of the same name.
+        if let Some(link) = &book.series_link {
+            return (format!("l{}", hash(link)), name.clone(), false);
+        }
         return (format!("s{}", hash(&format!("{root_url}\n{}", crate::naming::normalize_title(name)))), name.clone(), false);
     }
     if !in_root {
@@ -1842,6 +1853,30 @@ mod tests {
     fn rejects_what_isnt_a_feed() {
         assert!(parse_feed("<html><body>hi</body></html>", &base()).is_none());
         assert!(parse_feed("not xml", &base()).is_none());
+    }
+
+    #[test]
+    fn series_with_the_same_name_stay_apart_by_their_link() {
+        let book = |id: &str, link: &str| Book {
+            id: id.into(),
+            title: "Moby Dick; Or, The Whale".into(),
+            series: Some(("Moby Dick; Or, The Whale".into(), Some(1.0))),
+            series_link: Some(link.into()),
+            ..Default::default()
+        };
+        let a = series_for(&book("1", "https://k/opds/v2/series/A"), "https://k/r", "All", "https://k/r", true);
+        let b = series_for(&book("2", "https://k/opds/v2/series/B"), "https://k/r", "All", "https://k/r", true);
+        assert_ne!(a.0, b.0);
+        assert_eq!(a.1, "Moby Dick; Or, The Whale");
+        // The same series found under another picked folder is one series.
+        let c = series_for(&book("3", "https://k/opds/v2/series/A"), "https://k/x", "X", "https://k/x", false);
+        assert_eq!(a.0, c.0);
+        // Read from an OPDS 2 feed.
+        let base = url::Url::parse("https://k/opds/v2/libraries").unwrap();
+        let p = serde_json::json!({"metadata": {"title": "Dracula", "belongsTo": {"series": [{"name": "Dracula", "position": 1.0,
+            "links": [{"href": "/opds/v2/series/0EBEX", "type": "application/opds+json"}]}]}}, "links": []});
+        let parsed = json_book(&p, &base).unwrap();
+        assert_eq!(parsed.series_link.as_deref(), Some("https://k/opds/v2/series/0EBEX"));
     }
 
     #[test]

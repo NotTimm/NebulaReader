@@ -22,6 +22,7 @@ book-details-tip = Book details (I)
 settings-tip = Settings (S)
 # Page counter when a series has several chapters: chapter, page, pages.
 chapter-page-counter = Ch.{ $chapter }  ·  { $page } / { $pages }
+book-chapter-counter = Chapter { $chapter } of { $chapters }
 previous-page = Previous page (←)
 page = Page
 next-page = Next page (→)

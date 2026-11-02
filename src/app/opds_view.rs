@@ -1636,9 +1636,16 @@ fn add_as_choice<'a>(account: &opds::Account) -> Element<'a, Message> {
         if kind == recommended {
             content = content.push(widget::text::caption_heading(fl!("opds-recommended")));
         }
-        // A card, rounded like the settings around it, not a pill.
-        widget::button::custom(content)
+        // A card you can see is one to press: its own background and a
+        // chevron, rounded like the settings around it, not a pill.
+        let row = widget::row::with_capacity(2)
+            .align_y(cosmic::iced::Alignment::Center)
+            .push(content)
+            .push(widget::icon::from_name("go-next-symbolic").size(16));
+        let card = widget::container(row).padding([4, 12, 4, 4]).class(cosmic::theme::Container::Card);
+        widget::button::custom(card)
             .class(cosmic::theme::Button::ListItem(radius))
+            .padding(0)
             .width(Length::Fill)
             .on_press(Message::Opds(OpdsMsg::AddAs(kind)))
             .into()
