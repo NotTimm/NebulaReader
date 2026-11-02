@@ -132,17 +132,47 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
     let mut chapters = Vec::new();
     let mut chapter_for_path: HashMap<String, usize> = HashMap::new();
 
+    // Where each table-of-contents anchor landed: (file, id) -> chapter.
+    let mut chapter_for_anchor: HashMap<(String, String), usize> = HashMap::new();
+
     for idref in &opf.spine {
         let Some(item) = opf.manifest.get(idref) else { continue };
         let chapter_path = join_epub_path(&opf_dir, &item.href);
         let Ok(xhtml) = read_zip_text(&mut zip, &chapter_path) else { continue };
         let chapter_dir = Path::new(&chapter_path).parent().unwrap_or(Path::new("")).to_path_buf();
 
-        let parsed = parse_xhtml_body(&xhtml, &css);
-        let mut blocks = Vec::with_capacity(parsed.len());
-        for block in parsed {
+        // A file holding several chapters (Project Gutenberg puts a dozen
+        // in each) is split where the table of contents points into it,
+        // at its top level there, so each chapter is one of ours: its own
+        // title, pages and place in the contents. Lower-level entries
+        // (sections) stay inside their chapter.
+        let entries: Vec<&RawToc> = toc_raw.iter().filter(|t| t.path == chapter_path).collect();
+        let split_level = entries.iter().filter(|t| t.fragment.is_some()).map(|t| t.level).min();
+        let wanted: std::collections::HashSet<String> = entries.iter().filter_map(|t| t.fragment.clone()).collect();
+        let split_at: HashMap<&str, &str> = entries
+            .iter()
+            .filter(|t| Some(t.level) == split_level)
+            .filter_map(|t| Some((t.fragment.as_deref()?, t.title.as_str())))
+            .collect();
+
+        // (title from the contents, blocks), and which part each anchor is in.
+        let file_title = entries.iter().find(|t| t.fragment.is_none()).map(|t| t.title.clone());
+        let mut parts: Vec<(Option<String>, Vec<Block>)> = vec![(file_title, Vec::new())];
+        let mut anchor_part: Vec<(String, usize)> = Vec::new();
+        for block in parse_xhtml_body(&xhtml, &css, &wanted) {
             match block {
-                Parsed::Block(b) => blocks.push(b),
+                Parsed::Anchor(id) => {
+                    if let Some(title) = split_at.get(id.as_str()) {
+                        if parts.last().is_some_and(|(_, b)| !b.is_empty()) {
+                            parts.push((Some(title.to_string()), Vec::new()));
+                        } else if let Some(last) = parts.last_mut() {
+                            // Nothing before it: this part is that chapter.
+                            last.0 = Some(title.to_string());
+                        }
+                    }
+                    anchor_part.push((id, parts.len() - 1));
+                }
+                Parsed::Block(b) => parts.last_mut().unwrap().1.push(b),
                 Parsed::ImageSrc(src) => {
                     let p = join_epub_path(&chapter_dir, &src);
                     let idx = match image_index.get(&p) {
@@ -157,41 +187,45 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
                     // tall) mean nothing as a block of their own.
                     let tiny = idx.and_then(|i| image_size(&images[i])).is_some_and(|(w, h)| w.max(h) <= 32);
                     if let (Some(i), false) = (idx, tiny) {
-                        blocks.push(Block::Image(i));
+                        parts.last_mut().unwrap().1.push(Block::Image(i));
                     }
                 }
             }
         }
-        if blocks.is_empty() {
-            continue;
-        }
 
-        let words = blocks
-            .iter()
-            .map(|b| match b {
-                Block::Heading { spans, .. }
-                | Block::Paragraph { spans, .. }
-                | Block::Quote(spans)
-                | Block::ListItem(spans) => spans.iter().map(|s| s.text.split_whitespace().count()).sum(),
-                _ => 0,
-            })
-            .sum();
-
-        let title = toc_raw
-            .iter()
-            .find(|(p, _, _)| *p == chapter_path)
-            .map(|(_, t, _)| t.clone())
-            .or_else(|| {
-                blocks.iter().find_map(|b| match b {
-                    Block::Heading { spans, .. } => Some(spans_text(spans)),
-                    _ => None,
+        // Parts become chapters (empty ones are dropped: an anchor in one
+        // means the next chapter).
+        let mut part_chapter = Vec::with_capacity(parts.len());
+        for (title, blocks) in parts {
+            part_chapter.push(chapters.len());
+            if blocks.is_empty() {
+                continue;
+            }
+            let words = blocks
+                .iter()
+                .map(|b| match b {
+                    Block::Heading { spans, .. }
+                    | Block::Paragraph { spans, .. }
+                    | Block::Quote(spans)
+                    | Block::ListItem(spans) => spans.iter().map(|s| s.text.split_whitespace().count()).sum(),
+                    _ => 0,
                 })
-            })
-            .filter(|t| !t.trim().is_empty())
-            .unwrap_or_default();
-
-        chapter_for_path.insert(chapter_path, chapters.len());
-        chapters.push(EpubChapter { title, blocks, words });
+                .sum();
+            let title = title
+                .or_else(|| {
+                    blocks.iter().find_map(|b| match b {
+                        Block::Heading { spans, .. } => Some(spans_text(spans)),
+                        _ => None,
+                    })
+                })
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_default();
+            chapter_for_path.entry(chapter_path.clone()).or_insert(chapters.len());
+            chapters.push(EpubChapter { title, blocks, words });
+        }
+        for (id, part) in anchor_part {
+            chapter_for_anchor.insert((chapter_path.clone(), id), part_chapter[part]);
+        }
     }
 
     if chapters.is_empty() {
@@ -207,8 +241,11 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
 
     let mut toc: Vec<TocEntry> = toc_raw
         .into_iter()
-        .filter_map(|(p, title, level)| {
-            chapter_for_path.get(&p).map(|&chapter| TocEntry { title, chapter, level })
+        .filter_map(|t| {
+            let at_anchor = t.fragment.and_then(|f| chapter_for_anchor.get(&(t.path.clone(), f)).copied());
+            let chapter = at_anchor.or_else(|| chapter_for_path.get(&t.path).copied())?;
+            // An anchor past the last chapter (empty end of a file).
+            (chapter < chapters.len()).then_some(TocEntry { title: t.title, chapter, level: t.level })
         })
         .collect();
     if toc.is_empty() {
@@ -434,11 +471,29 @@ fn parse_opf(xml: &str) -> Opf {
 // ── Table of contents ────────────────────────────────────────────────────────
 
 /// (chapter file path in the zip, title, nesting level), in reading order.
+/// A table-of-contents entry as the book's navigation gives it.
+#[derive(Debug, Clone, PartialEq)]
+struct RawToc {
+    /// The file it points into.
+    path: String,
+    /// The anchor in that file (`#chapter-3`), when it points inside it.
+    fragment: Option<String>,
+    title: String,
+    level: usize,
+}
+
+impl RawToc {
+    fn new(dir: &Path, href: &str, title: String, level: usize) -> Self {
+        let fragment = href.split_once('#').map(|(_, f)| f.to_string()).filter(|f| !f.is_empty());
+        RawToc { path: join_epub_path(dir, href), fragment, title, level }
+    }
+}
+
 fn read_toc(
     zip: &mut zip::ZipArchive<std::fs::File>,
     opf: &Opf,
     opf_dir: &Path,
-) -> Vec<(String, String, usize)> {
+) -> Vec<RawToc> {
     // EPUB 3 nav document.
     if let Some(item) = opf.manifest.values().find(|i| i.properties.split_whitespace().any(|p| p == "nav")) {
         let nav_path = join_epub_path(opf_dir, &item.href);
@@ -466,7 +521,7 @@ fn read_toc(
     Vec::new()
 }
 
-fn parse_ncx(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
+fn parse_ncx(xml: &str, dir: &Path) -> Vec<RawToc> {
     let mut reader = Reader::from_str(xml);
     // Not trimmed: the spaces around an entity (`A &amp; B`) are text
     // events of their own. The whole text is trimmed instead.
@@ -496,7 +551,7 @@ fn parse_ncx(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
                 if let Some(src) = attr(&e, "src") {
                     let label = collapse(&label);
                     if !label.is_empty() {
-                        out.push((join_epub_path(dir, &src), label, depth.saturating_sub(1)));
+                        out.push(RawToc::new(dir, &src, label, depth.saturating_sub(1)));
                     }
                 }
             }
@@ -508,7 +563,7 @@ fn parse_ncx(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
     out
 }
 
-fn parse_nav(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
+fn parse_nav(xml: &str, dir: &Path) -> Vec<RawToc> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
     reader.config_mut().check_end_names = false;
@@ -530,7 +585,7 @@ fn parse_nav(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
                 }
                 "ol" if in_toc_nav => ol_depth += 1,
                 "a" if in_toc_nav => {
-                    current = attr(&e, "href").map(|h| (join_epub_path(dir, &h), String::new()));
+                    current = attr(&e, "href").map(|h| (h, String::new()));
                 }
                 _ => {}
             },
@@ -551,10 +606,10 @@ fn parse_nav(xml: &str, dir: &Path) -> Vec<(String, String, usize)> {
                 }
                 "ol" if in_toc_nav => ol_depth = ol_depth.saturating_sub(1),
                 "a" => {
-                    if let Some((path, label)) = current.take() {
+                    if let Some((href, label)) = current.take() {
                         let label = collapse(&label);
                         if !label.is_empty() {
-                            out.push((path, label, ol_depth.saturating_sub(1)));
+                            out.push(RawToc::new(dir, &href, label, ol_depth.saturating_sub(1)));
                         }
                     }
                 }
@@ -700,6 +755,9 @@ impl CssHints {
 enum Parsed {
     Block(Block),
     ImageSrc(String),
+    /// An element with one of the ids asked for: where a chapter the
+    /// table of contents points to starts.
+    Anchor(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -736,6 +794,8 @@ fn block_kind(name: &str) -> Option<Kind> {
 
 struct BodyParser<'c> {
     css: &'c CssHints,
+    /// Ids to report where they are (table-of-contents targets).
+    anchors: &'c std::collections::HashSet<String>,
     out: Vec<Parsed>,
     stack: Vec<Frame>,
     spans: Vec<Inline>,
@@ -839,6 +899,14 @@ impl BodyParser<'_> {
 
     fn open(&mut self, e: &BytesStart, empty: bool) {
         let name = local_name(&e.name()).to_ascii_lowercase();
+        if !self.anchors.is_empty() {
+            if let Some(id) = attr(e, "id").or_else(|| if name == "a" { attr(e, "name") } else { None }) {
+                if self.anchors.contains(&id) {
+                    self.flush();
+                    self.out.push(Parsed::Anchor(id));
+                }
+            }
+        }
         match name.as_str() {
             "br" => return self.line_break(),
             "hr" => {
@@ -879,13 +947,13 @@ impl BodyParser<'_> {
     }
 }
 
-fn parse_xhtml_body(xhtml: &str, css: &CssHints) -> Vec<Parsed> {
+fn parse_xhtml_body(xhtml: &str, css: &CssHints, anchors: &std::collections::HashSet<String>) -> Vec<Parsed> {
     let mut reader = Reader::from_str(xhtml);
     reader.config_mut().trim_text(false);
     reader.config_mut().check_end_names = false;
     let mut buf = Vec::new();
 
-    let mut p = BodyParser { css, out: Vec::new(), stack: Vec::new(), spans: Vec::new(), pending_space: false };
+    let mut p = BodyParser { css, anchors, out: Vec::new(), stack: Vec::new(), spans: Vec::new(), pending_space: false };
     let mut in_body = false;
     let mut skip_depth = 0usize; // inside <head>/<style>/<script>
 
@@ -1063,6 +1131,54 @@ fn read_zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Resul
 mod tests {
     use super::*;
 
+    /// A file with several chapters, like Project Gutenberg's EPUBs, is
+    /// split where the table of contents points into it.
+    #[test]
+    fn splits_files_at_contents_anchors() {
+        use std::io::Write;
+        let files: [(&str, &str); 4] = [
+            ("META-INF/container.xml", r#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#),
+            (
+                "OEBPS/content.opf",
+                r#"<package><metadata><title>Whale</title></metadata><manifest>
+<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+<item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>
+</manifest><spine><itemref idref="a"/></spine></package>"#,
+            ),
+            (
+                "OEBPS/nav.xhtml",
+                r##"<html><body><nav epub:type="toc"><ol>
+<li><a href="a.xhtml">Front</a></li>
+<li><a href="a.xhtml#c1">Chapter 1</a><ol><li><a href="a.xhtml#s1">A section</a></li></ol></li>
+<li><a href="a.xhtml#c2">Chapter 2</a></li>
+</ol></nav></body></html>"##,
+            ),
+            (
+                "OEBPS/a.xhtml",
+                r#"<html><body><p>Title page.</p>
+<h2 id="c1">CHAPTER 1</h2><p>Call me Ishmael.</p><p id="s1">A section.</p><p>More of one.</p>
+<div><a id="c2"></a></div><h2>CHAPTER 2</h2><p>The carpet-bag.</p></body></html>"#,
+            ),
+        ];
+        let path = std::env::temp_dir().join(format!("nebula-split-{}.epub", std::process::id()));
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            for (name, body) in files {
+                w.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                w.write_all(body.as_bytes()).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        let book = open(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let titles: Vec<&str> = book.chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["Front", "Chapter 1", "Chapter 2"]);
+        // The section stays inside its chapter.
+        assert_eq!(book.chapters[1].words, 10);
+        let toc: Vec<(&str, usize, usize)> = book.toc.iter().map(|t| (t.title.as_str(), t.chapter, t.level)).collect();
+        assert_eq!(toc, [("Front", 0, 0), ("Chapter 1", 1, 0), ("A section", 1, 1), ("Chapter 2", 2, 0)]);
+    }
+
     #[test]
     fn entities_in_titles_and_contents() {
         let opf = parse_opf(r#"<package><metadata>
@@ -1076,14 +1192,14 @@ mod tests {
             <content src="a.xhtml"/></navPoint></navMap></ncx>"#,
             Path::new(""),
         );
-        assert_eq!(ncx[0].1, "Tom & Jerry");
+        assert_eq!(ncx[0].title, "Tom & Jerry");
 
         let nav = parse_nav(
             r#"<nav epub:type="toc"><ol><li><a href="b.xhtml">Salt &amp;
             Pepper</a></li></ol></nav>"#,
             Path::new(""),
         );
-        assert_eq!(nav[0].1, "Salt & Pepper");
+        assert_eq!(nav[0].title, "Salt & Pepper");
     }
 
     #[test]
@@ -1094,7 +1210,7 @@ mod tests {
             <h2 class="h2"><a id="p"/>3</h2>
             <p class="noindent"><span class="stickup">T</span>he afternoon &amp; <span class="txit">Hai bude</span> atom&nbsp;robitnikom.</p>
             <p>Second   line<br/>broken.</p></body></html>"#;
-        let blocks: Vec<Block> = parse_xhtml_body(html, &css)
+        let blocks: Vec<Block> = parse_xhtml_body(html, &css, &Default::default())
             .into_iter()
             .filter_map(|p| match p { Parsed::Block(b) => Some(b), _ => None })
             .collect();
