@@ -56,11 +56,14 @@ pub enum LibrarySource {
     Local,
     Jellyfin,
     Opds,
+    /// Not in the library: picking it opens the Wikipedia page (when that's
+    /// turned on). Never saved as the library's choice.
+    Wikipedia,
 }
 
 impl LibrarySource {
-    pub const ALL: [LibrarySource; 4] =
-        [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin, LibrarySource::Opds];
+    pub const ALL: [LibrarySource; 5] =
+        [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin, LibrarySource::Opds, LibrarySource::Wikipedia];
 
     /// Whether a library entry (by its key and library root) is from here.
     pub fn includes(self, path: &str, root: &str) -> bool {
@@ -70,6 +73,7 @@ impl LibrarySource {
             LibrarySource::Local => !from(crate::remote::is_key),
             LibrarySource::Jellyfin => from(crate::jellyfin::is_key),
             LibrarySource::Opds => from(crate::opds::is_key),
+            LibrarySource::Wikipedia => false,
         }
     }
 }

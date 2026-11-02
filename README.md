@@ -396,8 +396,9 @@ How it works:
 
 ## Wikipedia (optional, new)
 
-**Settings → Wikipedia → Read Wikipedia in Nebula** adds a dictionary
-button to the library's header. It opens Wikipedia's main page (today's
+**Settings → Wikipedia → Read Wikipedia in Nebula** adds Wikipedia to
+the library's source menu (All / Local / Jellyfin / OPDS / Wikipedia, top
+left). It opens Wikipedia's main page (today's
 featured article, In the news, On this day, most read, the picture of
 the day), search and random articles. Articles are drawn by Nebula, not
 a web view, and laid out like the site: one scrolling page with a

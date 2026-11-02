@@ -264,7 +264,14 @@ the owner's laptop). Last updated 2026-11-01.
   boxes, article as one scrolling page like the site, collapsible
   contents sidebar jumping via a widget `Operation` (`FindSection`),
   figures beside the following text, credit + CC BY-SA + View on
-  Wikipedia). Owner wants the site's look, no web view, no tools/main
+  Wikipedia). It's a source in the library's dropdown
+  (`LibrarySource::Wikipedia`, never saved as the library's filter;
+  picking it opens the page, the dropdown stays there as the way back;
+  shown whenever Wikipedia is on), with an own globe icon
+  (`res/icons/ui/wikipedia.svg`). Pictures: decoded off-thread at shown
+  size, disk cache `cache/wikipedia` (400 MB), batched arrivals like
+  NebulaPlayer; viewer with ←/→/Esc; `FloatFlow` lays out floats like
+  CSS. Owner wants the site's look, no web view, no tools/main
   menu, scrolling only (no pages). Never ship the Wikipedia logo or
   wordmark (trademarks); User-Agent names the app. English only.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;

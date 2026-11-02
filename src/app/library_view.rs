@@ -97,7 +97,7 @@ impl App {
     /// The All / Local / Jellyfin picker at the left of the header: a pill
     /// with the current choice's icon, opening a menu of all three.
     pub(super) fn library_source_picker(&self) -> Element<'_, Message> {
-        let current = self.settings.library_source;
+        let current = if self.app_view == super::AppView::Wikipedia { LibrarySource::Wikipedia } else { self.settings.library_source };
         let label = |src: LibrarySource| {
             LibrarySource::ALL.iter().position(|s| *s == src).map_or("", |i| self.labels.library_source[i].as_str())
         };
@@ -156,11 +156,16 @@ impl App {
     /// the source dropdown.
     fn sources_present(&self) -> Vec<LibrarySource> {
         let entries: Vec<&SeriesEntry> = self.library_entries.iter().filter(|e| self.is_visible(e)).collect();
-        LibrarySource::ALL[1..]
+        let mut present: Vec<LibrarySource> = LibrarySource::ALL[1..]
             .iter()
             .copied()
             .filter(|src| entries.iter().any(|e| src.includes(&e.path, &e.library_root)))
-            .collect()
+            .collect();
+        // Wikipedia isn't in the library, but it's a place to go when it's on.
+        if self.settings.wikipedia {
+            present.push(LibrarySource::Wikipedia);
+        }
+        present
     }
 
     /// Whether the library has series from more than one place, so the
@@ -803,6 +808,7 @@ const ALL_ICON: &[u8] = include_bytes!("../../res/icons/ui/all.svg");
 const LOCAL_ICON: &[u8] = include_bytes!("../../res/icons/ui/local.svg");
 const JELLYFIN_ICON: &[u8] = include_bytes!("../../res/icons/ui/jellyfin.svg");
 const OPDS_ICON: &[u8] = include_bytes!("../../res/icons/ui/opds.svg");
+const WIKIPEDIA_ICON: &[u8] = include_bytes!("../../res/icons/ui/wikipedia.svg");
 const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg");
 const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
 const BOLT: &[u8] = include_bytes!("../../res/icons/ui/bolt.svg");
@@ -836,11 +842,18 @@ pub(super) fn opds_icon() -> widget::icon::Handle {
     ui_icon(OPDS_ICON)
 }
 
+/// A globe: Wikipedia, the encyclopedia of the world. (Wikipedia's own
+/// puzzle globe and "W" are Wikimedia's trademarks, so the app has its own.)
+pub(super) fn wikipedia_icon() -> widget::icon::Handle {
+    ui_icon(WIKIPEDIA_ICON)
+}
+
 fn source_icon(src: LibrarySource) -> widget::icon::Handle {
     match src {
         LibrarySource::All => ui_icon(ALL_ICON),
         LibrarySource::Local => ui_icon(LOCAL_ICON),
         LibrarySource::Jellyfin => jellyfin_icon(),
         LibrarySource::Opds => opds_icon(),
+        LibrarySource::Wikipedia => wikipedia_icon(),
     }
 }

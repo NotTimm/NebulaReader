@@ -648,7 +648,7 @@ impl App {
         let kinds = [LibrarySource::Jellyfin, LibrarySource::Opds];
         if kinds.iter().all(|k| self.dl.groups.iter().any(|g| k.includes(&g.series, ""))) {
             let mut row = widget::row::with_capacity(3).spacing(8);
-            for (i, src) in LibrarySource::ALL.into_iter().enumerate().filter(|(_, s)| *s != LibrarySource::Local) {
+            for (i, src) in LibrarySource::ALL.into_iter().enumerate().filter(|(_, s)| matches!(s, LibrarySource::All | LibrarySource::Jellyfin | LibrarySource::Opds)) {
                 let label = self.labels.library_source[i].clone();
                 let button = if src == filter { widget::button::suggested(label) } else { widget::button::standard(label) };
                 row = row.push(button.on_press(Message::LibrarySource(i)));

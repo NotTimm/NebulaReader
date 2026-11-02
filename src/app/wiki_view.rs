@@ -640,7 +640,13 @@ impl App {
     /// Settings: turning the Wikipedia page on.
     pub(super) fn build_wiki_section(&self) -> Element<'_, Message> {
         widget::settings::section()
-            .title("Wikipedia")
+            .header(
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(widget::icon(super::library_view::wikipedia_icon()).size(16))
+                    .push(widget::text::heading("Wikipedia")),
+            )
             .add(
                 widget::settings::item_row(vec![
                     widget::column::with_capacity(2)

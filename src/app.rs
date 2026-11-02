@@ -74,7 +74,7 @@ impl Labels {
             look: vec![fl!("style-auto"), "COSMIC".into(), "KDE Breeze".into(), "Windows 11".into(), "GNOME Adwaita".into()],
             corners: vec![fl!("corners-auto"), fl!("corners-round"), fl!("corners-slightly-round"), fl!("corners-square")],
             background: vec![fl!("background-theme"), fl!("background-black")],
-            library_source: vec![fl!("source-all"), fl!("source-local"), "Jellyfin".into(), "OPDS".into()],
+            library_source: vec![fl!("source-all"), fl!("source-local"), "Jellyfin".into(), "OPDS".into(), "Wikipedia".into()],
             book_line_spacing: vec![fl!("spacing-tight"), fl!("spacing-normal"), fl!("spacing-relaxed"), fl!("spacing-loose")],
             book_layout: vec![fl!("layout-single"), fl!("layout-two"), fl!("layout-scroll")],
             book_width: vec![fl!("width-narrow"), fl!("width-medium"), fl!("width-wide")],
@@ -1566,12 +1566,15 @@ impl Application for App {
                 ),
                 self.source_label(),
             ],
-            AppView::Series | AppView::Downloads | AppView::Catalog | AppView::Wikipedia => vec![tip(
+            // The source dropdown, with Wikipedia picked: the way back.
+            AppView::Wikipedia => vec![self.library_source_picker()],
+            AppView::Series | AppView::Downloads | AppView::Catalog => vec![tip(
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
                 fl!("back-to-library"),
             )],
             // All / Local / Jellyfin, once the library has some of each.
-            AppView::Library if self.has_local_and_remote() => vec![self.library_source_picker()],
+            // With Wikipedia on, always: it's how to get there.
+            AppView::Library if self.has_local_and_remote() || self.settings.wikipedia => vec![self.library_source_picker()],
             AppView::Library => vec![],
         }
     }
@@ -1594,14 +1597,6 @@ impl Application for App {
                         .width(Length::Fixed(220.0))
                         .into(),
                 );
-                // Wikipedia, when it's turned on.
-                if self.settings.wikipedia {
-                    els.push(tip(
-                        widget::button::icon(icon::from_name("accessories-dictionary-symbolic"))
-                            .on_press(Message::Wiki(WikiMsg::Open)),
-                        "Wikipedia".to_string(),
-                    ));
-                }
                 // OPDS catalogs added as catalogs: browse them.
                 if self.has_catalogs() {
                     els.push(tip(
@@ -3696,6 +3691,13 @@ impl App {
             Message::CloseLibraryMenu => self.library_menu = false,
             Message::LibrarySource(i) => {
                 self.library_menu = false;
+                if LibrarySource::ALL.get(i) == Some(&LibrarySource::Wikipedia) {
+                    return self.update(Message::Wiki(WikiMsg::Open));
+                }
+                if self.app_view == AppView::Wikipedia {
+                    self.app_view = AppView::Library;
+                    self.set_header_title("Nebula".into());
+                }
                 if let Some(src) = LibrarySource::ALL.get(i) {
                     self.settings.library_source = *src;
                     self.settings.save();
