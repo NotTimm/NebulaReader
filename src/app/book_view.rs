@@ -387,7 +387,7 @@ impl App {
         let (bg, fg) = (pal.bg, pal.fg);
         // Frosted glass: the System theme leaves the page to the window's
         // own background; the others tint it with their colour.
-        let page_bg = match (self.settings.book.frosted, self.settings.book.theme) {
+        let page_bg = match (self.book_frosted(), self.settings.book.theme) {
             (false, _) => Some(bg),
             (true, BookTheme::Auto) => None,
             (true, _) => Some(Color { a: FROSTED_TINT, ..bg }),
@@ -618,14 +618,30 @@ impl App {
                     |i| Message::Book(BookMsg::SetTheme(i)),
                 ),
             ))
-            .add(widget::settings::item(
-                fl!("frosted-glass"),
-                widget::toggler(bs.frosted).on_toggle(|v| Message::Book(BookMsg::SetFrosted(v))),
-            ));
+            // Only where the window is frosted (COSMIC with frosted windows
+            // on): elsewhere there's nothing to see through to.
+            .add_maybe(self.window_frosted().then(|| {
+                widget::settings::item(
+                    fl!("frosted-glass"),
+                    widget::toggler(bs.frosted).on_toggle(|v| Message::Book(BookMsg::SetFrosted(v))),
+                )
+            }));
 
         let help = widget::settings::section().title(fl!("keys")).add(widget::text::caption(fl!("book-keys")));
 
         widget::settings::view_column(vec![section.into(), layout.into(), help.into()]).into()
+    }
+
+    /// Whether the window has frosted glass: COSMIC with frosted windows
+    /// turned on in COSMIC Settings.
+    fn window_frosted(&self) -> bool {
+        self.core.frosted(cosmic::theme::active().cosmic())
+    }
+
+    /// Whether book pages are frosted: chosen, and the window is frosted
+    /// (the choice is kept for when it is again).
+    fn book_frosted(&self) -> bool {
+        self.settings.book.frosted && self.window_frosted()
     }
 
     // ── Update ────────────────────────────────────────────────────────────
