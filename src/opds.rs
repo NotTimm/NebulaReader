@@ -784,6 +784,38 @@ pub struct Feed {
     pub search: Option<Search>,
     /// How many items the whole feed has, when the server says.
     pub total: Option<usize>,
+    /// Other ways to see this feed: sorted or filtered differently.
+    pub facets: Vec<FacetGroup>,
+}
+
+/// Facets of one kind ("Sort by", "Language"): links to the same feed
+/// sorted or filtered another way.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FacetGroup {
+    /// Empty when the catalog doesn't name it.
+    pub title: String,
+    pub facets: Vec<Facet>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Facet {
+    pub title: String,
+    pub url: String,
+    pub count: Option<usize>,
+    /// The one being shown.
+    pub active: bool,
+}
+
+const FACET: &str = "http://opds-spec.org/facet";
+
+fn add_facet(feed: &mut Feed, group: &str, facet: Facet) {
+    if facet.title.is_empty() {
+        return;
+    }
+    match feed.facets.iter_mut().find(|g| g.title == group) {
+        Some(g) => g.facets.push(facet),
+        None => feed.facets.push(FacetGroup { title: group.to_string(), facets: vec![facet] }),
+    }
 }
 
 /// A link to another feed.
@@ -867,6 +899,8 @@ struct AtomLink {
     title: String,
     count: Option<usize>,
     length: Option<u64>,
+    facet_group: String,
+    active: bool,
     last_read: Option<usize>,
     last_read_date: Option<String>,
 }
@@ -904,6 +938,8 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
         title: attr(e, "title").unwrap_or_default(),
         count: attr(e, "count").and_then(|c| c.trim().parse().ok()),
         length: attr(e, "length").and_then(|c| c.trim().parse().ok()),
+        facet_group: attr(e, "facetGroup").unwrap_or_default(),
+        active: attr(e, "activeFacet").is_some_and(|a| a.trim() == "true"),
         last_read: attr(e, "lastRead").and_then(|c| c.trim().parse().ok()),
         last_read_date: attr(e, "lastReadDate"),
     };
@@ -1035,6 +1071,12 @@ fn markup_text(s: &str, escaped: bool) -> String {
 fn feed_link(feed: &mut Feed, link: AtomLink, base: &url::Url) {
     match link.rel.as_str() {
         "next" => feed.next = join(base, &link.href),
+        FACET => {
+            if let Some(url) = join(base, &link.href) {
+                let facet = Facet { title: link.title.clone(), url, count: link.count, active: link.active };
+                add_facet(feed, &link.facet_group, facet);
+            }
+        }
         "search" if link.kind.contains("opensearchdescription") => {
             feed.search = join(base, &link.href).map(Search::Description);
         }
@@ -1203,6 +1245,19 @@ fn parse_json(json: &serde_json::Value, base: &url::Url) -> Option<Feed> {
             })
             .collect()
     };
+    for group in as_list(&json["facets"]) {
+        let title = group["metadata"]["title"].as_str().unwrap_or_default().to_string();
+        for l in as_list(&group["links"]) {
+            let Some(url) = l["href"].as_str().and_then(|h| join(base, h)) else { continue };
+            let facet = Facet {
+                title: l["title"].as_str().unwrap_or_default().to_string(),
+                url,
+                count: l["properties"]["numberOfItems"].as_u64().map(|n| n as usize),
+                active: rels(l).contains(&"self"),
+            };
+            add_facet(&mut feed, &title, facet);
+        }
+    }
     feed.folders = folders(&json["navigation"]);
     feed.books = as_list(&json["publications"]).into_iter().filter_map(|p| json_book(p, base)).collect();
     // Groups ("New this week", "Popular"): their books as shown, and each
@@ -1915,6 +1970,36 @@ Summary:
         );
         assert_eq!(connect_candidates("komga.example/opds"), ["https://komga.example/opds", "http://komga.example/opds"]);
         assert_eq!(connect_candidates("c.example/"), ["https://c.example", "https://c.example/", "http://c.example", "http://c.example/"]);
+    }
+
+    #[test]
+    fn reads_facets() {
+        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog" xmlns:thr="http://purl.org/syndication/thread/1.0">
+<title>All books</title>
+<link rel="http://opds-spec.org/facet" href="/all?sort=new" title="Newest" opds:facetGroup="Sort" opds:activeFacet="true"/>
+<link rel="http://opds-spec.org/facet" href="/all?sort=title" title="Title" opds:facetGroup="Sort"/>
+<link rel="http://opds-spec.org/facet" href="/all?lang=fr" title="French" opds:facetGroup="Language" thr:count="120"/>
+</feed>"#;
+        let feed = parse_feed(xml, &url::Url::parse("https://c.example/all").unwrap()).unwrap();
+        let groups: Vec<(&str, Vec<(&str, bool, Option<usize>)>)> = feed
+            .facets
+            .iter()
+            .map(|g| (g.title.as_str(), g.facets.iter().map(|f| (f.title.as_str(), f.active, f.count)).collect()))
+            .collect();
+        assert_eq!(
+            groups,
+            [("Sort", vec![("Newest", true, None), ("Title", false, None)]), ("Language", vec![("French", false, Some(120))])]
+        );
+        assert_eq!(feed.facets[0].facets[1].url, "https://c.example/all?sort=title");
+
+        let json = r#"{"metadata": {"title": "All"}, "links": [],
+          "facets": [{"metadata": {"title": "Sort"}, "links": [
+            {"title": "Newest", "href": "/all?sort=new", "rel": "self"},
+            {"title": "Title", "href": "/all?sort=title", "properties": {"numberOfItems": 9}}]}],
+          "publications": []}"#;
+        let feed = parse_feed(json, &url::Url::parse("https://c.example/all").unwrap()).unwrap();
+        let f = &feed.facets[0];
+        assert_eq!((f.title.as_str(), f.facets.len(), f.facets[0].active, f.facets[1].count), ("Sort", 2, true, Some(9)));
     }
 
     #[test]

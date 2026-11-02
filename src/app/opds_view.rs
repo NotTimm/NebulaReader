@@ -24,7 +24,7 @@ use super::downloads::{human_size, DlState};
 use super::jellyfin_view::JfMsg;
 use super::{App, AppView, DlMsg, Message};
 use crate::library;
-use crate::opds::{self, Book, Feed, Folder, Kind, Root, SavedBook, Search};
+use crate::opds::{self, Book, FacetGroup, Feed, Folder, Kind, Root, SavedBook, Search};
 use crate::remote::Account as RemoteAccount;
 
 /// A folder with at least this many books asks before it's added to a
@@ -64,6 +64,8 @@ pub enum OpdsMsg {
     ConfirmRoot,
     CancelRoot,
     OpenInBrowser(String),
+    /// Shows the folder sorted or filtered another way (a facet's link).
+    Facet(String),
     /// A book's page, by its place in the folder shown.
     ShowBook(usize),
     /// A picture for the Catalog page arrived: (url, image).
@@ -500,6 +502,14 @@ impl App {
             }
             OpdsMsg::CancelRoot => self.op.confirm = None,
             OpdsMsg::OpenInBrowser(url) => crate::platform::open_url(&url),
+            OpdsMsg::Facet(url) => {
+                // The same folder, seen another way: it replaces the one
+                // shown rather than going a level deeper.
+                if let Some((_, last)) = self.op.browse.as_mut().and_then(|b| b.trail.last_mut()) {
+                    *last = url;
+                    return self.load_current();
+                }
+            }
             OpdsMsg::ShowBook(i) => {
                 let Some(b) = self.op.browse.as_mut() else { return Task::none() };
                 let Some(book) = b.feed.as_ref().and_then(|f| f.books.get(i)).cloned() else { return Task::none() };
@@ -709,6 +719,11 @@ impl App {
                     .on_input(|s| Message::Opds(OpdsMsg::SearchInput(s)))
                     .on_submit(|_| Message::Opds(OpdsMsg::Search)),
             );
+        }
+        if let Some(feed) = &b.feed {
+            for group in &feed.facets {
+                col = col.push(facet_row(group));
+            }
         }
         if b.trail.len() == 1 {
             col = col.push(widget::text::body(if catalog { fl!("opds-catalog-help", catalog = account.name()) } else { fl!("opds-pick-help") }));
@@ -1054,6 +1069,28 @@ fn confirm_banner<'a>(c: &Confirm) -> Element<'a, Message> {
     .class(cosmic::theme::Container::Card)
     .width(Length::Fill)
     .into()
+}
+
+/// One group of facets: its name, and a button for each way to see the
+/// folder (the one shown highlighted).
+fn facet_row<'a>(group: &FacetGroup) -> Element<'a, Message> {
+    let buttons: Vec<Element<'a, Message>> = group
+        .facets
+        .iter()
+        .map(|f| {
+            let label = match f.count {
+                Some(n) => format!("{} ({n})", f.title),
+                None => f.title.clone(),
+            };
+            let button = if f.active { widget::button::suggested(label) } else { widget::button::standard(label) };
+            button.on_press(Message::Opds(OpdsMsg::Facet(f.url.clone()))).into()
+        })
+        .collect();
+    let mut col = widget::column::with_capacity(2).spacing(6);
+    if !group.title.is_empty() {
+        col = col.push(widget::text::caption_heading(group.title.clone()));
+    }
+    col.push(widget::flex_row(buttons).row_spacing(6).column_spacing(6)).into()
 }
 
 /// Add to Library / Remove from Library for one folder.

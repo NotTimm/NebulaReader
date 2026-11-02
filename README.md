@@ -366,6 +366,11 @@ To add one:
    your library; **Remove Download** takes it out again. The search
    button in the library's header (**Browse catalogs**) comes back here.
 
+On any Catalog page, the sort and filter options a catalog offers
+("Newest", "Title", "Language: French"…) show as buttons above the list.
+Project Gutenberg has none in its feeds, but its search takes a language:
+`dracula l.en` finds English editions only, and `l.fr` lists French books.
+
 How it works:
 
 - An OPDS catalog has no fixed layout and lists the same book in many
