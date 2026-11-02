@@ -22,6 +22,7 @@ book-details-tip = Detalles del libro (I)
 settings-tip = Ajustes (S)
 chapter-page-counter = Cap. { $chapter }  ·  { $page } / { $pages }
 book-chapter-counter = Capítulo { $chapter } de { $chapters }
+book-section-counter = Sección { $section } de { $sections }
 previous-page = Página anterior (←)
 page = Página
 next-page = Página siguiente (→)

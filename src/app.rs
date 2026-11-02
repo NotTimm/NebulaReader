@@ -1912,16 +1912,19 @@ impl Application for App {
                         .on_press(Message::Book(BookMsg::PrevChapter)),
                     fl!("previous-chapter"),
                 ));
-                // Chapters, said so: a bare "10 / 19" read as pages. The
-                // page in the chapter is in the status line below the text.
-                els.push(tip(
-                    widget::text(fl!(
-                        "book-chapter-counter",
-                        chapter = self.epub_chapter + 1,
-                        chapters = book.chapters.len()
-                    )),
-                    fl!("chapter"),
-                ));
+                // A real chapter counts among the book's chapters only (not
+                // the cover, contents or preface); anything else shows its
+                // title. The page in the chapter is in the status line.
+                let label = match book.chapter_label(self.epub_chapter) {
+                    crate::epub::ChapterLabel::Numbered { n, of } => {
+                        fl!("book-chapter-counter", chapter = n, chapters = of)
+                    }
+                    crate::epub::ChapterLabel::Named(title) => truncate_label(&title, 36),
+                    crate::epub::ChapterLabel::Section { n, of } => {
+                        fl!("book-section-counter", section = n, sections = of)
+                    }
+                };
+                els.push(tip(widget::text(label), fl!("chapter")));
                 els.push(tip(
                     widget::button::icon(icon::from_name("go-next-symbolic"))
                         .on_press(Message::Book(BookMsg::NextChapter)),
@@ -2196,6 +2199,15 @@ impl Application for App {
             .on_finish(|mime, data, _action, _x, _y| Message::DndDataReceived(mime, data))
             .on_data_received(Message::DndDataReceived)
             .into()
+    }
+}
+
+/// A title cut to `max` characters, with an ellipsis.
+fn truncate_label(title: &str, max: usize) -> String {
+    if title.chars().count() <= max {
+        title.to_string()
+    } else {
+        format!("{}…", title.chars().take(max - 1).collect::<String>().trim_end())
     }
 }
 

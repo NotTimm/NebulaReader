@@ -77,7 +77,7 @@ pub struct TocEntry {
     pub level: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EpubBook {
     pub title: String,
     pub author: Option<String>,
@@ -93,7 +93,92 @@ pub struct EpubBook {
     pub images: Vec<Vec<u8>>,
 }
 
+/// What the reader's top bar calls a part of a book.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChapterLabel {
+    /// A real chapter: the `n`th of the book's `of` numbered chapters (the
+    /// cover, contents and preface before them don't count).
+    Numbered { n: usize, of: usize },
+    /// Anything else, by its own title ("Contents", "Preface").
+    Named(String),
+    /// A part with no title: its place among all of them.
+    Section { n: usize, of: usize },
+}
+
+/// Whether a title names a numbered chapter: "Chapter I", "CHAPTER 12.
+/// Loomings", "Chapter One", "Capítulo 3", or a bare "IV." or "12".
+pub fn is_numbered_chapter(title: &str) -> bool {
+    const WORDS: &[&str] = &["chapter", "ch", "chap", "capítulo", "capitulo", "chapitre", "kapitel", "capitolo", "hoofdstuk", "rozdział", "глава"];
+    let split = |c: char| c.is_whitespace() || matches!(c, '.' | ':' | '—' | '–' | '-' | ',');
+    let lower = title.trim().to_lowercase();
+    let mut tokens = lower.split(split).filter(|t| !t.is_empty());
+    let Some(first) = tokens.next() else { return false };
+    if WORDS.contains(&first) {
+        // "Chapter" and then anything: a numeral, a word ("One"), "the First".
+        return tokens.next().is_some();
+    }
+    // A bare numeral, alone or before the chapter's name: digits, or a
+    // Roman numeral in capitals ("IV", not "Mid").
+    // It's the whole title or punctuation follows ("IV.", "XIV: The
+    // Storm"); a word after it is a name ("I Am Legend", "12 Angry Men").
+    let trimmed = title.trim();
+    let first = trimmed.split(split).find(|t| !t.is_empty()).unwrap_or_default();
+    let after = trimmed[first.len()..].chars().next();
+    let alone = after.is_none_or(|c| matches!(c, '.' | ':' | '—' | '–' | '-' | ')'));
+    alone && ((first.len() <= 4 && first.chars().all(|c| c.is_ascii_digit())) || roman(first).is_some())
+}
+
+/// A Roman numeral in capitals, as a number ("XIV" → 14); `None` for
+/// anything that isn't one written the usual way.
+fn roman(s: &str) -> Option<u32> {
+    if s.is_empty() || s.len() > 9 || !s.chars().all(|c| "IVXLCDM".contains(c)) {
+        return None;
+    }
+    let value = |c| match c {
+        'I' => 1,
+        'V' => 5,
+        'X' => 10,
+        'L' => 50,
+        'C' => 100,
+        'D' => 500,
+        _ => 1000,
+    };
+    let digits: Vec<u32> = s.chars().map(value).collect();
+    let n: u32 = digits.iter().enumerate().map(|(i, &d)| if digits.get(i + 1).is_some_and(|&next| next > d) { 0u32.wrapping_sub(d) } else { d }).fold(0u32, u32::wrapping_add);
+    // Written back the usual way, it must come out the same.
+    const TABLE: &[(u32, &str)] = &[(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")];
+    let mut rest = n;
+    let mut out = String::new();
+    for &(v, r) in TABLE {
+        while rest >= v {
+            out.push_str(r);
+            rest -= v;
+        }
+    }
+    // No book has a chapter MIX (1009): high ones are words that happen
+    // to be numerals.
+    (n > 0 && n <= 300 && out == s).then_some(n)
+}
+
 impl EpubBook {
+    /// How the top bar names part `i`: "Chapter n of m" for a real chapter,
+    /// counting only those, else its title.
+    pub fn chapter_label(&self, i: usize) -> ChapterLabel {
+        let numbered: Vec<bool> = self.chapters.iter().map(|c| is_numbered_chapter(&c.title)).collect();
+        let of = numbered.iter().filter(|n| **n).count();
+        let title = self.chapters.get(i).map(|c| c.title.trim()).unwrap_or_default();
+        // Two or more numbered chapters: the book counts its chapters.
+        if of >= 2 && numbered.get(i).copied().unwrap_or(false) {
+            let n = numbered[..=i].iter().filter(|n| **n).count();
+            return ChapterLabel::Numbered { n, of };
+        }
+        if title.is_empty() {
+            ChapterLabel::Section { n: i + 1, of: self.chapters.len() }
+        } else {
+            ChapterLabel::Named(title.to_string())
+        }
+    }
+
     pub fn total_words(&self) -> usize {
         self.chapters.iter().map(|c| c.words).sum()
     }
@@ -1204,6 +1289,30 @@ fn read_zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn real_chapters_are_told_from_the_rest() {
+        for t in ["CHAPTER I", "Chapter I. Jonathan Harker's Journal", "CHAPTER 12. Loomings.", "Chapter One", "Capítulo 3", "IV.", "12", "XIV: The Storm", "chapter the first"] {
+            assert!(is_numbered_chapter(t), "{t}");
+        }
+        for t in ["Contents", "PREFACE", "Dracula", "Title Page", "", "Chapter", "Ivanhoe", "Mid-Winter", "Dim Lights", "MIX", "DIM", "I Am Legend", "12 Angry Men"] {
+            assert!(!is_numbered_chapter(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn the_top_bar_counts_only_real_chapters() {
+        let ch = |t: &str| EpubChapter { title: t.into(), blocks: Vec::new(), words: 0 };
+        let book = EpubBook {
+            chapters: vec![ch("Cover"), ch("Contents"), ch(""), ch("CHAPTER I"), ch("CHAPTER II"), ch("CHAPTER III"), ch("Appendix")],
+            ..Default::default()
+        };
+        assert_eq!(book.chapter_label(1), ChapterLabel::Named("Contents".into()));
+        assert_eq!(book.chapter_label(2), ChapterLabel::Section { n: 3, of: 7 });
+        assert_eq!(book.chapter_label(3), ChapterLabel::Numbered { n: 1, of: 3 });
+        assert_eq!(book.chapter_label(5), ChapterLabel::Numbered { n: 3, of: 3 });
+        assert_eq!(book.chapter_label(6), ChapterLabel::Named("Appendix".into()));
+    }
+
     use super::*;
 
     /// A file with several chapters, like Project Gutenberg's EPUBs, is
