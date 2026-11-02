@@ -70,7 +70,7 @@ pub enum WikiMsg {
     Back,
     Random,
     RandomFound(Result<String, String>),
-    HomeLoaded(u64, Result<Featured, String>),
+    HomeLoaded(u64, Result<Home, String>),
     ArticleLoaded(u64, Result<Article, String>),
     SearchLoaded(u64, Result<Vec<Summary>, String>),
     /// Pictures that finished loading, in a batch.
@@ -186,6 +186,26 @@ impl cosmic::widget::menu::Action for TextAction {
     }
 }
 
+/// The main page for a day: the site's own (English), and the daily feed
+/// (most read; the whole page for a language whose page isn't read).
+#[derive(Clone, Debug, Default)]
+pub struct Home {
+    /// `YYYY/MM/DD` (UTC) it's for: a new day loads it again.
+    day: String,
+    main: Option<wikipedia::MainPage>,
+    feed: Option<Featured>,
+}
+
+/// The main page's box colours, as the site's headings.
+fn box_band(id: &str) -> [u8; 3] {
+    match id {
+        "tfa" | "dyk" => [0xce, 0xf2, 0xe0],
+        "itn" | "otd" => [0xce, 0xdf, 0xf2],
+        "tfl" => [0xf2, 0xce, 0xdd],
+        _ => [0xdd, 0xce, 0xf2],
+    }
+}
+
 /// The languages' own names, for the dropdown.
 fn language_names() -> &'static [&'static str] {
     static NAMES: OnceLock<Vec<&'static str>> = OnceLock::new();
@@ -205,7 +225,7 @@ pub struct WikiState {
     generation: u64,
     loading: bool,
     error: Option<String>,
-    featured: Option<Featured>,
+    featured: Option<Home>,
     article: Option<Arc<Article>>,
     results: Vec<Summary>,
     /// Pictures by [`pic_key`], kept in memory while the page is open.
@@ -729,12 +749,16 @@ impl App {
         let load = match page {
             WikiPage::Home => {
                 self.set_header_title(fl!("wiki-main-page"));
-                if let Some(f) = self.wiki.featured.clone() {
+                if let Some(f) = self.wiki.featured.clone().filter(|h| h.day == wikipedia::chrono_today()) {
                     // Going Back to it: `HomeLoaded` scrolls to where it was.
                     let top = if self.wiki.restore.is_some() { Task::none() } else { top };
                     return Task::batch([self.update_wiki(WikiMsg::HomeLoaded(generation, Ok(f))), top]);
                 }
-                cosmic::task::future(async move { Message::Wiki(WikiMsg::HomeLoaded(generation, wikipedia::featured().await)) })
+                cosmic::task::future(async move {
+                    let day = wikipedia::chrono_today();
+                    let home = wikipedia::home().await.map(|(main, feed)| Home { day, main, feed });
+                    Message::Wiki(WikiMsg::HomeLoaded(generation, home))
+                })
             }
             WikiPage::Article(title) => {
                 self.set_header_title(title.clone());
@@ -934,21 +958,34 @@ impl App {
                 }
                 self.wiki.loading = false;
                 match result {
-                    Ok(f) => {
-                        // The viewer steps through the picture of the day and
-                        // the featured article's.
+                    Ok(home) => {
+                        // The viewer steps through the page's pictures.
                         let mut gallery = Vec::new();
-                        if let Some(p) = &f.picture {
-                            gallery.push((p.image.clone(), vec![Run { text: p.description.clone(), ..Default::default() }]));
-                        }
-                        if let Some(a) = &f.article {
-                            if let Some(t) = &a.thumbnail {
-                                gallery.push((t.clone(), vec![Run { text: a.title.clone(), ..Default::default() }]));
+                        let mut extra: Vec<(String, u32)> = Vec::new();
+                        if let Some(m) = &home.main {
+                            gallery.extend(m.gallery().into_iter().map(|(i, c)| (i.url, c)));
+                            // The featured picture, large, across the page.
+                            if let Some(tfp) = m.boxes.iter().find(|b| b.id == "tfp") {
+                                if let Some(Block::Figure { image, .. }) = tfp.blocks.iter().find(|b| matches!(b, Block::Figure { .. })) {
+                                    extra.push((wikipedia::full_size(&image.url), LARGE));
+                                }
                             }
+                        } else if let Some(f) = &home.feed {
+                            if let Some(p) = &f.picture {
+                                gallery.push((p.image.clone(), vec![Run { text: p.description.clone(), ..Default::default() }]));
+                            }
+                            if let Some(a) = &f.article {
+                                if let Some(t) = &a.thumbnail {
+                                    gallery.push((t.clone(), vec![Run { text: a.title.clone(), ..Default::default() }]));
+                                }
+                            }
+                            // The day's picture, large (the full file, scaled here).
+                            extra.extend(f.picture.iter().map(|p| (p.image.clone(), LARGE)));
                         }
-                        let mut extra: Vec<(String, u32)> = f.most_read.iter().filter_map(|a| a.thumbnail.clone()).map(|u| (u, THUMB)).collect();
-                        // The day's picture, large (the full file, scaled here).
-                        extra.extend(f.picture.iter().map(|p| (p.image.clone(), LARGE)));
+                        if let Some(f) = &home.feed {
+                            extra.extend(f.most_read.iter().filter_map(|a| a.thumbnail.clone()).map(|u| (u, THUMB)));
+                        }
+                        let f = home;
                         self.wiki.featured = Some(f);
                         let pictures = self.page_pictures(gallery, extra);
                         return Task::batch([pictures, self.wiki_restore()]);
@@ -1351,7 +1388,11 @@ impl App {
             match (&self.wiki.page, &self.wiki.article, &self.wiki.featured) {
                 (Some(WikiPage::Article(_)), Some(a), _) => self.view_wiki_article(a, &pal),
                 (Some(WikiPage::Search(q)), _, _) => self.view_wiki_results(q, &pal),
-                (Some(WikiPage::Home) | None, _, Some(f)) => self.view_wiki_home(f, &pal),
+                (Some(WikiPage::Home) | None, _, Some(h)) => match (&h.main, &h.feed) {
+                    (Some(m), feed) => self.view_wiki_main_page(m, feed.as_ref(), &pal),
+                    (None, Some(f)) => self.view_wiki_home(f, &pal),
+                    (None, None) => widget::Space::new().into(),
+                },
                 _ => widget::Space::new().into(),
             }
         };
@@ -1431,18 +1472,116 @@ impl App {
 
     // ── The main page ─────────────────────────────────────────────────────
 
-    fn view_wiki_home<'a>(&'a self, f: &'a Featured, pal: &Palette) -> Element<'a, Message> {
-        // A main-page box: a coloured heading band, then its content.
-        let main_box = |title: String, band: [u8; 3], content: Element<'a, Message>| -> Element<'a, Message> {
-            let bg = pal.page_color(band);
-            let head = widget::container(widget::text(title).size(17.0).font(Font { weight: Weight::Bold, ..serif() }))
-                .padding([4, 8])
+    /// A main-page box: a coloured heading band, then its content.
+    fn main_box<'a>(&self, title: String, band: [u8; 3], content: Element<'a, Message>, pal: &Palette) -> Element<'a, Message> {
+        let bg = pal.page_color(band);
+        let head = widget::container(self.heading(&title, 17.0, Font { weight: Weight::Bold, ..serif() }, pal))
+            .padding([4, 8])
+            .width(Length::Fill)
+            .style(move |_: &cosmic::Theme| widget::container::Style { background: Some(Background::Color(bg)), ..Default::default() });
+        boxed(widget::column::with_capacity(2).push(head).push(widget::container(content).padding([8, 10])), pal.panel, pal.border)
+            .width(Length::Fill)
+            .into()
+    }
+
+    /// "Most read today", from the daily feed (not on the site's page).
+    fn most_read_box<'a>(&'a self, f: &'a Featured, pal: &Palette) -> Option<Element<'a, Message>> {
+        if f.most_read.is_empty() {
+            return None;
+        }
+        let mut list = widget::column::with_capacity(f.most_read.len()).spacing(8);
+        for (i, a) in f.most_read.iter().enumerate() {
+            let mut row = widget::row::with_capacity(3).spacing(10).align_y(Alignment::Center);
+            row = row.push(widget::text(format!("{}.", i + 1)).size(TEXT).width(Length::Fixed(22.0)));
+            if let Some(pic) = a.thumbnail.as_deref().and_then(|t| self.wiki_pic(t, THUMB, Length::Fixed(48.0), Length::Fixed(48.0), pal)) {
+                row = row.push(pic);
+            }
+            row = row.push(
+                widget::column::with_capacity(2)
+                    .width(Length::Fill)
+                    .push(self.owned_text(vec![link_run(&a.title, true)], pal, TEXT))
+                    .push(muted(a.description.clone(), TEXT - 2.0, pal)),
+            );
+            list = list.push(row);
+        }
+        Some(self.main_box(fl!("wiki-most-read"), [0xce, 0xf2, 0xe0], list.into(), pal))
+    }
+
+    /// The day's picture across the page, kept in proportion (it opens in
+    /// the viewer).
+    /// `pic` is the file shown (loaded at `LARGE`), `view` the picture's
+    /// key in the viewer.
+    fn wide_picture<'a>(&self, pic: &str, view: &str) -> Option<Element<'a, Message>> {
+        let el: Element<'a, Message> = match self.wiki.pics.get(&pic_key(pic, LARGE)) {
+            Some(Pic::Ready(h)) => widget::mouse_area(widget::image(h.clone()).width(Length::Fill).content_fit(ContentFit::Contain))
+                .on_press(Message::Wiki(WikiMsg::View(view.to_string())))
+                .interaction(cosmic::iced::mouse::Interaction::ZoomIn)
+                .into(),
+            Some(Pic::Failed) => return None,
+            _ => widget::container(widget::indeterminate_circular())
                 .width(Length::Fill)
-                .style(move |_: &cosmic::Theme| widget::container::Style { background: Some(Background::Color(bg)), ..Default::default() });
-            boxed(widget::column::with_capacity(2).push(head).push(widget::container(content).padding([8, 10])), pal.panel, pal.border)
-                .width(Length::Fill)
-                .into()
+                .height(Length::Fixed(300.0))
+                .center_x(Length::Fill)
+                .center_y(Length::Fixed(300.0))
+                .into(),
         };
+        Some(widget::container(el).max_width(1100).width(Length::Fill).center_x(Length::Fill).into())
+    }
+
+    /// English Wikipedia's main page as the site shows it today: the
+    /// featured article and Did you know on the left, In the news and On
+    /// this day on the right, then the featured list and picture across.
+    fn view_wiki_main_page<'a>(&'a self, m: &'a wikipedia::MainPage, feed: Option<&'a Featured>, pal: &Palette) -> Element<'a, Message> {
+        let content = |b: &'a wikipedia::MainBox| -> Element<'a, Message> {
+            let mut flow = FloatFlow::new().spacing(8.0).gap(16.0);
+            let mut wide_done = false;
+            for block in &b.blocks {
+                flow = match block {
+                    // The featured picture: large, across the box.
+                    Block::Figure { image, .. } if b.id == "tfp" && !wide_done => {
+                        wide_done = true;
+                        match self.wide_picture(&wikipedia::full_size(&image.url), &image.url) {
+                            Some(p) => flow.push(p),
+                            None => flow,
+                        }
+                    }
+                    Block::Figure { image, caption } => match self.wiki_figure(image, caption, pal) {
+                        Some(fig) => flow.float(fig),
+                        None => flow,
+                    },
+                    other => flow.push(self.wiki_block(other, pal)),
+                };
+            }
+            flow.into()
+        };
+        let boxes = |column: wikipedia::Column| -> Vec<Element<'a, Message>> {
+            m.boxes.iter().filter(|b| b.column == column).map(|b| self.main_box(b.title.clone(), box_band(&b.id), content(b), pal)).collect()
+        };
+
+        let mut col = widget::column::with_capacity(6).spacing(16);
+        let welcome = m.welcome.trim_end_matches(',').to_string();
+        col = col.push(
+            widget::column::with_capacity(3)
+                .spacing(4)
+                .push(self.heading(if welcome.is_empty() { "Wikipedia" } else { &welcome }, 30.0, serif(), pal))
+                .push_maybe((!m.tagline.is_empty()).then(|| muted(m.tagline.clone(), TEXT, pal)))
+                .push_maybe((!m.count.is_empty()).then(|| muted(m.count.clone(), TEXT - 2.0, pal))),
+        );
+        let left = widget::column::with_children(boxes(wikipedia::Column::Left)).spacing(16).width(Length::FillPortion(11));
+        let right = widget::column::with_children(boxes(wikipedia::Column::Right)).spacing(16).width(Length::FillPortion(9));
+        col = col.push(widget::row::with_capacity(2).spacing(16).push(left).push(right));
+        for b in boxes(wikipedia::Column::Full) {
+            col = col.push(b);
+        }
+        if let Some(mr) = feed.and_then(|f| self.most_read_box(f, pal)) {
+            col = col.push(mr);
+        }
+        col = col.push(widget::text::caption(fl!("wiki-credit-home")));
+        col.into()
+    }
+
+    fn view_wiki_home<'a>(&'a self, f: &'a Featured, pal: &Palette) -> Element<'a, Message> {
+        let main_box = |title: String, band: [u8; 3], content: Element<'a, Message>| self.main_box(title, band, content, pal);
 
         let mut left = widget::column::with_capacity(3).spacing(16).width(Length::FillPortion(3));
         if let Some(a) = &f.article {
@@ -1456,23 +1595,8 @@ impl App {
             }
             left = left.push(main_box(fl!("wiki-featured-article"), [0xce, 0xf2, 0xe0], row.push(text).into()));
         }
-        if !f.most_read.is_empty() {
-            let mut list = widget::column::with_capacity(f.most_read.len()).spacing(8);
-            for (i, a) in f.most_read.iter().enumerate() {
-                let mut row = widget::row::with_capacity(3).spacing(10).align_y(Alignment::Center);
-                row = row.push(widget::text(format!("{}.", i + 1)).size(TEXT).width(Length::Fixed(22.0)));
-                if let Some(pic) = a.thumbnail.as_deref().and_then(|t| self.wiki_pic(t, THUMB, Length::Fixed(48.0), Length::Fixed(48.0), pal)) {
-                    row = row.push(pic);
-                }
-                row = row.push(
-                    widget::column::with_capacity(2)
-                        .width(Length::Fill)
-                        .push(self.owned_text(vec![link_run(&a.title, true)], pal, TEXT))
-                        .push(muted(a.description.clone(), TEXT - 2.0, pal)),
-                );
-                list = list.push(row);
-            }
-            left = left.push(main_box(fl!("wiki-most-read"), [0xce, 0xf2, 0xe0], list.into()));
+        if let Some(mr) = self.most_read_box(f, pal) {
+            left = left.push(mr);
         }
 
         let mut right = widget::column::with_capacity(2).spacing(16).width(Length::FillPortion(2));
@@ -1507,27 +1631,9 @@ impl App {
         );
         col = col.push(widget::row::with_capacity(2).spacing(16).push(left).push(right));
         if let Some(p) = &f.picture {
-            // The day's picture across the page, kept in proportion.
-            let picture: Option<Element<'a, Message>> = match self.wiki.pics.get(&pic_key(&p.image, LARGE)) {
-                Some(Pic::Ready(h)) => Some(
-                    widget::mouse_area(widget::image(h.clone()).width(Length::Fill).content_fit(ContentFit::Contain))
-                        .on_press(Message::Wiki(WikiMsg::View(p.image.clone())))
-                        .interaction(cosmic::iced::mouse::Interaction::ZoomIn)
-                        .into(),
-                ),
-                Some(Pic::Failed) => None,
-                _ => Some(
-                    widget::container(widget::indeterminate_circular())
-                        .width(Length::Fill)
-                        .height(Length::Fixed(300.0))
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fixed(300.0))
-                        .into(),
-                ),
-            };
             let content = widget::column::with_capacity(2)
                 .spacing(8)
-                .push_maybe(picture.map(|p| widget::container(p).max_width(1100).width(Length::Fill).center_x(Length::Fill)))
+                .push_maybe(self.wide_picture(&p.image, &p.image))
                 .push(widget::text(p.description.clone()).size(TEXT).line_height(LineHeight::Relative(LINE)).width(Length::Fill));
             col = col.push(main_box(fl!("wiki-featured-picture"), [0xdd, 0xce, 0xf2], content.into()));
         }

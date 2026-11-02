@@ -204,7 +204,7 @@ pub async fn featured() -> Result<Featured, String> {
 }
 
 /// `YYYY/MM/DD` for today in UTC.
-fn chrono_today() -> String {
+pub fn chrono_today() -> String {
     let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0) as i64;
     // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
     let z = days + 719_468;
@@ -343,26 +343,12 @@ impl Article {
     /// The article's pictures with their captions, in reading order (the
     /// infobox's first): what the picture viewer steps through.
     pub fn gallery(&self) -> Vec<(Image, Line)> {
-        fn walk(blocks: &[Block], out: &mut Vec<(Image, Line)>) {
-            for b in blocks {
-                match b {
-                    Block::Figure { image, caption } => out.push((image.clone(), caption.clone())),
-                    Block::Table(t) => table(t, out),
-                    _ => {}
-                }
-            }
-        }
-        fn table(t: &Table, out: &mut Vec<(Image, Line)>) {
-            for c in t.rows.iter().flat_map(|r| &r.cells) {
-                walk(&c.content, out);
-            }
-        }
         let mut out = Vec::new();
         if let Some(t) = &self.infobox {
-            table(t, &mut out);
+            table_pictures(t, &mut out);
         }
         for s in &self.sections {
-            walk(&s.blocks, &mut out);
+            block_pictures(&s.blocks, &mut out);
         }
         out
     }
@@ -552,6 +538,9 @@ struct Builder {
     /// The article's infobox, taken from the lead when it's met there.
     infobox: Option<Table>,
     take_infobox: bool,
+    /// Tables used for layout (the main page's) are read as their cells'
+    /// contents, not drawn as tables.
+    layout_tables: bool,
 }
 
 /// Where a link goes: `wiki:<Title>` for an article, a web address, or
@@ -729,6 +718,53 @@ impl Builder {
             return;
         }
         let name = e.name.as_str();
+        // An older-style thumbnail: the picture, then its caption beside it
+        // (the main page's).
+        if name == "div" && e.has_class("thumbinner") {
+            if let Some(image) = e.find(&|x| x.name == "img").and_then(image_of) {
+                self.flush();
+                let mut cap = Builder::default();
+                if let Some(c) = e.find(&|x| x.has_class("thumbcaption")) {
+                    cap.inlines(c, Ctx::default());
+                }
+                self.blocks.push(Block::Figure { image, caption: trim_line(cap.line) });
+            }
+            return;
+        }
+        // A horizontal list ("a · b · c"): one line, inline when its class
+        // says so ("More anniversaries: …").
+        if e.has_class("hlist") && matches!(name, "div" | "span") {
+            let inline = e.has_class("inline");
+            if !inline {
+                self.flush();
+            }
+            let mut items: Vec<&El> = Vec::new();
+            fn lis<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+                for k in &e.kids {
+                    if let Node::El(c) = k {
+                        if hidden(c) {
+                            continue;
+                        }
+                        if c.name == "li" {
+                            out.push(c);
+                        } else {
+                            lis(c, out);
+                        }
+                    }
+                }
+            }
+            lis(e, &mut items);
+            for (i, li) in items.iter().enumerate() {
+                if i > 0 {
+                    self.push_text(" · ", ctx, false);
+                }
+                self.inlines(li, ctx.clone());
+            }
+            if !inline {
+                self.flush();
+            }
+            return;
+        }
         // A picture (a thumbnail with its caption, or one on its own).
         if name == "figure" || (e.attr("typeof").is_some_and(|t| t.starts_with("mw:File")) && name != "a") {
             if let Some(image) = e.find(&|x| x.name == "img").and_then(image_of) {
@@ -795,6 +831,26 @@ impl Builder {
                 let line = trim_line(b.line);
                 if !line.is_empty() {
                     self.blocks.push(Block::Quote(line));
+                }
+            }
+            "table" if self.layout_tables && e.attr("role") == Some("presentation") => {
+                self.flush();
+                fn cells<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+                    for k in &e.kids {
+                        if let Node::El(c) = k {
+                            if matches!(c.name.as_str(), "td" | "th") {
+                                out.push(c);
+                            } else {
+                                cells(c, out);
+                            }
+                        }
+                    }
+                }
+                let mut found = Vec::new();
+                cells(e, &mut found);
+                for c in found {
+                    self.blocks(c, ctx);
+                    self.flush();
                 }
             }
             "table" => {
@@ -899,6 +955,125 @@ fn table(t: &El) -> Table {
 }
 
 /// An article's HTML (Parsoid's) as sections, with the infobox apart.
+/// The pictures in some blocks, with their captions.
+fn block_pictures(blocks: &[Block], out: &mut Vec<(Image, Line)>) {
+    for b in blocks {
+        match b {
+            Block::Figure { image, caption } => out.push((image.clone(), caption.clone())),
+            Block::Table(t) => table_pictures(t, out),
+            _ => {}
+        }
+    }
+}
+
+fn table_pictures(t: &Table, out: &mut Vec<(Image, Line)>) {
+    for c in t.rows.iter().flat_map(|r| &r.cells) {
+        block_pictures(&c.content, out);
+    }
+}
+
+// ── The main page ──────────────────────────────────────────────────────────
+
+/// Where a box sits on the main page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Column {
+    Left,
+    Right,
+    Full,
+}
+
+/// One of the main page's boxes ("From today's featured article", "Did you
+/// know …", "In the news"…), as the site shows it today.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MainBox {
+    /// Its id on the site without `mp-`: tfa, dyk, itn, otd, tfl, tfp.
+    pub id: String,
+    pub title: String,
+    pub column: Column,
+    pub blocks: Vec<Block>,
+}
+
+/// English Wikipedia's main page, read from the page itself, so it shows
+/// what the site does today, in its order.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MainPage {
+    /// "Welcome to Wikipedia,"
+    pub welcome: String,
+    /// "the free encyclopedia that anyone can edit."
+    pub tagline: String,
+    /// "7,258,440 articles in English"
+    pub count: String,
+    pub boxes: Vec<MainBox>,
+}
+
+impl MainPage {
+    pub fn gallery(&self) -> Vec<(Image, Line)> {
+        let mut out = Vec::new();
+        for b in &self.boxes {
+            block_pictures(&b.blocks, &mut out);
+        }
+        out
+    }
+}
+
+/// The boxes worth reading, in the site's order. Left out: "Help us
+/// improve this article!" (afi), and the boxes about Wikipedia itself
+/// (other areas, sister projects, languages).
+const MAIN_BOXES: &[&str] = &["tfa", "dyk", "itn", "otd", "tfl", "tfp"];
+
+fn clean(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Reads a main page laid out like English Wikipedia's (`mp-tfa`,
+/// `mp-dyk`…); `None` for one that isn't.
+pub fn parse_main_page(html: &str) -> Option<MainPage> {
+    let root = parse_html(html);
+    let by_id = |id: &str| root.find(&|e| e.attr("id") == Some(id));
+    let mut page = MainPage {
+        welcome: by_id("mp-welcome").map(|e| clean(&e.text())).unwrap_or_default(),
+        tagline: by_id("mp-free").map(|e| clean(&e.text())).unwrap_or_default(),
+        count: by_id("articlecount")
+            .and_then(|c| c.find(&|e| e.name == "li" && e.text().contains("article")))
+            .map(|e| clean(&e.text()))
+            .unwrap_or_default(),
+        boxes: Vec::new(),
+    };
+    let columns = [("mp-left", Column::Left), ("mp-right", Column::Right)];
+    for id in MAIN_BOXES {
+        let Some(el) = by_id(&format!("mp-{id}")) else { continue };
+        let title = by_id(&format!("mp-{id}-h2")).map(|h| clean(&h.text())).unwrap_or_default();
+        let column = columns
+            .iter()
+            .find(|(c, _)| by_id(c).is_some_and(|c| c.find(&|e| e.attr("id") == Some(&format!("mp-{id}"))).is_some()))
+            .map_or(Column::Full, |(_, col)| *col);
+        let mut b = Builder { layout_tables: true, ..Default::default() };
+        b.blocks(el, &Ctx::default());
+        b.flush();
+        let blocks: Vec<Block> = b.blocks.into_iter().filter(|b| !matches!(b, Block::Para(l) if l.is_empty())).collect();
+        if !blocks.is_empty() {
+            page.boxes.push(MainBox { id: id.to_string(), title, column, blocks });
+        }
+    }
+    (!page.boxes.is_empty()).then_some(page)
+}
+
+/// Today's main page: the page itself where it's laid out like English
+/// Wikipedia's, and the daily feed (most read, and the main page of a
+/// language whose page isn't read).
+pub async fn home() -> Result<(Option<MainPage>, Option<Featured>), String> {
+    let main = async {
+        let html = get(&format!("{}/api/rest_v1/page/html/Main_Page", host())).await?.text().await.map_err(|e| e.to_string())?;
+        Ok::<_, String>(parse_main_page(&html))
+    };
+    let (main, feed) = cosmic::iced::futures::future::join(main, featured()).await;
+    let main = main.ok().flatten();
+    match (main, feed) {
+        (None, Err(e)) => Err(e),
+        (main, feed) => Ok((main, feed.ok())),
+    }
+}
+
 pub fn parse_article(html: &str, title: &str) -> Article {
     let root = parse_html(html);
     let body = root.find(&|e| e.name == "body").cloned().unwrap_or(root);
@@ -1037,6 +1212,78 @@ mod tests {
         }
         if let Some(Block::Para(l)) = a.sections[0].blocks.iter().find(|b| matches!(b, Block::Para(_))) {
             println!("lead: {}", l.iter().map(|r| r.text.as_str()).collect::<String>().chars().take(400).collect::<String>());
+        }
+    }
+
+    #[test]
+    fn the_main_page_is_read_like_the_site() {
+        let html = r#"<body><div id="mp-welcomecount"><div id="mp-welcome"><h1>Welcome to <a href="./Wikipedia">Wikipedia</a></h1>,</div>
+<div id="mp-free">the free encyclopedia that anyone can edit.</div>
+<div id="articlecount"><ul><li><a href="./Special:Statistics">266,512</a> active editors</li><li><a href="./Special:Statistics">7,258,440</a> articles in <a href="./English_language">English</a></li></ul></div></div>
+<div id="mp-upper"><div id="mp-left">
+<h2 id="mp-tfa-h2" class="mp-h2">From today's featured article</h2>
+<div id="mp-tfa"><p>The <b><a rel="mw:WikiLink" href="./Ship">ship</a></b> sank.</p>
+<div class="hlist tfa-footer noprint"><ul><li><a href="./Wikipedia:TFA">Archive</a></li><li>By email</li></ul></div></div>
+<h2 id="mp-dyk-h2" class="mp-h2">Did you know ...</h2>
+<div id="mp-dyk"><ul><li>... that <a rel="mw:WikiLink" href="./Dragon">a dragon</a> exists?</li></ul></div></div>
+<div id="mp-right"><h2 id="mp-afi-h2">Help us improve this article!</h2><div id="mp-afi"><p>Edit me</p></div>
+<h2 id="mp-itn-h2" class="mp-h2">In the news</h2>
+<div id="mp-itn"><div class="itn-img"><div class="thumbinner"><span typeof="mw:File"><a href="./File:X.jpg"><img src="//upload.wikimedia.org/x/120px-X.jpg" width="120" height="150"/></a></span><div class="thumbcaption">Someone in 1999</div></div></div>
+<ul><li><a rel="mw:WikiLink" href="./Someone">Someone</a> <i>(pictured)</i> dies.</li></ul>
+<div><b>Ongoing</b>: <div class="hlist inline"><ul><li><a rel="mw:WikiLink" href="./War_A">War A</a></li><li><a rel="mw:WikiLink" href="./War_B">War B</a></li></ul></div></div></div>
+<h2 id="mp-otd-h2" class="mp-h2">On this day</h2>
+<div id="mp-otd"><p><b><a rel="mw:WikiLink" href="./November_2">November 2</a></b></p><ul><li><a rel="mw:WikiLink" href="./1943">1943</a> – A battle.</li></ul>
+<div class="hlist"><ul><li><a rel="mw:WikiLink" href="./Matilda">Matilda</a> (d. 1083)</li><li><a rel="mw:WikiLink" href="./James_Dunn">James Dunn</a> (b. 1901)</li></ul></div></div></div></div>
+<div id="mp-lower"><h2 id="mp-tfp-h2" class="mp-h2">Today's featured picture</h2>
+<div id="mp-tfp"><table role="presentation"><tbody><tr><td><span typeof="mw:File"><a href="./File:M.jpg"><img src="//upload.wikimedia.org/m/500px-M.jpg" width="500" height="235"/></a></span></td></tr><tr><td><p><b><a rel="mw:WikiLink" href="./Modriku">Mõdriku</a></b> is a village.</p></td></tr></tbody></table></div></div>
+<div id="mp-other"><h2>Other areas of Wikipedia</h2><p>Community portal</p></div></body>"#;
+        let m = parse_main_page(html).unwrap();
+        assert_eq!(m.welcome, "Welcome to Wikipedia,");
+        assert_eq!(m.count, "7,258,440 articles in English");
+        let ids: Vec<(&str, Column)> = m.boxes.iter().map(|b| (b.id.as_str(), b.column)).collect();
+        assert_eq!(ids, [("tfa", Column::Left), ("dyk", Column::Left), ("itn", Column::Right), ("otd", Column::Right), ("tfp", Column::Full)]);
+        assert_eq!(m.boxes[0].title, "From today's featured article");
+        let text = |b: &Block| match b {
+            Block::Para(l) => l.iter().map(|r| r.text.as_str()).collect::<String>(),
+            Block::List { items, .. } => items.iter().map(|(_, l)| l.iter().map(|r| r.text.as_str()).collect::<String>()).collect::<Vec<_>>().join("|"),
+            Block::Figure { caption, .. } => format!("fig:{}", caption.iter().map(|r| r.text.as_str()).collect::<String>()),
+            _ => String::new(),
+        };
+        // The footer (Archive, By email) is gone.
+        assert_eq!(m.boxes[0].blocks.iter().map(text).collect::<Vec<_>>(), ["The ship sank."]);
+        let itn: Vec<String> = m.boxes[2].blocks.iter().map(text).collect();
+        assert_eq!(itn, ["fig:Someone in 1999", "Someone (pictured) dies.", "Ongoing: War A · War B"]);
+        let otd: Vec<String> = m.boxes[3].blocks.iter().map(text).collect();
+        assert_eq!(otd, ["November 2", "1943 – A battle.", "Matilda (d. 1083) · James Dunn (b. 1901)"]);
+        // Links survive.
+        let Block::Para(ongoing) = &m.boxes[2].blocks[2] else { panic!() };
+        assert_eq!(ongoing.iter().filter_map(|r| r.link.as_deref()).collect::<Vec<_>>(), ["wiki:War A", "wiki:War B"]);
+        let tfp: Vec<String> = m.boxes[4].blocks.iter().map(text).collect();
+        assert_eq!(tfp, ["fig:", "Mõdriku is a village."]);
+        assert_eq!(m.gallery().len(), 2);
+    }
+
+    /// NEBULA_WIKI_MAIN=/path/Main_Page.html prints what the main page
+    /// parser makes of a saved main page.
+    #[test]
+    fn real_main_page() {
+        let Ok(path) = std::env::var("NEBULA_WIKI_MAIN") else { return };
+        let m = parse_main_page(&std::fs::read_to_string(path).unwrap()).expect("a main page");
+        println!("{} {} | {}", m.welcome, m.tagline, m.count);
+        for b in &m.boxes {
+            println!("== {} [{}] {:?}", b.title, b.id, b.column);
+            for block in &b.blocks {
+                match block {
+                    Block::Para(l) => println!("  p: {}", l.iter().map(|r| if r.link.is_some() { format!("[{}]", r.text) } else { r.text.clone() }).collect::<String>()),
+                    Block::List { items, .. } => {
+                        for (_, l) in items {
+                            println!("  - {}", l.iter().map(|r| if r.link.is_some() { format!("[{}]", r.text) } else { r.text.clone() }).collect::<String>());
+                        }
+                    }
+                    Block::Figure { image, caption } => println!("  fig {}x{} {}", image.width, image.height, caption.iter().map(|r| r.text.as_str()).collect::<String>()),
+                    other => println!("  {other:?}"),
+                }
+            }
         }
     }
 

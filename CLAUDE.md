@@ -312,6 +312,14 @@ the owner's laptop). Last updated 2026-11-02.
   Toggling the contents re-wraps the article, so `ToggleToc` measures the
   sections first (`MeasureSections` → `Layout::anchor`: section + how far
   through it), toggles, measures again and scrolls to the same place.
+  Main page (2026-11-02): English reads the real Main_Page (Parsoid HTML,
+  `wikipedia::parse_main_page`: boxes `mp-tfa/dyk/itn/otd/tfl/tfp` in the
+  site's order and columns, `noprint` footers and `mp-afi` dropped,
+  `thumbinner` pictures with captions, `hlist` as "a · b" lines, layout
+  tables unwrapped) via `wikipedia::home()`, plus the feed for Most read
+  (shown last; not on the site). Other languages fall back to the feed
+  page. `Home` is cached per UTC day. `NEBULA_WIKI_MAIN=page.html` prints
+  a saved main page's parse.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
 - Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows
