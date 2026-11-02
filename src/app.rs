@@ -2051,6 +2051,10 @@ impl Application for App {
             event::Event::Touch(t) => Some(Message::Touch(t)),
             // The window icon can only be set once the window exists.
             event::Event::Window(window::Event::Opened { .. }) => Some(Message::WindowOpened),
+            // Windows: if the window procedure wasn't hooked when it opened
+            // (platform/pinch.rs), it is when it gets focus.
+            #[cfg(windows)]
+            event::Event::Window(window::Event::Focused) if !crate::platform::pinch::hooked() => Some(Message::WindowOpened),
             event::Event::Window(window::Event::FileDropped(paths)) => {
                 Some(Message::FilesDropped(paths))
             }
