@@ -39,6 +39,7 @@ mod opds_view;
 mod paged;
 mod properties;
 mod rar_index;
+mod table_row;
 mod wiki_view;
 mod window_icon;
 

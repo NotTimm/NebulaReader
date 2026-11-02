@@ -323,6 +323,14 @@ the owner's laptop). Last updated 2026-11-02.
   a saved main page's parse.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
+- Wikipedia tables (2026-11-02): rows are `app/table_row.rs` (`TableRow`:
+  lays cells out at their own height, then all at the tallest, since an
+  iced row can't fill height on a scrolling page); columns weighted by
+  their longest text (`column_weights`: capped at 32, at least the longest
+  word + 2); header cells get the grey band.
+- Book reader's top bar: "Chapter n of m" counts only parts whose title
+  names a numbered chapter (`epub::is_numbered_chapter`,
+  `EpubBook::chapter_label`); others show their title.
 - Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows
   (comic reader, Wikipedia viewer) because a precision touchpad's pinch is
   wheel messages with `MK_CONTROL` in the message but not Ctrl in the

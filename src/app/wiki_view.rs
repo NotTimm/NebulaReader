@@ -196,6 +196,56 @@ pub struct Home {
     feed: Option<Featured>,
 }
 
+/// How much width each column of a table wants: its longest text (capped,
+/// so one long cell doesn't take the table), and never less than its
+/// longest word, so headings like "Attendance" don't break.
+fn column_weights(t: &Table) -> Vec<f32> {
+    fn text(blocks: &[Block], out: &mut String) {
+        for b in blocks {
+            match b {
+                Block::Para(l) | Block::Hatnote(l) | Block::Quote(l) => {
+                    out.extend(l.iter().map(|r| r.text.as_str()));
+                    out.push(' ');
+                }
+                Block::List { items, .. } => {
+                    for (_, l) in items {
+                        out.extend(l.iter().map(|r| r.text.as_str()));
+                        out.push(' ');
+                    }
+                }
+                Block::Figure { image, .. } => out.push_str(&"m".repeat((image.width / 8.0) as usize)),
+                Block::Table(_) | Block::Bar(_) => out.push_str("mmmmmmmmmm"),
+            }
+        }
+    }
+    let columns = t.rows.iter().map(|r| r.cells.iter().map(|c| c.colspan.max(1)).sum::<usize>()).max().unwrap_or(0);
+    let mut weights = vec![0.0f32; columns];
+    for r in &t.rows {
+        let mut at = 0;
+        for c in &r.cells {
+            let span = c.colspan.max(1);
+            // A cell across columns says little about any one of them.
+            if span == 1 {
+                let mut s = String::new();
+                text(&c.content, &mut s);
+                let len = s.trim().chars().count() as f32;
+                let word = s.split_whitespace().map(|w| w.chars().count()).max().unwrap_or(0) as f32;
+                let want = len.min(32.0).max(word + 2.0).max(3.0);
+                if let Some(w) = weights.get_mut(at) {
+                    *w = w.max(want);
+                }
+            }
+            at += span;
+        }
+    }
+    for w in &mut weights {
+        if *w == 0.0 {
+            *w = 6.0;
+        }
+    }
+    weights
+}
+
 /// The main page's box colours, as the site's headings.
 fn box_band(id: &str) -> [u8; 3] {
     match id {
@@ -387,6 +437,31 @@ mod tests {
         assert_eq!(after.resolve(a), Some(1700.0));
         let end = Layout { offset: 3500.0, ..before.clone() };
         assert_eq!(after.resolve(end.anchor().unwrap()), Some(2300.0));
+    }
+
+    #[test]
+    fn table_columns_are_as_wide_as_what_is_in_them() {
+        let cell = |t: &str, header: bool| Cell {
+            header,
+            colspan: 1,
+            background: None,
+            center: false,
+            content: vec![Block::Para(vec![Run { text: t.into(), ..Default::default() }])],
+        };
+        let row = |cells: Vec<Cell>| wikipedia::Row { cells };
+        let t = Table {
+            rows: vec![
+                row(vec![cell("Game", true), cell("Score", true), cell("Attendance", true)]),
+                row(vec![cell("1", false), cell("Tampa Bay Rays – 2, Milwaukee Brewers – 3", false), cell("43,250", false)]),
+            ],
+            caption: Vec::new(),
+            float_right: false,
+        };
+        let w = column_weights(&t);
+        assert_eq!(w.len(), 3);
+        // The score takes the most room; "Game" and "Attendance" keep theirs.
+        assert!(w[1] > w[2] && w[2] > w[0]);
+        assert!(w[0] >= 6.0 && w[2] >= 12.0);
     }
 
     #[test]
@@ -1856,13 +1931,25 @@ impl App {
             col = col.push(widget::container(self.line_text(&t.caption, pal, TEXT)).padding([4, 8]));
         }
         let size = if infobox { TEXT - 2.0 } else { TEXT - 1.0 };
+        // Columns as wide as what's in them, as a browser sizes them.
+        let columns = column_weights(t);
         for r in &t.rows {
-            let mut row = widget::row::with_capacity(r.cells.len()).spacing(if infobox { 8 } else { 0 });
+            // Every cell as tall as the row's tallest, so the grid lines up.
+            let mut row = super::table_row::TableRow::new().spacing(if infobox { 8.0 } else { 0.0 });
             // Label and value: the label narrower, as in an infobox.
             let label_row = infobox && r.cells.len() == 2 && r.cells[0].header && !r.cells[1].header;
+            let mut at = 0;
             for (j, c) in r.cells.iter().enumerate() {
-                let portion = if label_row { if j == 0 { 2 } else { 3 } } else { c.colspan as u16 };
-                row = row.push(self.wiki_cell(c, pal, size, infobox).width(Length::FillPortion(portion)));
+                let span = c.colspan.max(1);
+                let weight = if label_row {
+                    if j == 0 { 2.0 } else { 3.0 }
+                } else if infobox {
+                    span as f32
+                } else {
+                    columns.iter().skip(at).take(span).sum::<f32>().max(1.0)
+                };
+                at += span;
+                row = row.push(weight, self.wiki_cell(c, pal, size, infobox).width(Length::Fill));
             }
             col = col.push(row);
         }
@@ -1912,7 +1999,8 @@ impl App {
                 other => self.wiki_block(other, pal),
             });
         }
-        let bg = c.background.map(|b| pal.page_color(b));
+        // A heading cell gets the site's grey band unless it has a colour.
+        let bg = c.background.map(|b| pal.page_color(b)).or((c.header && !infobox).then_some(pal.panel));
         let border = if infobox { Color::TRANSPARENT } else { pal.border };
         widget::container(col).padding(if infobox { [3, 4] } else { [4, 8] }).style(move |_: &cosmic::Theme| widget::container::Style {
             background: bg.map(Background::Color),
