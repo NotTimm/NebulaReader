@@ -2520,12 +2520,15 @@ impl App {
         // In theater mode libcosmic's content frame is off (see `update`),
         // so nothing else paints behind the reader; without this, anything
         // not on the backdrop (the error banner, the gap below it) would
-        // show the window through.
+        // show the window through. Otherwise the frame paints the window's
+        // own background (frosted glass on COSMIC), and a second layer here
+        // would hide it.
+        let theater = self.theater_mode && self.epub_book.is_none();
         widget::container(col.push(main_row))
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(|theme: &cosmic::Theme| widget::container::Style {
-                background: Some(Background::Color(theme.cosmic().bg_color().into())),
+            .style(move |theme: &cosmic::Theme| widget::container::Style {
+                background: theater.then(|| Background::Color(theme.cosmic().bg_color().into())),
                 ..Default::default()
             })
             .into()
@@ -2535,12 +2538,15 @@ impl App {
     /// *around* the page is tinted — the page image itself is a child of
     /// this container and is never affected by the opacity setting.
     fn backdrop<'a>(&self, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-        let black = self.theater_mode || self.settings.background == BgStyle::Black;
-        // Theater mode is always fully black.
-        let alpha = if self.theater_mode {
-            1.0
+        // Theater mode: solid black. Black: black at the chosen opacity, over
+        // the window's background. Theme: nothing of its own, so the window's
+        // background shows as on every other page (frosted glass on COSMIC).
+        let fill = if self.theater_mode {
+            Some(Color::BLACK)
+        } else if self.settings.background == BgStyle::Black {
+            Some(Color { a: self.settings.background_opacity.clamp(0.0, 1.0), ..Color::BLACK })
         } else {
-            self.settings.background_opacity.clamp(0.0, 1.0)
+            None
         };
 
         widget::container(content)
@@ -2548,16 +2554,9 @@ impl App {
             .height(Length::Fill)
             .center_x(Length::Fill)
             .center_y(Length::Fill)
-            .style(move |theme: &cosmic::Theme| {
-                let base = if black {
-                    Color::BLACK
-                } else {
-                    theme.cosmic().bg_color().into()
-                };
-                widget::container::Style {
-                    background: Some(Background::Color(Color { a: alpha, ..base })),
-                    ..Default::default()
-                }
+            .style(move |_: &cosmic::Theme| widget::container::Style {
+                background: fill.map(Background::Color),
+                ..Default::default()
             })
             .into()
     }
@@ -2687,19 +2686,23 @@ impl App {
                     Message::SetBackground,
                 ),
             ))
-            .add(widget::settings::item(
-                fl!(
-                    "background-opacity",
-                    percent = format!("{:.0}", s.background_opacity * 100.0)
-                ),
-                widget::slider(
-                    0.0..=1.0,
-                    s.background_opacity,
-                    Message::SetBackgroundOpacity,
+            // How strong the black is; the theme's own background is the
+            // window's (frosted glass on COSMIC), with nothing to set.
+            .add_maybe((s.background == BgStyle::Black).then(|| {
+                widget::settings::item(
+                    fl!(
+                        "background-opacity",
+                        percent = format!("{:.0}", s.background_opacity * 100.0)
+                    ),
+                    widget::slider(
+                        0.0..=1.0,
+                        s.background_opacity,
+                        Message::SetBackgroundOpacity,
+                    )
+                    .step(0.05_f32)
+                    .width(Length::Fixed(180.0)),
                 )
-                .step(0.05_f32)
-                .width(Length::Fixed(180.0)),
-            ))
+            }))
             .add(widget::settings::item(
                 fl!("theater-mode"),
                 widget::toggler(self.theater_mode).on_toggle(|_| Message::ToggleTheater),
