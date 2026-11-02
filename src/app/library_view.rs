@@ -9,8 +9,8 @@ use cosmic::Element;
 
 use super::{error_banner, App, Message};
 use crate::library::{IssueEntry, SeriesEntry};
-use crate::settings::LibrarySource;
 use crate::scan::{THUMB_H, THUMB_W};
+use crate::settings::LibrarySource;
 
 /// Shelf cards are shown at half the thumbnail resolution (crisp on HiDPI).
 const CARD_W: f32 = THUMB_W as f32 / 2.0;
@@ -20,12 +20,17 @@ fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}…", s.chars().take(max - 1).collect::<String>().trim_end())
+        format!(
+            "{}…",
+            s.chars().take(max - 1).collect::<String>().trim_end()
+        )
     }
 }
 
 pub(super) fn progress_bar<'a>(fraction: f32) -> Element<'a, Message> {
-    cosmic::iced::widget::ProgressBar::new(0.0..=1.0, fraction).girth(4.0).into()
+    cosmic::iced::widget::ProgressBar::new(0.0..=1.0, fraction)
+        .girth(4.0)
+        .into()
 }
 
 fn tint(alpha: f32) -> impl Fn(&cosmic::Theme) -> widget::container::Style {
@@ -33,7 +38,10 @@ fn tint(alpha: f32) -> impl Fn(&cosmic::Theme) -> widget::container::Style {
         let accent: Color = theme.cosmic().accent_color().into();
         widget::container::Style {
             background: Some(Background::Color(Color { a: alpha, ..accent })),
-            border: cosmic::iced::Border { radius: 6.0.into(), ..Default::default() },
+            border: cosmic::iced::Border {
+                radius: 6.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -47,7 +55,10 @@ fn placeholder_cover<'a>(w: f32, h: f32, icon_name: &'static str) -> Element<'a,
         .center_y(Length::Fixed(h))
         .style(|_: &cosmic::Theme| widget::container::Style {
             background: Some(Background::Color(Color::from_rgba(0.5, 0.5, 0.5, 0.15))),
-            border: cosmic::iced::Border { radius: 4.0.into(), ..Default::default() },
+            border: cosmic::iced::Border {
+                radius: 4.0.into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .into()
@@ -57,9 +68,22 @@ fn placeholder_cover<'a>(w: f32, h: f32, icon_name: &'static str) -> Element<'a,
 fn card_subtitle(e: &SeriesEntry) -> String {
     if e.is_epub {
         // The author, like a bookshop label; "Book" when unknown.
-        let author = e.creators.lines().next().and_then(|l| l.split_once(": ")).map(|(_, names)| names);
+        let author = e
+            .creators
+            .lines()
+            .next()
+            .and_then(|l| l.split_once(": "))
+            .map(|(_, names)| names);
         let what = author.map(str::to_string).unwrap_or_else(|| fl!("book"));
-        return if e.has_progress() { fl!("book-chapter", what = what.as_str(), chapter = e.last_read_chapter + 1) } else { what };
+        return if e.has_progress() {
+            fl!(
+                "book-chapter",
+                what = what.as_str(),
+                chapter = e.last_read_chapter + 1
+            )
+        } else {
+            what
+        };
     }
     if e.issue_count > 1 {
         if e.is_finished() {
@@ -73,7 +97,11 @@ fn card_subtitle(e: &SeriesEntry) -> String {
     if e.is_finished() {
         return fl!("finished");
     }
-    if e.total_pages > 0 { fl!("page-count", count = e.total_pages) } else { String::new() }
+    if e.total_pages > 0 {
+        fl!("page-count", count = e.total_pages)
+    } else {
+        String::new()
+    }
 }
 
 /// "Continue" line: which issue you're on and how far.
@@ -83,12 +111,20 @@ fn continue_label(e: &SeriesEntry) -> String {
     }
     if e.issue_count > 1 && !e.current_issue_label.is_empty() {
         let n = &e.current_issue_label;
-        let label = if n.chars().all(|c| c.is_ascii_digit() || c == '.') { format!("#{n}") } else { truncate(n, 14) };
+        let label = if n.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            format!("#{n}")
+        } else {
+            truncate(n, 14)
+        };
         // A Jellyfin chapter has no page count until it is opened.
         if e.current_issue_fraction <= 0.0 {
             return label;
         }
-        return fl!("issue-progress", label = label, percent = format!("{:.0}", e.current_issue_fraction * 100.0));
+        return fl!(
+            "issue-progress",
+            label = label,
+            percent = format!("{:.0}", e.current_issue_fraction * 100.0)
+        );
     }
     format!("{:.0}%", e.progress_fraction() * 100.0)
 }
@@ -97,9 +133,16 @@ impl App {
     /// The All / Local / Jellyfin picker at the left of the header: a pill
     /// with the current choice's icon, opening a menu of all three.
     pub(super) fn library_source_picker(&self) -> Element<'_, Message> {
-        let current = if self.app_view == super::AppView::Wikipedia { LibrarySource::Wikipedia } else { self.settings.library_source };
+        let current = if self.app_view == super::AppView::Wikipedia {
+            LibrarySource::Wikipedia
+        } else {
+            self.settings.library_source
+        };
         let label = |src: LibrarySource| {
-            LibrarySource::ALL.iter().position(|s| *s == src).map_or("", |i| self.labels.library_source[i].as_str())
+            LibrarySource::ALL
+                .iter()
+                .position(|s| *s == src)
+                .map_or("", |i| self.labels.library_source[i].as_str())
         };
 
         let pill = widget::button::custom(
@@ -128,7 +171,10 @@ impl App {
                     .spacing(10)
                     .align_y(Alignment::Center)
                     .push(widget::icon(source_icon(src)).size(16))
-                    .push(widget::text::body(self.labels.library_source[i].as_str()).width(Length::Fill));
+                    .push(
+                        widget::text::body(self.labels.library_source[i].as_str())
+                            .width(Length::Fill),
+                    );
                 if src == current {
                     row = row.push(widget::icon(ui_icon(CHECK)).size(16));
                 }
@@ -155,11 +201,19 @@ impl App {
     /// The places the library has series from (Local, Jellyfin, OPDS), for
     /// the source dropdown.
     fn sources_present(&self) -> Vec<LibrarySource> {
-        let entries: Vec<&SeriesEntry> = self.library_entries.iter().filter(|e| self.is_visible(e)).collect();
+        let entries: Vec<&SeriesEntry> = self
+            .library_entries
+            .iter()
+            .filter(|e| self.is_visible(e))
+            .collect();
         let mut present: Vec<LibrarySource> = LibrarySource::ALL[1..]
             .iter()
             .copied()
-            .filter(|src| entries.iter().any(|e| src.includes(&e.path, &e.library_root)))
+            .filter(|src| {
+                entries
+                    .iter()
+                    .any(|e| src.includes(&e.path, &e.library_root))
+            })
             .collect();
         // Wikipedia isn't in the library, but it's a place to go when it's on.
         if self.settings.wikipedia {
@@ -177,8 +231,13 @@ impl App {
     /// Whether a server series belongs to an account that's still signed
     /// in. Series left behind by a removed account can't be opened.
     fn has_account(&self, e: &SeriesEntry) -> bool {
-        let key = if crate::remote::is_key(&e.path) { &e.path } else { &e.library_root };
-        crate::remote::parse_key(key).is_some_and(|(account, _)| self.remote_account(account).is_some())
+        let key = if crate::remote::is_key(&e.path) {
+            &e.path
+        } else {
+            &e.library_root
+        };
+        crate::remote::parse_key(key)
+            .is_some_and(|(account, _)| self.remote_account(account).is_some())
     }
 
     pub(super) fn view_library(&self) -> Element<'_, Message> {
@@ -206,8 +265,14 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(icon::from_name("dialog-warning-symbolic").size(16))
-                    .push(widget::text::caption(fl!("downloads-error", error = e)).width(Length::Shrink))
-                    .push(widget::button::link(fl!("manage-downloads")).on_press(Message::Dl(super::DlMsg::OpenManager)))
+                    .push(
+                        widget::text::caption(fl!("downloads-error", error = e))
+                            .width(Length::Shrink),
+                    )
+                    .push(
+                        widget::button::link(fl!("manage-downloads"))
+                            .on_press(Message::Dl(super::DlMsg::OpenManager)),
+                    )
                     .push(
                         widget::button::icon(icon::from_name("window-close-symbolic"))
                             .on_press(Message::Dl(super::DlMsg::DismissError)),
@@ -227,7 +292,10 @@ impl App {
                     .spacing(8)
                     .align_y(Alignment::Center)
                     .push(icon::from_name("network-error-symbolic").size(16))
-                    .push(widget::text::caption(fl!("servers-offline", servers = offline.join(", ")))),
+                    .push(widget::text::caption(fl!(
+                        "servers-offline",
+                        servers = offline.join(", ")
+                    ))),
             );
         }
         if self.scans_pending > 0 || meta_left > 0 {
@@ -237,13 +305,18 @@ impl App {
             // lookups.
             if self.scans_pending > 0 {
                 status = status.push(widget::indeterminate_circular().size(14.0).bar_height(2.0));
-                status = status.push(widget::text::caption(fl!("scanning-library", left = self.scans_pending)));
+                status = status.push(widget::text::caption(fl!(
+                    "scanning-library",
+                    left = self.scans_pending
+                )));
             }
             if meta_left > 0 {
                 let total = self.meta_done + meta_left;
                 let percent = self.meta_done * 100 / total;
                 status = status.push(
-                    widget::determinate_circular(self.meta_done as f32 / total as f32).size(14.0).bar_height(2.0),
+                    widget::determinate_circular(self.meta_done as f32 / total as f32)
+                        .size(14.0)
+                        .bar_height(2.0),
                 );
                 status = status.push(widget::text::caption(fl!(
                     "looking-up-metadata-progress",
@@ -255,13 +328,19 @@ impl App {
             col = col.push(status);
         }
 
-        let visible: Vec<&SeriesEntry> =
-            self.library_entries.iter().filter(|e| self.is_visible(e)).collect();
+        let visible: Vec<&SeriesEntry> = self
+            .library_entries
+            .iter()
+            .filter(|e| self.is_visible(e))
+            .collect();
 
         // Narrowed by the All / Local / Jellyfin dropdown in the header.
         let visible: Vec<&SeriesEntry> = if self.has_local_and_remote() {
             let src = self.settings.library_source;
-            visible.into_iter().filter(|e| src.includes(&e.path, &e.library_root)).collect()
+            visible
+                .into_iter()
+                .filter(|e| src.includes(&e.path, &e.library_root))
+                .collect()
         } else {
             visible
         };
@@ -272,41 +351,69 @@ impl App {
             } else {
                 fl!("no-search-match")
             };
-            col = col.push(
-                widget::container(
-                    widget::Column::new()
-                        .spacing(12)
-                        .align_x(Alignment::Center)
-                        .push(icon::from_name("library-symbolic").size(64))
-                        .push(widget::text::title3(if self.library_search.is_empty() {
-                            fl!("library-empty")
-                        } else {
-                            fl!("no-results")
-                        }))
-                        .push(widget::text::body(msg))
-                        .push(
-                            widget::Row::new()
-                                .spacing(8)
-                                .push(widget::button::standard(fl!("open-file")).on_press(Message::OpenFile))
-                                .push(widget::button::standard(fl!("open-folder")).on_press(Message::OpenFolder))
-                                .push_maybe(self.catalog_to_browse().filter(|_| self.library_search.is_empty()).map(|c| {
-                                    widget::button::standard(fl!("opds-browse-catalog", catalog = c.name()))
-                                        .on_press(Message::Opds(super::opds_view::OpdsMsg::BrowseCatalogs))
-                                }))
-                                .push(
-                                    widget::button::suggested(fl!("add-library-folder"))
-                                        .on_press(Message::AddLibraryFolder),
-                                ),
-                        ),
-                )
+            col =
+                col.push(
+                    widget::container(
+                        widget::Column::new()
+                            .spacing(12)
+                            .align_x(Alignment::Center)
+                            .push(icon::from_name("library-symbolic").size(64))
+                            .push(widget::text::title3(if self.library_search.is_empty() {
+                                fl!("library-empty")
+                            } else {
+                                fl!("no-results")
+                            }))
+                            .push(widget::text::body(msg))
+                            .push(
+                                widget::Row::new()
+                                    .spacing(8)
+                                    .push(
+                                        widget::button::standard(fl!("open-file"))
+                                            .on_press(Message::OpenFile),
+                                    )
+                                    .push(
+                                        widget::button::standard(fl!("open-folder"))
+                                            .on_press(Message::OpenFolder),
+                                    )
+                                    .push_maybe(
+                                        self.catalog_to_browse()
+                                            .filter(|_| self.library_search.is_empty())
+                                            .map(|c| {
+                                                widget::button::standard(fl!(
+                                                    "opds-browse-catalog",
+                                                    catalog = c.name()
+                                                ))
+                                                .on_press(Message::Opds(
+                                                    super::opds_view::OpdsMsg::BrowseCatalogs,
+                                                ))
+                                            }),
+                                    )
+                                    .push(
+                                        widget::button::suggested(fl!("add-library-folder"))
+                                            .on_press(Message::AddLibraryFolder),
+                                    ),
+                            ),
+                    )
+                    .width(Length::Fill)
+                    .center_x(Length::Fill)
+                    .padding(40),
+                );
+            return widget::container(col)
                 .width(Length::Fill)
-                .center_x(Length::Fill)
-                .padding(40),
-            );
-            return widget::container(col).width(Length::Fill).height(Length::Fill).into();
+                .height(Length::Fill)
+                .into();
         }
 
         let mut body = widget::Column::new().spacing(24);
+
+        // OPDS catalog shelves (compact, side-by-side) on the OPDS shelf.
+        let opds_shelf = self.settings.library_source == LibrarySource::Opds
+            || (!self.has_local_and_remote() && self.has_catalogs());
+        if self.library_search.is_empty() && opds_shelf {
+            if let Some(section) = self.view_catalog_quick_sections() {
+                body = body.push(section);
+            }
+        }
 
         // ── Continue Reading ──────────────────────────────────────────────
         if self.library_search.is_empty() {
@@ -321,9 +428,9 @@ impl App {
                 for e in recent.into_iter().take(10) {
                     row = row.push(self.series_card(e, true));
                 }
-                body = body.push(widget::text::title3(fl!("continue-reading"))).push(
-                    widget::scrollable::horizontal(row.padding([0, 0, 12, 0])),
-                );
+                body = body
+                    .push(widget::text::title3(fl!("continue-reading")))
+                    .push(widget::scrollable::horizontal(row.padding([0, 0, 12, 0])));
             }
         }
 
@@ -334,13 +441,19 @@ impl App {
             let mut items: Vec<&SeriesEntry> = visible
                 .iter()
                 .copied()
-                .filter(|e| e.library_root == root || (e.library_root.is_empty() && Path::new(&e.path).starts_with(dir)))
+                .filter(|e| {
+                    e.library_root == root
+                        || (e.library_root.is_empty() && Path::new(&e.path).starts_with(dir))
+                })
                 .collect();
             if items.is_empty() {
                 continue;
             }
             items.sort_by_cached_key(|e| e.name().to_lowercase());
-            let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(root);
+            let name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(root);
             sections.push((name, items));
         }
         // One section per Jellyfin library ("Manga · deepdish").
@@ -352,10 +465,23 @@ impl App {
         remote_roots.sort_unstable();
         remote_roots.dedup();
         for root in remote_roots {
-            let mut items: Vec<&SeriesEntry> = visible.iter().copied().filter(|e| e.library_root == root).collect();
+            let mut items: Vec<&SeriesEntry> = visible
+                .iter()
+                .copied()
+                .filter(|e| e.library_root == root)
+                .collect();
             items.sort_by_cached_key(|e| e.name().to_lowercase());
-            let fallback = if crate::opds::is_key(root) { "OPDS" } else { "Jellyfin" };
-            let name = self.jf.library_names.get(root).cloned().unwrap_or_else(|| fallback.into());
+            let fallback = if crate::opds::is_key(root) {
+                "OPDS"
+            } else {
+                "Jellyfin"
+            };
+            let name = self
+                .jf
+                .library_names
+                .get(root)
+                .cloned()
+                .unwrap_or_else(|| fallback.into());
             sections.push((name, items));
         }
 
@@ -363,12 +489,23 @@ impl App {
             .iter()
             .copied()
             .filter(|e| {
-                e.library_root.is_empty() && !self.library_dirs.iter().any(|d| Path::new(&e.path).starts_with(d))
+                e.library_root.is_empty()
+                    && !self
+                        .library_dirs
+                        .iter()
+                        .any(|d| Path::new(&e.path).starts_with(d))
             })
             .collect();
         if !other.is_empty() {
             other.sort_by_key(|e| std::cmp::Reverse(e.last_opened));
-            sections.push((if sections.is_empty() { fl!("library") } else { fl!("opened-elsewhere") }, other));
+            sections.push((
+                if sections.is_empty() {
+                    fl!("library")
+                } else {
+                    fl!("opened-elsewhere")
+                },
+                other,
+            ));
         }
 
         for (name, items) in sections {
@@ -382,15 +519,23 @@ impl App {
                         .push(widget::text::caption(format!("{count}"))),
                 )
                 .push(
-                    widget::flex_row(items.into_iter().map(|e| self.series_card(e, false)).collect())
-                        .row_spacing(20)
-                        .column_spacing(16)
-                        .width(Length::Fill),
+                    widget::flex_row(
+                        items
+                            .into_iter()
+                            .map(|e| self.series_card(e, false))
+                            .collect(),
+                    )
+                    .row_spacing(20)
+                    .column_spacing(16)
+                    .width(Length::Fill),
                 );
         }
 
         col = col.push(widget::scrollable(body.padding([0, 12, 24, 0])).height(Length::Fill));
-        widget::container(col).width(Length::Fill).height(Length::Fill).into()
+        widget::container(col)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     fn is_visible(&self, e: &SeriesEntry) -> bool {
@@ -399,12 +544,18 @@ impl App {
         }
         if is_remote(e) {
             // While its server can't be reached, only what's downloaded.
-            let key = if crate::remote::is_key(&e.path) { &e.path } else { &e.library_root };
-            return self.has_account(e) && (!self.jellyfin_offline(key) || self.dl.has_series(&e.path));
+            let key = if crate::remote::is_key(&e.path) {
+                &e.path
+            } else {
+                &e.library_root
+            };
+            return self.has_account(e)
+                && (!self.jellyfin_offline(key) || self.dl.has_series(&e.path));
         }
         !self.missing_roots.iter().any(|r| {
             let r = r.to_string_lossy();
-            e.library_root == r || (e.library_root.is_empty() && Path::new(&e.path).starts_with(r.as_ref()))
+            e.library_root == r
+                || (e.library_root.is_empty() && Path::new(&e.path).starts_with(r.as_ref()))
         })
     }
 
@@ -419,7 +570,11 @@ impl App {
             None => placeholder_cover(
                 CARD_W,
                 CARD_H,
-                if e.is_epub { "x-office-document-symbolic" } else { "image-x-generic-symbolic" },
+                if e.is_epub {
+                    "x-office-document-symbolic"
+                } else {
+                    "image-x-generic-symbolic"
+                },
             ),
         };
 
@@ -437,7 +592,10 @@ impl App {
                                 background: Some(cosmic::iced::Background::Color(bg)),
                                 text_color: Some(theme.cosmic().on_bg_color().into()),
                                 icon_color: Some(theme.cosmic().on_bg_color().into()),
-                                border: cosmic::iced::Border { radius: 10.0.into(), ..Default::default() },
+                                border: cosmic::iced::Border {
+                                    radius: 10.0.into(),
+                                    ..Default::default()
+                                },
                                 ..Default::default()
                             }
                         }),
@@ -472,11 +630,16 @@ impl App {
         // Continue Reading opens the reader; everything else its page, one-
         // shots included, for the description and the download button.
         let msg = if continuing {
-            Message::OpenEntry { key: e.path.clone(), chapter: None }
+            Message::OpenEntry {
+                key: e.path.clone(),
+                chapter: None,
+            }
         } else {
             Message::OpenSeriesPage(e.path.clone())
         };
-        let card = mouse_area(card).on_press(msg).interaction(cosmic::iced::mouse::Interaction::Pointer);
+        let card = mouse_area(card)
+            .on_press(msg)
+            .interaction(cosmic::iced::mouse::Interaction::Pointer);
         widget::context_menu(card, Some(self.card_menu(e, continuing)))
             .on_open(Message::CardMenuOpened(e.path.clone()))
             .into()
@@ -502,7 +665,10 @@ impl App {
         }
 
         // ── Header: cover + details + actions ─────────────────────────────
-        let cover = self.series_page_covers.get(&0).or_else(|| self.library_covers.get(&series.id));
+        let cover = self
+            .series_page_covers
+            .get(&0)
+            .or_else(|| self.library_covers.get(&series.id));
         let cover: Element<'_, Message> = match cover {
             Some(h) => widget::image(h.clone())
                 .width(Length::Fixed(THUMB_W as f32 * 0.75))
@@ -510,7 +676,11 @@ impl App {
                 .content_fit(ContentFit::Cover)
                 .border_radius([6.0; 4])
                 .into(),
-            None => placeholder_cover(THUMB_W as f32 * 0.75, THUMB_H as f32 * 0.75, "image-x-generic-symbolic"),
+            None => placeholder_cover(
+                THUMB_W as f32 * 0.75,
+                THUMB_H as f32 * 0.75,
+                "image-x-generic-symbolic",
+            ),
         };
 
         let mut facts: Vec<String> = Vec::new();
@@ -537,11 +707,19 @@ impl App {
                 if issue.completed {
                     facts.push(fl!("read"));
                 } else if issue.in_progress() {
-                    facts.push(fl!("page-of", page = issue.last_page + 1, pages = issue.page_count.max(1)));
+                    facts.push(fl!(
+                        "page-of",
+                        page = issue.last_page + 1,
+                        pages = issue.page_count.max(1)
+                    ));
                 }
             }
         } else {
-            facts.push(if manga { fl!("chapter-count", count = issues.len()) } else { fl!("issue-count", count = issues.len()) });
+            facts.push(if manga {
+                fl!("chapter-count", count = issues.len())
+            } else {
+                fl!("issue-count", count = issues.len())
+            });
             if read > 0 {
                 facts.push(fl!("read-count", count = read));
             }
@@ -557,23 +735,34 @@ impl App {
         }
 
         if !series.display_title.is_empty() && series.display_title != series.title {
-            details = details.push(widget::text::caption(fl!("on-disk-as", name = series.title.as_str())));
+            details = details.push(widget::text::caption(fl!(
+                "on-disk-as",
+                name = series.title.as_str()
+            )));
         }
 
         let source_line = match series.source.as_str() {
             "comicvine" => fl!("matched-comicvine"),
             "anilist" => fl!("matched-anilist"),
             _ if series.meta_status == "nomatch" => fl!("no-match-folder-name"),
-            _ if series.meta_status.starts_with("error") => fl!("lookup-failed", error = series.meta_status[6..].trim()),
-            _ if self.meta_running && self.meta_current.as_deref() == Some(series.path.as_str()) => {
+            _ if series.meta_status.starts_with("error") => {
+                fl!("lookup-failed", error = series.meta_status[6..].trim())
+            }
+            _ if self.meta_running
+                && self.meta_current.as_deref() == Some(series.path.as_str()) =>
+            {
                 fl!("looking-up-metadata")
             }
             _ => fl!("not-looked-up"),
         };
-        let mut source_row = widget::Row::new().spacing(8).align_y(Alignment::Center).push(widget::text::caption(source_line));
+        let mut source_row = widget::Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(widget::text::caption(source_line));
         if !series.source_url.is_empty() {
             source_row = source_row.push(
-                widget::button::link(fl!("view-page")).on_press(Message::OpenUrl(series.source_url.clone())),
+                widget::button::link(fl!("view-page"))
+                    .on_press(Message::OpenUrl(series.source_url.clone())),
             );
         }
         details = details.push(source_row);
@@ -598,19 +787,28 @@ impl App {
             None => fl!("read-again"),
         };
         let primary_idx = next.map(|i| i.idx).unwrap_or(0);
-        let mut actions = widget::Row::new()
-            .spacing(8)
-            .push(
-                widget::button::suggested(primary_label)
-                    .on_press(Message::OpenEntry { key: series.path.clone(), chapter: Some(primary_idx) }),
-            );
-        let (mark_read, mark_unread) =
-            if one_shot { (fl!("mark-read-one"), fl!("mark-unread-one")) } else { (fl!("mark-all-read"), fl!("mark-all-unread")) };
+        let mut actions =
+            widget::Row::new()
+                .spacing(8)
+                .push(
+                    widget::button::suggested(primary_label).on_press(Message::OpenEntry {
+                        key: series.path.clone(),
+                        chapter: Some(primary_idx),
+                    }),
+                );
+        let (mark_read, mark_unread) = if one_shot {
+            (fl!("mark-read-one"), fl!("mark-unread-one"))
+        } else {
+            (fl!("mark-all-read"), fl!("mark-all-unread"))
+        };
         if read < issues.len() {
-            actions = actions.push(widget::button::standard(mark_read).on_press(Message::MarkSeriesRead(true)));
+            actions = actions
+                .push(widget::button::standard(mark_read).on_press(Message::MarkSeriesRead(true)));
         }
         if read > 0 || issues.iter().any(|i| i.in_progress()) {
-            actions = actions.push(widget::button::standard(mark_unread).on_press(Message::MarkSeriesRead(false)));
+            actions = actions.push(
+                widget::button::standard(mark_unread).on_press(Message::MarkSeriesRead(false)),
+            );
         }
         // Jellyfin and OPDS items can be downloaded for reading offline: a
         // series all at once (each chapter has its own button below), a
@@ -618,7 +816,8 @@ impl App {
         if crate::remote::is_key(&series.path) {
             if one_shot {
                 if let Some(issue) = issues.first() {
-                    actions = actions.push(self.one_shot_download_action(&issue.path, &series.path));
+                    actions =
+                        actions.push(self.one_shot_download_action(&issue.path, &series.path));
                 }
             } else {
                 let keys: Vec<String> = issues.iter().map(|i| i.path.clone()).collect();
@@ -650,7 +849,10 @@ impl App {
         if one_shot {
             // The whole page is the details; scroll if the description is long.
             col = col.push(widget::scrollable(header.padding([0, 12, 24, 0])).height(Length::Fill));
-            return widget::container(col).width(Length::Fill).height(Length::Fill).into();
+            return widget::container(col)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
         }
         col = col.push(header);
         col = col.push(widget::divider::horizontal::default());
@@ -662,10 +864,18 @@ impl App {
         }
         col = col.push(widget::scrollable(list.padding([0, 12, 24, 0])).height(Length::Fill));
 
-        widget::container(col).width(Length::Fill).height(Length::Fill).into()
+        widget::container(col)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
-    fn issue_row<'a>(&'a self, series: &'a SeriesEntry, issue: &'a IssueEntry, manga: bool) -> Element<'a, Message> {
+    fn issue_row<'a>(
+        &'a self,
+        series: &'a SeriesEntry,
+        issue: &'a IssueEntry,
+        manga: bool,
+    ) -> Element<'a, Message> {
         let thumb: Element<'_, Message> = match self.series_page_covers.get(&issue.idx) {
             Some(h) => widget::image(h.clone())
                 .width(Length::Fixed(54.0))
@@ -688,7 +898,10 @@ impl App {
         // Show the file name only when it adds something: not for an
         // official title, and not for manga-tui chapter files ("Ch 3 Vol
         // none Weeb central 01J7…"), whose number and title are shown above.
-        if !issue.title.is_empty() || issue.number.is_empty() || crate::naming::starts_with_chapter(&issue.name) {
+        if !issue.title.is_empty()
+            || issue.number.is_empty()
+            || crate::naming::starts_with_chapter(&issue.name)
+        {
         } else {
             meta.push(truncate(&issue.name, 60));
         }
@@ -700,7 +913,11 @@ impl App {
                 .spacing(2)
                 .width(Length::Fixed(120.0))
                 .push(progress_bar(issue.fraction()))
-                .push(widget::text::caption(fl!("page-of", page = issue.last_page + 1, pages = issue.page_count.max(1))))
+                .push(widget::text::caption(fl!(
+                    "page-of",
+                    page = issue.last_page + 1,
+                    pages = issue.page_count.max(1)
+                )))
                 .into()
         } else {
             widget::text::caption(fl!("unread")).into()
@@ -713,7 +930,11 @@ impl App {
                 "object-select-symbolic"
             }))
             .on_press(Message::ToggleIssueRead(issue.id, !issue.completed)),
-            widget::text(if issue.completed { fl!("mark-unread") } else { fl!("mark-read") }),
+            widget::text(if issue.completed {
+                fl!("mark-unread")
+            } else {
+                fl!("mark-read")
+            }),
             widget::tooltip::Position::Left,
         );
 
@@ -728,8 +949,9 @@ impl App {
             })
             .push_maybe((!meta.is_empty()).then(|| widget::text::caption(meta.join("  ·  "))));
 
-        let download = crate::remote::is_key(&issue.path)
-            .then(|| self.download_button(&issue.path, &series.path, widget::tooltip::Position::Left));
+        let download = crate::remote::is_key(&issue.path).then(|| {
+            self.download_button(&issue.path, &series.path, widget::tooltip::Position::Left)
+        });
         let row = widget::Row::new()
             .spacing(12)
             .align_y(Alignment::Center)
@@ -742,13 +964,19 @@ impl App {
             .push(toggle);
 
         let row: Element<'_, Message> = if is_current {
-            widget::container(row).style(tint(0.12)).width(Length::Fill).into()
+            widget::container(row)
+                .style(tint(0.12))
+                .width(Length::Fill)
+                .into()
         } else {
             row.into()
         };
 
         let row = mouse_area(row)
-            .on_press(Message::OpenEntry { key: series.path.clone(), chapter: Some(issue.idx) })
+            .on_press(Message::OpenEntry {
+                key: series.path.clone(),
+                chapter: Some(issue.idx),
+            })
             .interaction(cosmic::iced::mouse::Interaction::Pointer);
         // A Jellyfin CBR without a page index: right-click to build it now.
         if self.issue_unindexed(&series.path, &issue.path) {
@@ -760,7 +988,9 @@ impl App {
                     super::rar_index::IssueAction::BuildIndex,
                 )],
             );
-            widget::context_menu(row, Some(items)).on_open(Message::IssueMenuOpened(issue.path.clone())).into()
+            widget::context_menu(row, Some(items))
+                .on_open(Message::IssueMenuOpened(issue.path.clone()))
+                .into()
         } else {
             row.into()
         }
@@ -770,10 +1000,17 @@ impl App {
 /// The issue to suggest next: the in-progress one, else the first unread
 /// after the last read one, else the first unread at all.
 pub(super) fn next_issue(issues: &[IssueEntry]) -> Option<&IssueEntry> {
-    if let Some(i) = issues.iter().filter(|i| i.in_progress()).max_by_key(|i| i.last_read_at) {
+    if let Some(i) = issues
+        .iter()
+        .filter(|i| i.in_progress())
+        .max_by_key(|i| i.last_read_at)
+    {
         return Some(i);
     }
-    let last_read = issues.iter().filter(|i| i.completed).max_by_key(|i| (i.last_read_at, i.idx));
+    let last_read = issues
+        .iter()
+        .filter(|i| i.completed)
+        .max_by_key(|i| (i.last_read_at, i.idx));
     if let Some(lr) = last_read {
         if let Some(n) = issues.iter().find(|i| i.idx > lr.idx && !i.completed) {
             return Some(n);
@@ -794,7 +1031,11 @@ pub(super) fn is_manga(issues: &[IssueEntry]) -> bool {
 pub(super) fn issue_title(issue: &IssueEntry, manga: bool) -> String {
     let heading = issue.heading();
     if heading.is_empty() || issue.number.is_empty() {
-        if issue.number.is_empty() { issue.name.clone() } else { issue.label(manga) }
+        if issue.number.is_empty() {
+            issue.name.clone()
+        } else {
+            issue.label(manga)
+        }
     } else {
         format!("{}  —  {}", issue.label(manga), heading)
     }

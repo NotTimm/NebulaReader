@@ -5,50 +5,54 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use cosmic::app::{Core, Task};
 use cosmic::dialog::file_chooser::{self, FileFilter};
+use cosmic::iced::widget::mouse_area;
 use cosmic::iced::{
     event,
     keyboard::{self, key::Named, Key},
     mouse, touch, window, Alignment, Background, Color, ContentFit, Length, Subscription,
 };
-use cosmic::iced::widget::mouse_area;
 use cosmic::widget::{self, icon};
 use cosmic::{executor, Application, ApplicationExt, Element};
 use url::Url;
 
 use crate::comic::{self, ChapterInfo, PageSource};
-use crate::epub;
 use crate::comicinfo::{self, ComicInfo};
 use crate::comicvine;
+use crate::epub;
 use crate::library::{self, IssueEntry, IssueRow, SeriesEntry, SeriesKind};
 use crate::metadata::{self, SeriesMatch};
 use crate::naming;
-use crate::scan;
 use crate::platform::look::{self, Corners, Look};
 use crate::platform::Desktop;
+use crate::scan;
 use crate::settings::{Background as BgStyle, LibrarySource, Settings};
 use crate::themes;
 
 mod book_view;
-mod paged;
-mod library_view;
-mod window_icon;
-mod jellyfin_view;
-mod opds_view;
-mod wiki_view;
-mod float_flow;
+mod chapter_list;
 mod downloads;
+mod float_flow;
+mod jellyfin_view;
+mod library_view;
+mod opds_view;
+mod paged;
 mod properties;
 mod rar_index;
-mod chapter_list;
+mod wiki_view;
+mod window_icon;
 
 use book_view::{BookMsg, BookScroll};
+use downloads::{DlMsg, Downloads};
 use jellyfin_view::{JfMsg, JfState, RemoteReading};
 use opds_view::{OpdsMsg, OpdsState};
 use wiki_view::{WikiMsg, WikiState};
-use downloads::{DlMsg, Downloads};
 
 /// The modifier key named in hints: Cmd on a Mac, Ctrl elsewhere.
-const MODIFIER_KEY: &str = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
+const MODIFIER_KEY: &str = if cfg!(target_os = "macos") {
+    "Cmd"
+} else {
+    "Ctrl"
+};
 
 /// Dropdown labels in the interface language. Dropdowns borrow their
 /// labels, so they live on the app and are rebuilt when the language
@@ -69,16 +73,50 @@ struct Labels {
 impl Labels {
     fn new(languages: &[crate::i18n::Language]) -> Self {
         Labels {
-            languages: std::iter::once(fl!("language-system")).chain(languages.iter().map(|l| l.name.clone())).collect(),
+            languages: std::iter::once(fl!("language-system"))
+                .chain(languages.iter().map(|l| l.name.clone()))
+                .collect(),
             // The desktop styles are proper names.
-            look: vec![fl!("style-auto"), "COSMIC".into(), "KDE Breeze".into(), "Windows 11".into(), "GNOME Adwaita".into()],
-            corners: vec![fl!("corners-auto"), fl!("corners-round"), fl!("corners-slightly-round"), fl!("corners-square")],
+            look: vec![
+                fl!("style-auto"),
+                "COSMIC".into(),
+                "KDE Breeze".into(),
+                "Windows 11".into(),
+                "GNOME Adwaita".into(),
+            ],
+            corners: vec![
+                fl!("corners-auto"),
+                fl!("corners-round"),
+                fl!("corners-slightly-round"),
+                fl!("corners-square"),
+            ],
             background: vec![fl!("background-theme"), fl!("background-black")],
-            library_source: vec![fl!("source-all"), fl!("source-local"), "Jellyfin".into(), "OPDS".into(), "Wikipedia".into()],
-            book_line_spacing: vec![fl!("spacing-tight"), fl!("spacing-normal"), fl!("spacing-relaxed"), fl!("spacing-loose")],
-            book_layout: vec![fl!("layout-single"), fl!("layout-two"), fl!("layout-scroll")],
+            library_source: vec![
+                fl!("source-all"),
+                fl!("source-local"),
+                "Jellyfin".into(),
+                "OPDS".into(),
+                "Wikipedia".into(),
+            ],
+            book_line_spacing: vec![
+                fl!("spacing-tight"),
+                fl!("spacing-normal"),
+                fl!("spacing-relaxed"),
+                fl!("spacing-loose"),
+            ],
+            book_layout: vec![
+                fl!("layout-single"),
+                fl!("layout-two"),
+                fl!("layout-scroll"),
+            ],
             book_width: vec![fl!("width-narrow"), fl!("width-medium"), fl!("width-wide")],
-            book_theme: vec![fl!("theme-auto"), fl!("theme-paper"), fl!("theme-sepia"), fl!("theme-dark"), fl!("theme-night")],
+            book_theme: vec![
+                fl!("theme-auto"),
+                fl!("theme-paper"),
+                fl!("theme-sepia"),
+                fl!("theme-dark"),
+                fl!("theme-night"),
+            ],
         }
     }
 }
@@ -98,14 +136,29 @@ const CACHE_RADIUS: usize = 14;
 // ── View modes ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum AppView { Library, Series, Reader, Downloads, Catalog, Wikipedia }
+pub enum AppView {
+    Library,
+    Series,
+    Reader,
+    Downloads,
+    Catalog,
+    Wikipedia,
+}
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Layout { Single, Dual }
+pub enum Layout {
+    Single,
+    Dual,
+}
 
 /// Which panel the context drawer is currently showing.
 #[derive(Clone, Debug, PartialEq)]
-pub enum ContextPage { Settings, Info, Typography, Properties }
+pub enum ContextPage {
+    Settings,
+    Info,
+    Typography,
+    Properties,
+}
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
@@ -118,13 +171,20 @@ pub enum Message {
     PathSelected(Url),
     /// Open a library entry in the reader; `chapter` picks an issue,
     /// `None` resumes where you left off.
-    OpenEntry { key: String, chapter: Option<usize> },
+    OpenEntry {
+        key: String,
+        chapter: Option<usize>,
+    },
     OpenSeriesPage(String),
     // Loading
     Loaded(PathBuf, Vec<PageSource>, Vec<ChapterInfo>),
     EpubLoaded(PathBuf, Result<epub::EpubBook, String>),
     /// A page decoded for the comic opened as `.0` (see `App::page_gen`).
-    PageDecoded(u64, usize, Result<(widget::image::Handle, PageSize), String>),
+    PageDecoded(
+        u64,
+        usize,
+        Result<(widget::image::Handle, PageSize), String>,
+    ),
     /// A decoded page is on the GPU, ready to draw the moment it's shown.
     PageAllocated(u64, usize, Option<cosmic::iced::runtime::image::Allocation>),
     LoadFailed(String),
@@ -177,7 +237,11 @@ pub enum Message {
     // Chapter covers
     /// The open comic's ComicInfo.xml, for the comic opened as `.0`.
     ComicInfoRead(u64, Option<ComicInfo>),
-    ChapterCoverReady { gen: u64, chapter_idx: usize, result: Result<(u32, u32, Vec<u8>), String> },
+    ChapterCoverReady {
+        gen: u64,
+        chapter_idx: usize,
+        result: Result<(u32, u32, Vec<u8>), String>,
+    },
     // Library
     LibrarySearchChanged(String),
     LibrarySource(usize),
@@ -185,7 +249,10 @@ pub enum Message {
     CloseLibraryMenu,
     RootDiscovered(PathBuf, Option<Vec<scan::Discovered>>),
     SeriesScanned(Result<scan::ScanResult, String>),
-    IssueCoverReady { key: String, idx: usize },
+    IssueCoverReady {
+        key: String,
+        idx: usize,
+    },
     HideMissing(Vec<String>),
     RescanLibrary,
     AddLibraryFolder,
@@ -439,8 +506,16 @@ fn open_task(path: PathBuf) -> Task<Message> {
 }
 
 /// Wraps a header control in a hover hint, so every button says what it does.
-pub(crate) fn tip<'a>(el: impl Into<Element<'a, Message>>, hint: impl Into<Cow<'a, str>>) -> Element<'a, Message> {
-    widget::tooltip(el, widget::text(hint.into()), widget::tooltip::Position::Bottom).into()
+pub(crate) fn tip<'a>(
+    el: impl Into<Element<'a, Message>>,
+    hint: impl Into<Cow<'a, str>>,
+) -> Element<'a, Message> {
+    widget::tooltip(
+        el,
+        widget::text(hint.into()),
+        widget::tooltip::Position::Bottom,
+    )
+    .into()
 }
 
 /// The icon button that enters or leaves full screen. One button that
@@ -451,7 +526,11 @@ fn fullscreen_button<'a>(on: bool) -> Element<'a, Message> {
         widget::button::icon(icon::from_name("view-fullscreen-symbolic"))
             .selected(on)
             .on_press(Message::ToggleFullscreen),
-        if on { fl!("leave-full-screen") } else { fl!("full-screen") },
+        if on {
+            fl!("leave-full-screen")
+        } else {
+            fl!("full-screen")
+        },
     )
 }
 
@@ -515,7 +594,9 @@ fn scan_series_task(
 ) -> Task<Message> {
     cosmic::task::future(async move {
         let _permit = scan_semaphore().acquire().await;
-        let result = tokio::task::spawn_blocking(move || scan::scan_series(&d, known, missing_details)).await;
+        let result =
+            tokio::task::spawn_blocking(move || scan::scan_series(&d, known, missing_details))
+                .await;
         Message::SeriesScanned(result.unwrap_or_else(|e| Err(format!("scan panicked: {e}"))))
     })
 }
@@ -539,7 +620,10 @@ fn issue_cover_task(key: String, idx: usize, issue: PathBuf) -> Task<Message> {
 fn missing_check_task(paths: Vec<String>) -> Task<Message> {
     cosmic::task::future(async move {
         let missing = tokio::task::spawn_blocking(move || {
-            paths.into_iter().filter(|p| !p.starts_with("group://") && !Path::new(p).exists()).collect()
+            paths
+                .into_iter()
+                .filter(|p| !p.starts_with("group://") && !Path::new(p).exists())
+                .collect()
         })
         .await
         .unwrap_or_default();
@@ -561,7 +645,11 @@ fn build_query(entry: &SeriesEntry, issues: &[IssueEntry]) -> metadata::SeriesQu
     metadata::SeriesQuery {
         search,
         year: entry.year,
-        issue_numbers: issues.iter().filter(|i| !i.number.is_empty()).map(|i| i.number.clone()).collect(),
+        issue_numbers: issues
+            .iter()
+            .filter(|i| !i.number.is_empty())
+            .map(|i| i.number.clone())
+            .collect(),
         looks_manga,
     }
 }
@@ -570,7 +658,11 @@ fn issue_rows_from_chapters(chapters: &[ChapterInfo]) -> Vec<IssueRow> {
     chapters
         .iter()
         .map(|ch| {
-            let file = ch.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let file = ch
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let parsed = naming::parse_issue(&file);
             IssueRow {
                 path: ch.path.to_string_lossy().into_owned(),
@@ -611,8 +703,10 @@ fn resume_page(
     }
     let Some(entry) = entry else { return 0 };
     if !entry.last_issue_path.is_empty() {
-        if let Some((i, ch)) =
-            chapters.iter().enumerate().find(|(_, ch)| ch.path.to_string_lossy() == entry.last_issue_path)
+        if let Some((i, ch)) = chapters
+            .iter()
+            .enumerate()
+            .find(|(_, ch)| ch.path.to_string_lossy() == entry.last_issue_path)
         {
             if let Some(issue) = issue_for(ch) {
                 if issue.completed {
@@ -630,7 +724,9 @@ fn resume_page(
 fn decode_semaphore() -> &'static tokio::sync::Semaphore {
     static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
     SEM.get_or_init(|| {
-        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
         tokio::sync::Semaphore::new((cores / 2).max(2))
     })
 }
@@ -664,23 +760,38 @@ fn decode_task(gen: u64, index: usize, source: PageSource) -> Task<Message> {
         let result = tokio::task::spawn_blocking(move || {
             // The pixels move into the handle: no second copy of the page.
             comic::decode_source(&source).map(|page| {
-                let size = PageSize { width: page.width, height: page.height };
-                (widget::image::Handle::from_rgba(page.width, page.height, page.rgba), size)
+                let size = PageSize {
+                    width: page.width,
+                    height: page.height,
+                };
+                (
+                    widget::image::Handle::from_rgba(page.width, page.height, page.rgba),
+                    size,
+                )
             })
         })
         .await;
-        Message::PageDecoded(gen, index, result.unwrap_or_else(|e| Err(format!("decode panicked: {e}"))))
+        Message::PageDecoded(
+            gen,
+            index,
+            result.unwrap_or_else(|e| Err(format!("decode panicked: {e}"))),
+        )
     })
 }
 
 fn copy_task(page: widget::image::Handle) -> Task<Message> {
     cosmic::task::future(async move {
         let result = tokio::task::spawn_blocking(move || {
-            let widget::image::Handle::Rgba { width, height, pixels, .. } = &page else {
+            let widget::image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            } = &page
+            else {
                 return Err("copy: page isn't decoded".to_string());
             };
-            let mut cb = arboard::Clipboard::new()
-                .map_err(|e| format!("clipboard: {e}"))?;
+            let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
             cb.set_image(arboard::ImageData {
                 width: *width as usize,
                 height: *height as usize,
@@ -697,14 +808,23 @@ fn copy_task(page: widget::image::Handle) -> Task<Message> {
 }
 
 /// Decode the first page of `chapter_idx`, thumbnail it, save to disk, return rgba.
-fn cover_task(gen: u64, chapter_idx: usize, source: PageSource, series_path: PathBuf) -> Task<Message> {
+fn cover_task(
+    gen: u64,
+    chapter_idx: usize,
+    source: PageSource,
+    series_path: PathBuf,
+) -> Task<Message> {
     // Two at a time: a series with hundreds of chapters would otherwise
     // decode hundreds of full pages at once, ahead of the pages being read.
     static COVERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
     cosmic::task::future(async move {
         let _permit = COVERS.acquire().await;
         if DECODE_GEN.load(Ordering::Relaxed) != gen {
-            return Message::ChapterCoverReady { gen, chapter_idx, result: Err("no longer needed".into()) };
+            return Message::ChapterCoverReady {
+                gen,
+                chapter_idx,
+                result: Err("no longer needed".into()),
+            };
         }
         let result = tokio::task::spawn_blocking(move || {
             let page = comic::decode_source(&source)?;
@@ -712,16 +832,14 @@ fn cover_task(gen: u64, chapter_idx: usize, source: PageSource, series_path: Pat
                 .ok_or_else(|| "bad rgba".to_string())?;
             let thumb = scan::make_thumb(&img);
             // Save to disk cache
-            let cover_path = library::chapter_cover_path(
-                &series_path.to_string_lossy(),
-                chapter_idx,
-            );
+            let cover_path =
+                library::chapter_cover_path(&series_path.to_string_lossy(), chapter_idx);
             if let Some(parent) = cover_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("mkdir: {e}"))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
             }
             // Save as PNG
-            thumb.save(&cover_path)
+            thumb
+                .save(&cover_path)
                 .map_err(|e| format!("save cover: {e}"))?;
             let (w, h) = thumb.dimensions();
             Ok::<_, String>((w, h, thumb.into_raw()))
@@ -747,29 +865,56 @@ fn battery_glyph<'a>(b: crate::platform::status::Battery) -> Element<'a, Message
     let low = b.percent <= 15 && !b.charging;
     let fill = (16.0 * f32::from(b.percent) / 100.0).max(1.5);
     let color = move |theme: &cosmic::Theme| -> Color {
-        if low { theme.cosmic().destructive_color().into() } else { theme.cosmic().on_bg_color().into() }
+        if low {
+            theme.cosmic().destructive_color().into()
+        } else {
+            theme.cosmic().on_bg_color().into()
+        }
     };
-    let level = widget::container(widget::Space::new().width(Length::Fixed(fill)).height(Length::Fill))
-        .style(move |theme: &cosmic::Theme| widget::container::Style {
-            background: Some(Background::Color(color(theme))),
-            border: cosmic::iced::Border { radius: 1.0.into(), ..Default::default() },
+    let level = widget::container(
+        widget::Space::new()
+            .width(Length::Fixed(fill))
+            .height(Length::Fill),
+    )
+    .style(move |theme: &cosmic::Theme| widget::container::Style {
+        background: Some(Background::Color(color(theme))),
+        border: cosmic::iced::Border {
+            radius: 1.0.into(),
             ..Default::default()
-        });
+        },
+        ..Default::default()
+    });
     let body = widget::container(level)
         .padding(2)
         .width(Length::Fixed(22.0))
         .height(Length::Fixed(11.0))
         .style(move |theme: &cosmic::Theme| widget::container::Style {
-            border: cosmic::iced::Border { color: color(theme), width: 1.2, radius: 2.5.into() },
+            border: cosmic::iced::Border {
+                color: color(theme),
+                width: 1.2,
+                radius: 2.5.into(),
+            },
             ..Default::default()
         });
-    let nub = widget::container(widget::Space::new().width(Length::Fixed(2.0)).height(Length::Fixed(5.0)))
-        .style(move |theme: &cosmic::Theme| widget::container::Style {
-            background: Some(Background::Color(color(theme))),
-            border: cosmic::iced::Border { radius: [0.0, 1.0, 1.0, 0.0].into(), ..Default::default() },
+    let nub = widget::container(
+        widget::Space::new()
+            .width(Length::Fixed(2.0))
+            .height(Length::Fixed(5.0)),
+    )
+    .style(move |theme: &cosmic::Theme| widget::container::Style {
+        background: Some(Background::Color(color(theme))),
+        border: cosmic::iced::Border {
+            radius: [0.0, 1.0, 1.0, 0.0].into(),
             ..Default::default()
-        });
-    widget::row::with_capacity(2).spacing(1).align_y(Alignment::Center).push(body).push(nub).into()
+        },
+        ..Default::default()
+    });
+    widget::row::with_capacity(2)
+        .spacing(1)
+        .align_y(Alignment::Center)
+        .push(body)
+        .push(nub)
+        .into()
 }
 
 fn comic_file_filter() -> FileFilter {
@@ -809,16 +954,31 @@ impl App {
     /// with its sync state (hover for details).
     fn source_label(&self) -> Element<'_, Message> {
         let (label, online, hint) = self.jellyfin_source().unwrap_or_else(|| {
-            let path = self.open_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+            let path = self
+                .open_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
             (fl!("source-local"), None, path)
         });
-        let mut content = widget::row::with_capacity(2).spacing(4).align_y(Alignment::Center).push(widget::text::caption(label));
+        let mut content = widget::row::with_capacity(2)
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .push(widget::text::caption(label));
         if let Some(online) = online {
-            let color = if online { Color::from_rgb8(0x3f, 0xb9, 0x50) } else { Color::from_rgb8(0xe0, 0x4a, 0x4a) };
-            content = content.push(widget::text::caption("●").class(cosmic::theme::Text::Color(color)));
+            let color = if online {
+                Color::from_rgb8(0x3f, 0xb9, 0x50)
+            } else {
+                Color::from_rgb8(0xe0, 0x4a, 0x4a)
+            };
+            content =
+                content.push(widget::text::caption("●").class(cosmic::theme::Text::Color(color)));
         }
         tip(
-            widget::container(content).padding([0, 6]).height(Length::Fill).align_y(Alignment::Center),
+            widget::container(content)
+                .padding([0, 6])
+                .height(Length::Fill)
+                .align_y(Alignment::Center),
             hint,
         )
     }
@@ -839,7 +999,9 @@ impl App {
             return None;
         }
         let clock = self.status_clock.clone()?;
-        let mut row = widget::row::with_capacity(4).spacing(6).align_y(Alignment::Center);
+        let mut row = widget::row::with_capacity(4)
+            .spacing(6)
+            .align_y(Alignment::Center);
         if let Some(b) = self.battery {
             row = row.push(battery_glyph(b));
             if b.charging {
@@ -858,7 +1020,10 @@ impl App {
                     widget::container::Style {
                         background: Some(Background::Color(bg)),
                         text_color: Some(theme.cosmic().on_bg_color().into()),
-                        border: cosmic::iced::Border { radius: 12.0.into(), ..Default::default() },
+                        border: cosmic::iced::Border {
+                            radius: 12.0.into(),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     }
                 })
@@ -868,7 +1033,11 @@ impl App {
 
     /// Rebuilds the theme from the style, corners and colour theme.
     fn apply_theme(&self) -> Task<Message> {
-        cosmic::command::set_theme(look::theme(self.look(), self.settings.corners, self.theme_colors.as_ref()))
+        cosmic::command::set_theme(look::theme(
+            self.look(),
+            self.settings.corners,
+            self.theme_colors.as_ref(),
+        ))
     }
 
     /// Re-lists the colour themes (built-in plus the themes folder).
@@ -906,7 +1075,8 @@ impl App {
         }
         let keep_start = self.current_page.saturating_sub(CACHE_RADIUS);
         let keep_end = (self.current_page + CACHE_RADIUS).min(len - 1);
-        self.cache.retain(|idx, _| (keep_start..=keep_end).contains(idx));
+        self.cache
+            .retain(|idx, _| (keep_start..=keep_end).contains(idx));
         let gpu = self.current_page.saturating_sub(PRELOAD_FAR)..=self.current_page + PRELOAD_FAR;
         self.allocations.retain(|idx, _| gpu.contains(idx));
         DECODE_GEN.store(self.page_gen, Ordering::Relaxed);
@@ -946,7 +1116,9 @@ impl App {
     /// Whether a decoded page is a two-page spread: scanned as one image
     /// wider than it is tall. Pages not decoded yet count as normal ones.
     fn is_spread(&self, idx: usize) -> bool {
-        self.cache.get(&idx).is_some_and(|(_, p)| p.width as f32 > p.height as f32 * 1.05)
+        self.cache
+            .get(&idx)
+            .is_some_and(|(_, p)| p.width as f32 > p.height as f32 * 1.05)
     }
 
     /// Pages on screen from `idx` on: two in two-page mode, except that a
@@ -956,14 +1128,22 @@ impl App {
             && idx + 1 < self.sources.len()
             && !self.is_spread(idx)
             && !self.is_spread(idx + 1);
-        if pair { 2 } else { 1 }
+        if pair {
+            2
+        } else {
+            1
+        }
     }
 
     /// Where the view before `current_page` starts: two pages back when
     /// they make a pair, one when that page is a spread (or stands alone).
     fn prev_view_start(&self) -> usize {
         let p = self.current_page;
-        if p >= 2 && self.pages_shown_at(p - 2) == 2 { p - 2 } else { p.saturating_sub(1) }
+        if p >= 2 && self.pages_shown_at(p - 2) == 2 {
+            p - 2
+        } else {
+            p.saturating_sub(1)
+        }
     }
 
     /// Enters zoom/pan mode (at 100%) if not already active. The actual
@@ -1064,12 +1244,20 @@ impl App {
         if crate::remote::is_key(&key) {
             return self.open_remote(key, chapter);
         }
-        let entry = self.db.as_ref().and_then(|db| library::get_series(db, &key));
+        let entry = self
+            .db
+            .as_ref()
+            .and_then(|db| library::get_series(db, &key));
         if let Some(e) = entry.as_ref().filter(|e| e.kind == SeriesKind::Group) {
             let issues: Vec<PathBuf> = self
                 .db
                 .as_ref()
-                .map(|db| library::issues_for(db, &e.path).into_iter().map(|i| PathBuf::from(i.path)).collect())
+                .map(|db| {
+                    library::issues_for(db, &e.path)
+                        .into_iter()
+                        .map(|i| PathBuf::from(i.path))
+                        .collect()
+                })
                 .unwrap_or_default();
             return open_list_task(PathBuf::from(&key), issues);
         }
@@ -1081,7 +1269,11 @@ impl App {
     /// progress and "next issue" carry on there (issue linking).
     fn open_linked(&mut self, path: PathBuf) -> Task<Message> {
         let key = path.to_string_lossy().into_owned();
-        if let Some((series, idx)) = self.db.as_ref().and_then(|db| library::series_for_issue(db, &key)) {
+        if let Some((series, idx)) = self
+            .db
+            .as_ref()
+            .and_then(|db| library::series_for_issue(db, &key))
+        {
             return self.open_entry(series, Some(idx));
         }
         self.open_entry(key, None)
@@ -1090,7 +1282,9 @@ impl App {
     /// A series' chapters for its page: all of them, or only the downloaded
     /// ones while its Jellyfin server can't be reached.
     fn series_issues(&self, key: &str) -> Vec<IssueEntry> {
-        let Some(db) = &self.db else { return Vec::new() };
+        let Some(db) = &self.db else {
+            return Vec::new();
+        };
         let mut issues = library::issues_for(db, key);
         if self.jellyfin_offline(key) {
             issues.retain(|i| self.dl.file(&i.path).is_some());
@@ -1105,8 +1299,12 @@ impl App {
     }
 
     fn open_series_page(&mut self, key: String) -> Task<Message> {
-        let Some(db) = &self.db else { return Task::none() };
-        let Some(entry) = library::get_series(db, &key) else { return Task::none() };
+        let Some(db) = &self.db else {
+            return Task::none();
+        };
+        let Some(entry) = library::get_series(db, &key) else {
+            return Task::none();
+        };
         if self.series_page.as_ref().map(|s| &s.path) != Some(&key) {
             self.series_page_covers.clear();
             self.series_covers_pending.clear();
@@ -1119,18 +1317,25 @@ impl App {
 
         let mut tasks = Vec::new();
         for issue in &self.series_page_issues {
-            if self.series_page_covers.contains_key(&issue.idx) || self.series_covers_pending.contains(&issue.idx) {
+            if self.series_page_covers.contains_key(&issue.idx)
+                || self.series_covers_pending.contains(&issue.idx)
+            {
                 continue;
             }
             let cover = library::chapter_cover_path(&key, issue.idx);
             if cover.exists() {
-                self.series_page_covers.insert(issue.idx, widget::image::Handle::from_path(cover));
+                self.series_page_covers
+                    .insert(issue.idx, widget::image::Handle::from_path(cover));
             } else {
                 self.series_covers_pending.insert(issue.idx);
                 if crate::remote::is_key(&issue.path) {
                     tasks.push(self.remote_issue_cover(key.clone(), issue.idx, &issue.path));
                 } else {
-                    tasks.push(issue_cover_task(key.clone(), issue.idx, PathBuf::from(&issue.path)));
+                    tasks.push(issue_cover_task(
+                        key.clone(),
+                        issue.idx,
+                        PathBuf::from(&issue.path),
+                    ));
                 }
             }
         }
@@ -1140,7 +1345,8 @@ impl App {
     /// Re-reads DB-backed state for whatever's on screen.
     fn refresh_views(&mut self) -> Task<Message> {
         let mut tasks = vec![self.reload_library()];
-        if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+        if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone()))
+        {
             self.series_page = library::get_series(db, &key);
             self.series_page_issues = self.series_issues(&key);
         }
@@ -1166,7 +1372,9 @@ impl App {
         if self.meta_running {
             return Task::none();
         }
-        let Some(db) = &self.db else { return Task::none() };
+        let Some(db) = &self.db else {
+            return Task::none();
+        };
         while let Some(key) = self.meta_queue.pop_front() {
             let Some(entry) = library::get_series(db, &key) else {
                 self.meta_done += 1;
@@ -1202,15 +1410,15 @@ impl App {
 
     /// Queue cover generation for chapters that don't have covers yet.
     fn queue_missing_covers(&mut self) -> Task<Message> {
-        let Some(series_path) = &self.open_path else { return Task::none() };
+        let Some(series_path) = &self.open_path else {
+            return Task::none();
+        };
         let series_path = series_path.clone();
         let path_str = series_path.to_string_lossy().to_string();
 
         let mut tasks = Vec::new();
         for (ch_idx, ch) in self.chapters.iter().enumerate() {
-            if self.chapter_covers.contains_key(&ch_idx)
-                || self.covers_pending.contains(&ch_idx)
-            {
+            if self.chapter_covers.contains_key(&ch_idx) || self.covers_pending.contains(&ch_idx) {
                 continue;
             }
             // Check disk cache first
@@ -1224,7 +1432,12 @@ impl App {
             if ch.page_count > 0 {
                 self.covers_pending.insert(ch_idx);
                 let source = self.sources[ch.start].clone();
-                tasks.push(cover_task(self.page_gen, ch_idx, source, series_path.clone()));
+                tasks.push(cover_task(
+                    self.page_gen,
+                    ch_idx,
+                    source,
+                    series_path.clone(),
+                ));
             }
         }
         Task::batch(tasks)
@@ -1257,7 +1470,9 @@ impl App {
     }
 
     fn reload_library(&mut self) -> Task<Message> {
-        let Some(db) = &self.db else { return Task::none() };
+        let Some(db) = &self.db else {
+            return Task::none();
+        };
 
         let entries = if self.library_search.is_empty() {
             library::all_series(db)
@@ -1271,7 +1486,8 @@ impl App {
             }
             let cover_path = library::chapter_cover_path(&entry.path, 0);
             if cover_path.exists() {
-                self.library_covers.insert(entry.id, widget::image::Handle::from_path(cover_path));
+                self.library_covers
+                    .insert(entry.id, widget::image::Handle::from_path(cover_path));
             }
         }
 
@@ -1301,7 +1517,10 @@ enum UpdateStatus {
 /// An in-app update (`crate::updater`) the user started.
 enum UpdateJob {
     Idle,
-    Downloading { done: u64, total: Option<u64> },
+    Downloading {
+        done: u64,
+        total: Option<u64>,
+    },
     /// Downloaded and checked; installs when the app restarts.
     Ready(crate::updater::Staged),
     Failed(String),
@@ -1315,8 +1534,12 @@ impl Application for App {
     type Message = Message;
     const APP_ID: &'static str = APP_ID;
 
-    fn core(&self) -> &Core { &self.core }
-    fn core_mut(&mut self) -> &mut Core { &mut self.core }
+    fn core(&self) -> &Core {
+        &self.core
+    }
+    fn core_mut(&mut self) -> &mut Core {
+        &mut self.core
+    }
 
     fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let db = library::open_db().ok();
@@ -1335,7 +1558,10 @@ impl Application for App {
         // Theater mode became the default in 0.1.10; turn it on once for
         // settings saved before that, which all hold the old `false`.
         if just_updated
-            && settings.last_version.as_deref().is_none_or(|v| crate::updates::is_newer("0.1.10", v))
+            && settings
+                .last_version
+                .as_deref()
+                .is_none_or(|v| crate::updates::is_newer("0.1.10", v))
         {
             settings.theater_mode = true;
         }
@@ -1345,7 +1571,12 @@ impl Application for App {
         }
         let library_dirs: Vec<PathBuf> = db
             .as_ref()
-            .map(|db| library::list_library_dirs(db).into_iter().map(PathBuf::from).collect())
+            .map(|db| {
+                library::list_library_dirs(db)
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect()
+            })
             .unwrap_or_default();
 
         let native_titlebar = settings.look.resolve(Desktop::detect()).native_titlebar();
@@ -1354,7 +1585,11 @@ impl Application for App {
             core,
             native_titlebar,
             icon_open: None,
-            app_view: if flags.is_none() { AppView::Library } else { AppView::Reader },
+            app_view: if flags.is_none() {
+                AppView::Library
+            } else {
+                AppView::Reader
+            },
             title: "Nebula".to_string(),
             open_path: None,
             sources: Vec::new(),
@@ -1377,10 +1612,17 @@ impl Application for App {
             theme_labels: Vec::new(),
             languages: crate::i18n::available(),
             labels: Labels::new(&crate::i18n::available()),
-            theme_colors: settings.theme.as_deref().and_then(|id| themes::load(id).ok()),
+            theme_colors: settings
+                .theme
+                .as_deref()
+                .and_then(|id| themes::load(id).ok()),
             theme_error: None,
             theater_mode: settings.theater_mode,
-            layout: if settings.dual_page { Layout::Dual } else { Layout::Single },
+            layout: if settings.dual_page {
+                Layout::Dual
+            } else {
+                Layout::Single
+            },
             zoom_active: false,
             fit_width: false,
             fit_width_leaving: false,
@@ -1467,6 +1709,7 @@ impl Application for App {
         }];
 
         tasks.push(app.reload_library());
+        tasks.push(app.load_catalog_quick());
         // Files an earlier update left behind.
         std::thread::spawn(crate::updater::clean_up);
         tasks.push(app.sync_all_remote());
@@ -1483,8 +1726,12 @@ impl Application for App {
         for dir in library_dirs {
             tasks.push(app.scan_root(dir));
         }
-        let one_offs: Vec<String> =
-            app.library_entries.iter().filter(|e| e.library_root.is_empty()).map(|e| e.path.clone()).collect();
+        let one_offs: Vec<String> = app
+            .library_entries
+            .iter()
+            .filter(|e| e.library_root.is_empty())
+            .map(|e| e.path.clone())
+            .collect();
         tasks.push(missing_check_task(one_offs));
         // Retry lookups for anything never matched (e.g. added offline).
         let pending: Vec<String> = app
@@ -1502,7 +1749,10 @@ impl Application for App {
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
-        let (url, always) = self.book_link.as_ref().filter(|_| self.app_view == AppView::Reader)?;
+        let (url, always) = self
+            .book_link
+            .as_ref()
+            .filter(|_| self.app_view == AppView::Reader)?;
         Some(
             widget::dialog()
                 .title(fl!("open-link-title"))
@@ -1512,8 +1762,14 @@ impl Application for App {
                         .label(fl!("open-link-always"))
                         .on_toggle(|on| Message::Book(BookMsg::LinkAlways(on))),
                 )
-                .primary_action(widget::button::suggested(fl!("open-link")).on_press(Message::Book(BookMsg::LinkOpen)))
-                .secondary_action(widget::button::standard(fl!("cancel")).on_press(Message::Book(BookMsg::LinkCancel)))
+                .primary_action(
+                    widget::button::suggested(fl!("open-link"))
+                        .on_press(Message::Book(BookMsg::LinkOpen)),
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("cancel"))
+                        .on_press(Message::Book(BookMsg::LinkCancel)),
+                )
                 .into(),
         )
     }
@@ -1554,14 +1810,16 @@ impl Application for App {
         match self.app_view {
             AppView::Reader if self.back_to_series => vec![
                 tip(
-                    widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::GoToLibrary),
+                    widget::button::icon(icon::from_name("go-previous-symbolic"))
+                        .on_press(Message::GoToLibrary),
                     fl!("back-to-series"),
                 ),
                 self.source_label(),
             ],
             AppView::Reader => vec![
                 tip(
-                    widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
+                    widget::button::icon(icon::from_name("go-home-symbolic"))
+                        .on_press(Message::GoToLibrary),
                     fl!("back-to-library-esc"),
                 ),
                 self.source_label(),
@@ -1569,12 +1827,15 @@ impl Application for App {
             // The source dropdown, with Wikipedia picked: the way back.
             AppView::Wikipedia => vec![self.library_source_picker()],
             AppView::Series | AppView::Downloads | AppView::Catalog => vec![tip(
-                widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
+                widget::button::icon(icon::from_name("go-home-symbolic"))
+                    .on_press(Message::GoToLibrary),
                 fl!("back-to-library"),
             )],
             // All / Local / Jellyfin, once the library has some of each.
             // With Wikipedia on, always: it's how to get there.
-            AppView::Library if self.has_local_and_remote() || self.settings.wikipedia => vec![self.library_source_picker()],
+            AppView::Library if self.has_local_and_remote() || self.settings.wikipedia => {
+                vec![self.library_source_picker()]
+            }
             AppView::Library => vec![],
         }
     }
@@ -1637,7 +1898,11 @@ impl Application for App {
                     fl!("previous-chapter"),
                 ));
                 els.push(tip(
-                    widget::text(format!("{} / {}", self.epub_chapter + 1, book.chapters.len())),
+                    widget::text(format!(
+                        "{} / {}",
+                        self.epub_chapter + 1,
+                        book.chapters.len()
+                    )),
                     fl!("chapter"),
                 ));
                 els.push(tip(
@@ -1653,7 +1918,8 @@ impl Application for App {
                     fl!("contents-tip"),
                 ));
                 els.push(tip(
-                    widget::button::standard("Aa").on_press(Message::Book(BookMsg::ToggleTypography)),
+                    widget::button::standard("Aa")
+                        .on_press(Message::Book(BookMsg::ToggleTypography)),
                     fl!("typography-tip"),
                 ));
                 els.push(tip(
@@ -1675,19 +1941,26 @@ impl Application for App {
                         if self.chapters.len() == 1 {
                             format!("{} / {}", pg + 1, ch.page_count)
                         } else {
-                            fl!("chapter-page-counter", chapter = ch_idx + 1, page = pg + 1, pages = ch.page_count)
+                            fl!(
+                                "chapter-page-counter",
+                                chapter = ch_idx + 1,
+                                page = pg + 1,
+                                pages = ch.page_count
+                            )
                         }
                     } else {
                         format!("{} / {}", self.current_page + 1, self.sources.len())
                     };
 
                     els.push(tip(
-                        widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::PrevPage),
+                        widget::button::icon(icon::from_name("go-previous-symbolic"))
+                            .on_press(Message::PrevPage),
                         fl!("previous-page"),
                     ));
                     els.push(tip(widget::text(counter), fl!("page")));
                     els.push(tip(
-                        widget::button::icon(icon::from_name("go-next-symbolic")).on_press(Message::NextPage),
+                        widget::button::icon(icon::from_name("go-next-symbolic"))
+                            .on_press(Message::NextPage),
                         fl!("next-page"),
                     ));
                     els.push(widget::divider::vertical::light().into());
@@ -1705,7 +1978,11 @@ impl Application for App {
                         widget::button::icon(icon::from_name("view-dual-symbolic"))
                             .selected(self.layout == Layout::Dual)
                             .on_press(Message::ToggleLayout),
-                        if self.layout == Layout::Dual { fl!("show-one-page") } else { fl!("show-two-pages") },
+                        if self.layout == Layout::Dual {
+                            fl!("show-one-page")
+                        } else {
+                            fl!("show-two-pages")
+                        },
                     ));
                     els.push(tip(
                         widget::button::icon(icon::from_name("zoom-in-symbolic"))
@@ -1721,10 +1998,15 @@ impl Application for App {
                         widget::button::icon(library_view::fit_width_icon())
                             .selected(self.fit_width)
                             .on_press(Message::ToggleFitWidth),
-                        if self.fit_width { fl!("whole-page-tip") } else { fl!("fit-width-tip") },
+                        if self.fit_width {
+                            fl!("whole-page-tip")
+                        } else {
+                            fl!("fit-width-tip")
+                        },
                     ));
                     els.push(tip(
-                        widget::button::icon(icon::from_name("edit-copy-symbolic")).on_press(Message::CopyPage),
+                        widget::button::icon(icon::from_name("edit-copy-symbolic"))
+                            .on_press(Message::CopyPage),
                         fl!("copy-page"),
                     ));
                     els.push(widget::divider::vertical::light().into());
@@ -1786,7 +2068,8 @@ impl Application for App {
                     } else {
                         return None;
                     };
-                    (HEADER_SHOWN.load(Ordering::Relaxed) != show).then_some(Message::PointerY(position.y))
+                    (HEADER_SHOWN.load(Ordering::Relaxed) != show)
+                        .then_some(Message::PointerY(position.y))
                 }
                 _ => None,
             })
@@ -1796,18 +2079,28 @@ impl Application for App {
         // Outside COSMIC (which pushes its theme to us), look for a changed
         // dark mode or accent colour now and then.
         let system_colors = if self.settings.theme.is_none() && self.look() != Look::Cosmic {
-            cosmic::iced::time::every(std::time::Duration::from_secs(5)).map(|_| Message::CheckSystemColors)
+            cosmic::iced::time::every(std::time::Duration::from_secs(5))
+                .map(|_| Message::CheckSystemColors)
         } else {
             Subscription::none()
         };
         // The full-screen clock: often enough that the minute is never far
         // behind.
         let status = if self.status_shown() {
-            cosmic::iced::time::every(std::time::Duration::from_secs(10)).map(|_| Message::StatusTick)
+            cosmic::iced::time::every(std::time::Duration::from_secs(10))
+                .map(|_| Message::StatusTick)
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), self.wiki_subscription(), pointer, system_colors, status])
+        Subscription::batch([
+            events,
+            self.jellyfin_subscription(),
+            self.downloads_subscription(),
+            self.wiki_subscription(),
+            pointer,
+            system_colors,
+            status,
+        ])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1849,9 +2142,13 @@ impl Application for App {
                 content,
                 // The interaction makes the stack hide the cursor from the
                 // content below; on_press alone would let the click through.
-                mouse_area(widget::Space::new().width(Length::Fill).height(Length::Fill))
-                    .on_press(Message::CloseContext)
-                    .interaction(cosmic::iced::mouse::Interaction::Idle),
+                mouse_area(
+                    widget::Space::new()
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                )
+                .on_press(Message::CloseContext)
+                .interaction(cosmic::iced::mouse::Interaction::Idle),
             ]
             .into()
         } else {
@@ -1864,7 +2161,10 @@ impl Application for App {
             Some(status) if !self.fullscreen_header && !self.core.window.show_context => {
                 cosmic::iced::widget::stack![
                     content,
-                    widget::container(status).width(Length::Fill).align_right(Length::Fill).padding([10, 14]),
+                    widget::container(status)
+                        .width(Length::Fill)
+                        .align_right(Length::Fill)
+                        .padding([10, 14]),
                 ]
                 .into()
             }
@@ -1913,7 +2213,9 @@ impl App {
                 Key::Named(Named::ArrowLeft | Named::PageUp) => Some(BookMsg::PageUp),
                 Key::Named(Named::ArrowDown) => Some(BookMsg::LineDown),
                 Key::Named(Named::ArrowUp) => Some(BookMsg::LineUp),
-                Key::Character(c) if ctrl && matches!(c.as_str(), "=" | "+") => Some(BookMsg::FontBigger),
+                Key::Character(c) if ctrl && matches!(c.as_str(), "=" | "+") => {
+                    Some(BookMsg::FontBigger)
+                }
                 Key::Character(c) if ctrl && c.as_str() == "-" => Some(BookMsg::FontSmaller),
                 Key::Character(c) if ctrl && c.as_str() == "0" => Some(BookMsg::FontReset),
                 _ => None,
@@ -1934,16 +2236,23 @@ impl App {
         }
         match &key {
             Key::Named(Named::ArrowRight) | Key::Named(Named::PageDown) => {
-                if self.app_view != AppView::Reader { return Task::none(); }
+                if self.app_view != AppView::Reader {
+                    return Task::none();
+                }
                 return self.update(Message::NextPage);
             }
             Key::Named(Named::ArrowLeft) | Key::Named(Named::PageUp) => {
-                if self.app_view != AppView::Reader { return Task::none(); }
+                if self.app_view != AppView::Reader {
+                    return Task::none();
+                }
                 return self.update(Message::PrevPage);
             }
             // Comics only: in a book Space turns the page (above).
             Key::Character(c)
-                if c.as_str() == " " && self.app_view == AppView::Reader && !self.sources.is_empty() && !self.modifiers.command() =>
+                if c.as_str() == " "
+                    && self.app_view == AppView::Reader
+                    && !self.sources.is_empty()
+                    && !self.modifiers.command() =>
             {
                 return self.update(Message::ToggleFitWidth);
             }
@@ -1951,18 +2260,24 @@ impl App {
                 if self.fullscreen {
                     return self.update(Message::ToggleFullscreen);
                 }
-                if self.fit_width { return self.update(Message::ToggleFitWidth); }
-                if self.zoom_active { self.zoom_active = false; self.zoom = 1.0; }
-                else if self.show_chapter_select { self.show_chapter_select = false; }
+                if self.fit_width {
+                    return self.update(Message::ToggleFitWidth);
+                }
+                if self.zoom_active {
+                    self.zoom_active = false;
+                    self.zoom = 1.0;
+                } else if self.show_chapter_select {
+                    self.show_chapter_select = false;
+                }
                 // In a catalog, Esc goes back like its Back button; home
                 // only from the catalog's start.
                 else if self.app_view == AppView::Catalog && self.catalog_can_go_back() {
                     return self.update(Message::Opds(OpdsMsg::Back));
-                }
-                else if self.app_view == AppView::Wikipedia && self.wiki_can_go_back() {
+                } else if self.app_view == AppView::Wikipedia && self.wiki_can_go_back() {
                     return self.update(Message::Wiki(WikiMsg::Back));
+                } else if self.app_view != AppView::Library {
+                    return self.update(Message::GoToLibrary);
                 }
-                else if self.app_view != AppView::Library { return self.update(Message::GoToLibrary); }
             }
             Key::Character(c)
                 if self.app_view == AppView::Reader
@@ -1975,25 +2290,33 @@ impl App {
             }
             // Single-letter shortcuts, unless Cmd/Ctrl is held (Cmd+C on a
             // Mac copies, it doesn't open the chapter list).
-            Key::Character(c) if self.app_view == AppView::Reader && !self.modifiers.command() => match c.as_str() {
-                "f" | "F" => return self.update(Message::ToggleFullscreen),
-                "t" | "T" => self.theater_mode = !self.theater_mode,
-                "l" | "L" => {
-                    self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
-                    if self.layout == Layout::Dual && self.current_page % 2 != 0 && !self.is_spread(self.current_page - 1) {
-                        self.current_page = self.current_page.saturating_sub(1);
+            Key::Character(c) if self.app_view == AppView::Reader && !self.modifiers.command() => {
+                match c.as_str() {
+                    "f" | "F" => return self.update(Message::ToggleFullscreen),
+                    "t" | "T" => self.theater_mode = !self.theater_mode,
+                    "l" | "L" => {
+                        self.layout = match self.layout {
+                            Layout::Single => Layout::Dual,
+                            Layout::Dual => Layout::Single,
+                        };
+                        if self.layout == Layout::Dual
+                            && self.current_page % 2 != 0
+                            && !self.is_spread(self.current_page - 1)
+                        {
+                            self.current_page = self.current_page.saturating_sub(1);
+                        }
+                        return self.refresh_window();
                     }
-                    return self.refresh_window();
+                    "m" | "M" => return self.update(Message::ToggleZoom),
+                    "i" | "I" => return self.update(Message::ToggleInfo),
+                    "s" | "S" => return self.update(Message::ToggleSettings),
+                    "c" | "C" if self.chapters.len() > 1 || self.reader_issues.len() > 1 => {
+                        return self.toggle_chapter_list();
+                    }
+                    "p" | "P" => return self.update(Message::CopyPage),
+                    _ => {}
                 }
-                "m" | "M" => return self.update(Message::ToggleZoom),
-                "i" | "I" => return self.update(Message::ToggleInfo),
-                "s" | "S" => return self.update(Message::ToggleSettings),
-                "c" | "C" if self.chapters.len() > 1 || self.reader_issues.len() > 1 => {
-                    return self.toggle_chapter_list();
-                }
-                "p" | "P" => return self.update(Message::CopyPage),
-                _ => {}
-            },
+            }
             _ => {}
         }
         Task::none()
@@ -2031,13 +2354,13 @@ impl App {
                             .height(Length::Fill)
                             .into()
                     }
-                    (Layout::Single, false) => widget::image(
-                        self.handle(self.current_page).unwrap().clone(),
-                    )
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .content_fit(ContentFit::Contain)
-                    .into(),
+                    (Layout::Single, false) => {
+                        widget::image(self.handle(self.current_page).unwrap().clone())
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .content_fit(ContentFit::Contain)
+                            .into()
+                    }
                     (Layout::Dual, false) => {
                         let mut row = widget::Row::new().spacing(4).height(Length::Fill);
                         if let Some(h) = self.handle(self.current_page) {
@@ -2124,7 +2447,10 @@ impl App {
                     .push(widget::text::title3(fl!("start-reading")))
                     .push(widget::text(fl!("reader-keys", modifier = MODIFIER_KEY)).size(12))
                     .push(widget::text(fl!("drop-hint")).size(12))
-                    .push(widget::button::suggested(fl!("open-comic-or-book")).on_press(Message::OpenFile))
+                    .push(
+                        widget::button::suggested(fl!("open-comic-or-book"))
+                            .on_press(Message::OpenFile),
+                    )
                     .into()
             };
 
@@ -2177,7 +2503,11 @@ impl App {
     fn backdrop<'a>(&self, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
         let black = self.theater_mode || self.settings.background == BgStyle::Black;
         // Theater mode is always fully black.
-        let alpha = if self.theater_mode { 1.0 } else { self.settings.background_opacity.clamp(0.0, 1.0) };
+        let alpha = if self.theater_mode {
+            1.0
+        } else {
+            self.settings.background_opacity.clamp(0.0, 1.0)
+        };
 
         widget::container(content)
             .width(Length::Fill)
@@ -2203,30 +2533,36 @@ impl App {
     /// drawer instead of the header bar.
     fn reader_common_controls(&self) -> Vec<Element<'_, Message>> {
         // From Jellyfin: download what's open for reading offline.
-        let download = self
-            .current_jellyfin_item()
-            .map(|(issue, series)| self.download_button(&issue, &series, widget::tooltip::Position::Bottom));
-        download.into_iter().chain([
-            tip(
-                widget::button::icon(icon::from_name("zoom-fit-best-symbolic")).on_press(Message::FitPage),
-                fl!("fit-page"),
-            ),
-            tip(
-                widget::button::icon(icon::from_name("dialog-information-symbolic")).on_press(Message::ToggleInfo),
-                fl!("details-tip"),
-            ),
-            fullscreen_button(self.fullscreen),
-            tip(
-                widget::button::icon(icon::from_name("emblem-system-symbolic")).on_press(Message::ToggleSettings),
-                fl!("settings-tip"),
-            ),
-            widget::divider::vertical::light().into(),
-            tip(
-                widget::button::icon(icon::from_name("document-open-symbolic")).on_press(Message::OpenFile),
-                fl!("open-a-file"),
-            ),
-        ])
-        .collect()
+        let download = self.current_jellyfin_item().map(|(issue, series)| {
+            self.download_button(&issue, &series, widget::tooltip::Position::Bottom)
+        });
+        download
+            .into_iter()
+            .chain([
+                tip(
+                    widget::button::icon(icon::from_name("zoom-fit-best-symbolic"))
+                        .on_press(Message::FitPage),
+                    fl!("fit-page"),
+                ),
+                tip(
+                    widget::button::icon(icon::from_name("dialog-information-symbolic"))
+                        .on_press(Message::ToggleInfo),
+                    fl!("details-tip"),
+                ),
+                fullscreen_button(self.fullscreen),
+                tip(
+                    widget::button::icon(icon::from_name("emblem-system-symbolic"))
+                        .on_press(Message::ToggleSettings),
+                    fl!("settings-tip"),
+                ),
+                widget::divider::vertical::light().into(),
+                tip(
+                    widget::button::icon(icon::from_name("document-open-symbolic"))
+                        .on_press(Message::OpenFile),
+                    fl!("open-a-file"),
+                ),
+            ])
+            .collect()
     }
 
     fn build_settings_panel(&self) -> Element<'_, Message> {
@@ -2240,7 +2576,11 @@ impl App {
                     &self.labels.languages[..],
                     Some(match &s.language {
                         None => 0,
-                        Some(id) => self.languages.iter().position(|l| &l.id == id).map_or(0, |i| i + 1),
+                        Some(id) => self
+                            .languages
+                            .iter()
+                            .position(|l| &l.id == id)
+                            .map_or(0, |i| i + 1),
                     }),
                     Message::SetLanguage,
                 ),
@@ -2253,16 +2593,21 @@ impl App {
                     Message::SetLook,
                 ),
             ))
-            .add_maybe((self.look().native_titlebar() != self.native_titlebar).then(|| {
-                widget::text::caption(fl!("title-bar-restart"))
-            }))
+            .add_maybe(
+                (self.look().native_titlebar() != self.native_titlebar)
+                    .then(|| widget::text::caption(fl!("title-bar-restart"))),
+            )
             .add(widget::settings::item(
                 fl!("colors"),
                 widget::dropdown(
                     &self.theme_labels[..],
                     Some(match &s.theme {
                         None => 0,
-                        Some(id) => self.themes.iter().position(|t| &t.id == id).map_or(0, |i| i + 1),
+                        Some(id) => self
+                            .themes
+                            .iter()
+                            .position(|t| &t.id == id)
+                            .map_or(0, |i| i + 1),
                     }),
                     Message::SetTheme,
                 ),
@@ -2274,10 +2619,20 @@ impl App {
                     .push(
                         widget::row::with_capacity(2)
                             .spacing(8)
-                            .push(widget::button::standard(fl!("import-theme")).on_press(Message::ImportTheme))
-                            .push(widget::button::standard(fl!("open-themes-folder")).on_press(Message::OpenThemesFolder)),
+                            .push(
+                                widget::button::standard(fl!("import-theme"))
+                                    .on_press(Message::ImportTheme),
+                            )
+                            .push(
+                                widget::button::standard(fl!("open-themes-folder"))
+                                    .on_press(Message::OpenThemesFolder),
+                            ),
                     )
-                    .push_maybe(self.theme_error.as_deref().map(|e| widget::text::caption(fl!("theme-error", error = e)))),
+                    .push_maybe(
+                        self.theme_error
+                            .as_deref()
+                            .map(|e| widget::text::caption(fl!("theme-error", error = e))),
+                    ),
             )
             // COSMIC Settings already sets roundness for the COSMIC style.
             .add_maybe((self.look() != Look::Cosmic).then(|| {
@@ -2299,10 +2654,17 @@ impl App {
                 ),
             ))
             .add(widget::settings::item(
-                fl!("background-opacity", percent = format!("{:.0}", s.background_opacity * 100.0)),
-                widget::slider(0.0..=1.0, s.background_opacity, Message::SetBackgroundOpacity)
-                    .step(0.05)
-                    .width(Length::Fixed(180.0)),
+                fl!(
+                    "background-opacity",
+                    percent = format!("{:.0}", s.background_opacity * 100.0)
+                ),
+                widget::slider(
+                    0.0..=1.0,
+                    s.background_opacity,
+                    Message::SetBackgroundOpacity,
+                )
+                .step(0.05)
+                .width(Length::Fixed(180.0)),
             ))
             .add(widget::settings::item(
                 fl!("theater-mode"),
@@ -2313,8 +2675,7 @@ impl App {
             .title(fl!("reading"))
             .add(widget::settings::item(
                 fl!("two-page-spread"),
-                widget::toggler(self.layout == Layout::Dual)
-                    .on_toggle(|_| Message::ToggleLayout),
+                widget::toggler(self.layout == Layout::Dual).on_toggle(|_| Message::ToggleLayout),
             ))
             .add(widget::settings::item(
                 fl!("fullscreen-status"),
@@ -2342,7 +2703,11 @@ impl App {
                             .align_y(Alignment::Center)
                             .push(
                                 widget::secure_input(
-                                    if has_key { fl!("replace-key") } else { fl!("paste-key") },
+                                    if has_key {
+                                        fl!("replace-key")
+                                    } else {
+                                        fl!("paste-key")
+                                    },
                                     &self.cv_key_input,
                                     None,
                                     true,
@@ -2351,22 +2716,28 @@ impl App {
                                 .on_submit(|_| Message::SaveComicVineKey)
                                 .width(Length::Fill),
                             )
-                            .push(widget::button::standard(fl!("save")).on_press(Message::SaveComicVineKey)),
+                            .push(
+                                widget::button::standard(fl!("save"))
+                                    .on_press(Message::SaveComicVineKey),
+                            ),
                     ),
             )
             .add(
                 widget::Row::new()
                     .spacing(8)
-                    .push(widget::button::standard(fl!("rescan-library")).on_press(Message::RescanLibrary))
-                    .push(widget::button::standard(fl!("refresh-metadata")).on_press(Message::RefreshAllMetadata)),
+                    .push(
+                        widget::button::standard(fl!("rescan-library"))
+                            .on_press(Message::RescanLibrary),
+                    )
+                    .push(
+                        widget::button::standard(fl!("refresh-metadata"))
+                            .on_press(Message::RefreshAllMetadata),
+                    ),
             );
 
         let mut library_section = widget::settings::section().title(fl!("library-folders"));
         if self.library_dirs.is_empty() {
-            library_section = library_section.add(
-                widget::text(fl!("no-library-folders"))
-                    .size(12),
-            );
+            library_section = library_section.add(widget::text(fl!("no-library-folders")).size(12));
         } else {
             for dir in &self.library_dirs {
                 let mut name = dir.to_string_lossy().into_owned();
@@ -2395,14 +2766,8 @@ impl App {
                     .on_submit(|_| Message::LibraryPathInputSubmitted)
                     .width(Length::Fill),
             )
-            .push(
-                widget::button::standard(fl!("add"))
-                    .on_press(Message::LibraryPathInputSubmitted),
-            )
-            .push(
-                widget::button::standard(fl!("browse"))
-                    .on_press(Message::AddLibraryFolder),
-            );
+            .push(widget::button::standard(fl!("add")).on_press(Message::LibraryPathInputSubmitted))
+            .push(widget::button::standard(fl!("browse")).on_press(Message::AddLibraryFolder));
 
         widget::settings::view_column(vec![
             appearance.into(),
@@ -2439,12 +2804,18 @@ impl App {
                     .spacing(2)
                     .push(widget::text::title4("Nebula Reader"))
                     .push(widget::text::body(version))
-                    .push(widget::text::caption(fl!("made-by", install = install.label()))),
+                    .push(widget::text::caption(fl!(
+                        "made-by",
+                        install = install.label()
+                    ))),
             )
             .add(
                 widget::row::with_capacity(2)
                     .spacing(8)
-                    .push(widget::button::standard("GitHub").on_press(Message::OpenUrl(updates::REPO_URL.into())))
+                    .push(
+                        widget::button::standard("GitHub")
+                            .on_press(Message::OpenUrl(updates::REPO_URL.into())),
+                    )
                     .push(
                         widget::button::standard(fl!("release-notes"))
                             .on_press(Message::OpenUrl(updates::RELEASES_URL.into())),
@@ -2452,25 +2823,35 @@ impl App {
             );
 
         if !install.checks_github() {
-            return section.add(widget::text::caption(install.how_to_update())).into();
+            return section
+                .add(widget::text::caption(install.how_to_update()))
+                .into();
         }
 
         let status: Element<'_, Message> = match &self.update {
             UpdateStatus::NotChecked => widget::text::body(fl!("update-not-checked")).into(),
             UpdateStatus::Checking => widget::text::body(fl!("update-checking")).into(),
             UpdateStatus::UpToDate => widget::text::body(fl!("update-up-to-date")).into(),
-            UpdateStatus::Failed(e) => widget::text::body(fl!("update-check-failed", error = e)).into(),
+            UpdateStatus::Failed(e) => {
+                widget::text::body(fl!("update-check-failed", error = e)).into()
+            }
             UpdateStatus::Available(release) => {
                 let (msg, action) = self.update_message(release);
                 let heading = if release.back_to_regular {
                     fl!("switch-back-heading", version = release.version.as_str())
                 } else {
-                    fl!("update-available-heading", version = release.version.as_str())
+                    fl!(
+                        "update-available-heading",
+                        version = release.version.as_str()
+                    )
                 };
                 widget::column::with_capacity(4)
                     .spacing(6)
                     .push(widget::text::heading(heading))
-                    .push_maybe((!matches!(self.update_job, UpdateJob::Idle)).then(|| widget::text::body(msg)))
+                    .push_maybe(
+                        (!matches!(self.update_job, UpdateJob::Idle))
+                            .then(|| widget::text::body(msg)),
+                    )
                     .push(action)
                     .push(widget::text::caption(install.how_to_update()))
                     .into()
@@ -2484,13 +2865,15 @@ impl App {
                     .push(widget::container(status).width(Length::Fill))
                     .push(
                         widget::button::standard(fl!("check-now")).on_press_maybe(
-                            (!matches!(self.update, UpdateStatus::Checking)).then_some(Message::CheckForUpdates),
+                            (!matches!(self.update, UpdateStatus::Checking))
+                                .then_some(Message::CheckForUpdates),
                         ),
                     ),
             )
             .add(widget::settings::item(
                 fl!("check-on-start"),
-                widget::toggler(self.settings.check_for_updates).on_toggle(Message::SetCheckForUpdates),
+                widget::toggler(self.settings.check_for_updates)
+                    .on_toggle(Message::SetCheckForUpdates),
             ));
         // Betas, for the installs that update themselves.
         if updates::can_follow_betas(install) {
@@ -2510,7 +2893,9 @@ impl App {
                         .push(widget::text::body(fl!("beta-versions")))
                         .push(widget::text::caption(note))
                         .into(),
-                    widget::toggler(self.beta_channel).on_toggle(Message::SetBetaChannel).into(),
+                    widget::toggler(self.beta_channel)
+                        .on_toggle(Message::SetBetaChannel)
+                        .into(),
                 ])
                 .align_y(Alignment::Center),
             );
@@ -2523,20 +2908,38 @@ impl App {
 
         let current = self.current_chapter();
         if let Some((ch_idx, ch, pg)) = current {
-            let issue = self.reader_issues.iter().find(|i| i.path == ch.path.to_string_lossy());
+            let issue = self
+                .reader_issues
+                .iter()
+                .find(|i| i.path == ch.path.to_string_lossy());
             let heading = match issue {
                 Some(i) if !i.number.is_empty() => {
                     let h = i.heading();
-                    if h.is_empty() { fl!("issue-number", number = i.number.as_str()) } else { fl!("issue-heading", number = i.number.as_str(), title = h) }
+                    if h.is_empty() {
+                        fl!("issue-number", number = i.number.as_str())
+                    } else {
+                        fl!("issue-heading", number = i.number.as_str(), title = h)
+                    }
                 }
-                _ if self.chapters.len() > 1 => fl!("chapter-heading", chapter = ch_idx + 1, name = ch.name.as_str()),
+                _ if self.chapters.len() > 1 => fl!(
+                    "chapter-heading",
+                    chapter = ch_idx + 1,
+                    name = ch.name.as_str()
+                ),
                 _ => ch.name.clone(),
             };
             col = col.push(widget::text::title4(heading));
-            col = col.push(widget::text::body(fl!("page-of", page = pg + 1, pages = ch.page_count)));
+            col = col.push(widget::text::body(fl!(
+                "page-of",
+                page = pg + 1,
+                pages = ch.page_count
+            )));
             if let Some(i) = issue {
                 if !i.date().is_empty() {
-                    col = col.push(widget::text::caption(fl!("released", date = library::pretty_date(i.date()))));
+                    col = col.push(widget::text::caption(fl!(
+                        "released",
+                        date = library::pretty_date(i.date())
+                    )));
                 }
                 for line in i.creators.lines() {
                     col = col.push(widget::text::caption(line.to_string()));
@@ -2549,7 +2952,10 @@ impl App {
                     )));
                 }
                 if !i.url.is_empty() {
-                    col = col.push(widget::button::link(fl!("view-issue-page")).on_press(Message::OpenUrl(i.url.clone())));
+                    col = col.push(
+                        widget::button::link(fl!("view-issue-page"))
+                            .on_press(Message::OpenUrl(i.url.clone())),
+                    );
                 }
             }
             col = col.push(widget::divider::horizontal::light());
@@ -2565,7 +2971,11 @@ impl App {
                 facts.push(y.to_string());
             }
             if e.issue_count > 1 {
-                facts.push(fl!("issues-read", read = e.issues_read, total = e.issue_count));
+                facts.push(fl!(
+                    "issues-read",
+                    read = e.issues_read,
+                    total = e.issue_count
+                ));
             }
             if !facts.is_empty() {
                 col = col.push(widget::text::body(facts.join(" · ")));
@@ -2605,7 +3015,11 @@ impl App {
                 (fl!("ci-genre"), info.genre.clone()),
             ] {
                 if let Some(v) = value {
-                    col = col.push(widget::text::caption(fl!("ci-field", label = label, value = v)));
+                    col = col.push(widget::text::caption(fl!(
+                        "ci-field",
+                        label = label,
+                        value = v
+                    )));
                 }
             }
             if let Some(summary) = &info.summary {
@@ -2616,7 +3030,11 @@ impl App {
 
         // ── What the name parser made of this file (for fixing matches) ──
         if let Some((_, ch, _)) = current {
-            let file = ch.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let file = ch
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let parsed = naming::parse_issue(&file);
             let clean = naming::series_name_from_issue(&file);
             col = col.push(widget::text::heading(fl!("name-parsing")));
@@ -2625,7 +3043,10 @@ impl App {
                 "name-parsed",
                 series = clean.search.as_str(),
                 issue = parsed.number.as_deref().unwrap_or("—"),
-                year = clean.year.map(|y| y.to_string()).unwrap_or_else(|| "—".into())
+                year = clean
+                    .year
+                    .map(|y| y.to_string())
+                    .unwrap_or_else(|| "—".into())
             )));
         }
 
@@ -2663,7 +3084,8 @@ impl App {
                     "software-update-available-symbolic",
                     msg,
                     action,
-                    (!matches!(self.update_job, UpdateJob::Downloading { .. })).then_some(Message::DismissUpdateBanner),
+                    (!matches!(self.update_job, UpdateJob::Downloading { .. }))
+                        .then_some(Message::DismissUpdateBanner),
                 ));
             }
         }
@@ -2671,8 +3093,11 @@ impl App {
             banners.push(notice_banner(
                 "emblem-ok-symbolic",
                 fl!("updated-banner", version = updates::VERSION),
-                widget::button::standard(fl!("whats-new"))
-                    .on_press(Message::OpenUrl(format!("{}/tag/v{}", updates::RELEASES_URL, updates::VERSION))),
+                widget::button::standard(fl!("whats-new")).on_press(Message::OpenUrl(format!(
+                    "{}/tag/v{}",
+                    updates::RELEASES_URL,
+                    updates::VERSION
+                ))),
                 Some(Message::DismissUpdatedBanner),
             ));
         }
@@ -2686,20 +3111,31 @@ impl App {
         let install = crate::updates::Install::detect();
         let in_app = crate::updater::Plan::for_release(install, release).is_some();
         let release_page = || -> Element<'_, Message> {
-            widget::button::standard(fl!("release-page")).on_press(Message::OpenUrl(release.url.clone())).into()
+            widget::button::standard(fl!("release-page"))
+                .on_press(Message::OpenUrl(release.url.clone()))
+                .into()
         };
         match &self.update_job {
             UpdateJob::Idle if in_app && release.back_to_regular => (
                 fl!("switch-back-available", version = release.version.as_str()),
-                widget::button::suggested(fl!("switch-back-now")).on_press(Message::UpdateNow).into(),
+                widget::button::suggested(fl!("switch-back-now"))
+                    .on_press(Message::UpdateNow)
+                    .into(),
             ),
             UpdateJob::Idle if in_app => (
                 fl!("update-available", version = release.version.as_str()),
-                widget::button::suggested(fl!("update-now")).on_press(Message::UpdateNow).into(),
+                widget::button::suggested(fl!("update-now"))
+                    .on_press(Message::UpdateNow)
+                    .into(),
             ),
-            UpdateJob::Idle => {
-                (fl!("update-available-how", version = release.version.as_str(), how = install.how_to_update()), release_page())
-            }
+            UpdateJob::Idle => (
+                fl!(
+                    "update-available-how",
+                    version = release.version.as_str(),
+                    how = install.how_to_update()
+                ),
+                release_page(),
+            ),
             UpdateJob::Downloading { done, total } => {
                 let msg = match total {
                     Some(total) if *total > 0 => fl!(
@@ -2713,12 +3149,21 @@ impl App {
                         mb = format!("{:.1}", *done as f64 / 1e6)
                     ),
                 };
-                let fraction = total.filter(|t| *t > 0).map_or(0.0, |t| *done as f32 / t as f32);
-                (msg, widget::container(library_view::progress_bar(fraction)).width(Length::Fixed(140.0)).into())
+                let fraction = total
+                    .filter(|t| *t > 0)
+                    .map_or(0.0, |t| *done as f32 / t as f32);
+                (
+                    msg,
+                    widget::container(library_view::progress_bar(fraction))
+                        .width(Length::Fixed(140.0))
+                        .into(),
+                )
             }
             UpdateJob::Ready(_) => (
                 fl!("update-ready", version = release.version.as_str()),
-                widget::button::suggested(fl!("restart-now")).on_press(Message::RestartToUpdate).into(),
+                widget::button::suggested(fl!("restart-now"))
+                    .on_press(Message::RestartToUpdate)
+                    .into(),
             ),
             UpdateJob::Failed(e) => (
                 fl!("update-failed", error = e.as_str()),
@@ -2745,7 +3190,9 @@ fn notice_banner<'a>(
             .push(icon::from_name(icon_name).size(20))
             .push(widget::text::body(msg).width(Length::Fill))
             .push(action)
-            .push_maybe(on_close.map(|m| widget::button::icon(icon::from_name("window-close-symbolic")).on_press(m))),
+            .push_maybe(on_close.map(|m| {
+                widget::button::icon(icon::from_name("window-close-symbolic")).on_press(m)
+            })),
     )
     .padding([8, 12])
     .width(Length::Fill)
@@ -2775,11 +3222,12 @@ impl App {
             Message::GoToLibrary => {
                 self.show_chapter_select = false;
                 // Reading a Jellyfin CBR built its page index.
-                let reindexed = if self.app_view == AppView::Reader && self.jellyfin_source().is_some() {
-                    self.refresh_unindexed()
-                } else {
-                    Task::none()
-                };
+                let reindexed =
+                    if self.app_view == AppView::Reader && self.jellyfin_source().is_some() {
+                        self.refresh_unindexed()
+                    } else {
+                        Task::none()
+                    };
                 // Leaving the reader also leaves full screen, so the library
                 // is a normal window again.
                 let windowed = match self.core.main_window_id() {
@@ -2794,7 +3242,11 @@ impl App {
                     self.persist_book_position();
                 }
                 if self.app_view == AppView::Reader && self.back_to_series {
-                    if let Some(key) = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned()) {
+                    if let Some(key) = self
+                        .open_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().into_owned())
+                    {
                         let t = self.refresh_views();
                         return Task::batch([windowed, t, self.open_series_page(key)]);
                     }
@@ -2802,7 +3254,7 @@ impl App {
                 self.app_view = AppView::Library;
                 self.series_page = None;
                 self.set_header_title("Nebula".into());
-                return Task::batch([windowed, self.refresh_views()]);
+                return Task::batch([windowed, self.refresh_views(), self.load_catalog_quick()]);
             }
             Message::OpenSeriesPage(key) => {
                 if self.context_page == ContextPage::Properties {
@@ -2814,7 +3266,8 @@ impl App {
                 return cosmic::task::future(async move {
                     let filter = comic_file_filter();
                     let dialog = file_chooser::open::Dialog::new()
-                        .title(fl!("open-comic-or-book")).filter(filter);
+                        .title(fl!("open-comic-or-book"))
+                        .filter(filter);
                     match dialog.open_file().await {
                         Ok(r) => Message::PathSelected(r.url().to_owned()),
                         Err(file_chooser::Error::Cancelled) => Message::Cancelled,
@@ -2882,14 +3335,21 @@ impl App {
                     // server (only a window of it is loaded), so just record
                     // the page counts we now know.
                     for ch in &self.chapters {
-                        let _ = library::set_issue_page_count(db, &key, &ch.path.to_string_lossy(), ch.page_count);
+                        let _ = library::set_issue_page_count(
+                            db,
+                            &key,
+                            &ch.path.to_string_lossy(),
+                            ch.page_count,
+                        );
                     }
                     let _ = library::touch_opened(db, &key);
                     self.reader_entry = library::get_series(db, &key);
                     self.reader_issues = library::issues_for(db, &key);
                 } else if let Some(db) = &self.db {
-                    let raw_name =
-                        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let raw_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     let title = if path.is_dir() {
                         naming::clean_series_name(&raw_name).display
                     } else {
@@ -2900,7 +3360,8 @@ impl App {
                     };
                     let is_series = path.is_dir() || self.chapters.len() > 1;
                     let _ = library::upsert_series(db, &key, &title, total, is_series);
-                    let _ = library::sync_issues(db, &key, &issue_rows_from_chapters(&self.chapters));
+                    let _ =
+                        library::sync_issues(db, &key, &issue_rows_from_chapters(&self.chapters));
                     let _ = library::touch_opened(db, &key);
                     self.reader_entry = library::get_series(db, &key);
                     self.reader_issues = library::issues_for(db, &key);
@@ -2926,7 +3387,11 @@ impl App {
                     .reader_entry
                     .as_ref()
                     .map(|e| e.name().to_string())
-                    .unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                    .unwrap_or_else(|| {
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    });
                 self.set_header_title(self.title.clone());
 
                 // Embedded ComicInfo.xml of the issue being read, looked up
@@ -2946,7 +3411,11 @@ impl App {
                 }
                 self.persist_progress();
 
-                if self.reader_entry.as_ref().is_some_and(|e| e.meta_fetched_at == 0) {
+                if self
+                    .reader_entry
+                    .as_ref()
+                    .is_some_and(|e| e.meta_fetched_at == 0)
+                {
                     tasks.push(self.enqueue_meta(key));
                 }
                 tasks.push(self.refresh_window());
@@ -2975,17 +3444,19 @@ impl App {
                         self.title = book.title.clone();
                         self.set_header_title(self.title.clone());
 
-                        self.epub_cover = book
-                            .cover
-                            .clone()
-                            .map(widget::image::Handle::from_bytes);
+                        self.epub_cover = book.cover.clone().map(widget::image::Handle::from_bytes);
 
                         let chapter_count = book.chapters.len();
-                        self.epub_images =
-                            book.images.iter().map(|b| widget::image::Handle::from_bytes(b.clone())).collect();
+                        self.epub_images = book
+                            .images
+                            .iter()
+                            .map(|b| widget::image::Handle::from_bytes(b.clone()))
+                            .collect();
                         // Resume at the saved chapter *and* scroll position.
                         let saved = self.db.as_ref().and_then(|db| {
-                            library::issues_for(db, &path_str).into_iter().find(|i| i.path == path_str)
+                            library::issues_for(db, &path_str)
+                                .into_iter()
+                                .find(|i| i.path == path_str)
                         });
                         let (chapter, position) = match saved {
                             Some(i) if !i.completed => (i.last_page, i.position),
@@ -2999,7 +3470,10 @@ impl App {
                             ),
                         };
                         self.epub_chapter = chapter.min(chapter_count.saturating_sub(1));
-                        self.book_scroll = BookScroll { rel_y: position, ..BookScroll::default() };
+                        self.book_scroll = BookScroll {
+                            rel_y: position,
+                            ..BookScroll::default()
+                        };
                         self.book_saved_pos = position;
                         let cover_bytes = book.cover.clone();
                         self.epub_book = Some(book);
@@ -3007,7 +3481,13 @@ impl App {
                         // As with comics: any opened EPUB gets tracked and a
                         // shelf cover, not just ones under a library folder.
                         if let Some(db) = &self.db {
-                            let _ = library::upsert_series(db, &path_str, &self.title, chapter_count, false);
+                            let _ = library::upsert_series(
+                                db,
+                                &path_str,
+                                &self.title,
+                                chapter_count,
+                                false,
+                            );
                             let _ = library::sync_issues(
                                 db,
                                 &path_str,
@@ -3026,18 +3506,25 @@ impl App {
 
                             let cover_path = library::chapter_cover_path(&path_str, 0);
                             if !cover_path.exists() {
-                                if let Some(img) = cover_bytes.and_then(|b| image::load_from_memory(&b).ok()) {
+                                if let Some(img) =
+                                    cover_bytes.and_then(|b| image::load_from_memory(&b).ok())
+                                {
                                     let _ = scan::save_thumb(&img.to_rgba8(), &cover_path);
                                 }
                             }
                         }
 
-                        let title_task = self.core.main_window_id()
+                        let title_task = self
+                            .core
+                            .main_window_id()
                             .map(|id| self.set_window_title(self.title.clone(), id));
 
                         let restore = cosmic::iced::widget::scrollable::snap_to(
                             book_view::book_scroll_id(),
-                            cosmic::iced::widget::scrollable::RelativeOffset { x: None, y: Some(position) },
+                            cosmic::iced::widget::scrollable::RelativeOffset {
+                                x: None,
+                                y: Some(position),
+                            },
                         );
                         return Task::batch(title_task.into_iter().chain([restore]));
                     }
@@ -3054,10 +3541,11 @@ impl App {
                 if let Ok((handle, size)) = result {
                     // Upload it now, while it isn't on screen yet.
                     if index.abs_diff(self.current_page) <= PRELOAD_FAR {
-                        tasks.push(
-                            cosmic::iced::runtime::image::allocate(handle.clone())
-                                .map(move |a| cosmic::Action::App(Message::PageAllocated(gen, index, a.ok()))),
-                        );
+                        tasks.push(cosmic::iced::runtime::image::allocate(handle.clone()).map(
+                            move |a| {
+                                cosmic::Action::App(Message::PageAllocated(gen, index, a.ok()))
+                            },
+                        ));
                     }
                     self.cache.insert(index, (handle, size));
                 }
@@ -3073,7 +3561,9 @@ impl App {
                 return Task::batch(tasks);
             }
             Message::PageAllocated(gen, index, allocation) => {
-                if let Some(a) = allocation.filter(|_| gen == self.page_gen && self.cache.contains_key(&index)) {
+                if let Some(a) =
+                    allocation.filter(|_| gen == self.page_gen && self.cache.contains_key(&index))
+                {
                     self.allocations.insert(index, a);
                 }
             }
@@ -3082,7 +3572,9 @@ impl App {
                 self.loading = false;
                 self.error = Some(why);
             }
-            Message::Cancelled => { self.loading = false; }
+            Message::Cancelled => {
+                self.loading = false;
+            }
             Message::MetaNext => {
                 return self.pump_meta();
             }
@@ -3096,10 +3588,15 @@ impl App {
                         Ok(Some(m)) => {
                             used_comicvine = m.source == "comicvine";
                             let entry = library::get_series(db, &key);
-                            let forced = entry.as_ref().is_some_and(|e| !e.search_override.is_empty());
+                            let forced = entry
+                                .as_ref()
+                                .is_some_and(|e| !e.search_override.is_empty());
                             let rename = forced || m.score >= metadata::RENAME_SCORE;
                             let display = rename.then(|| {
-                                naming::with_edition(&m.title, entry.as_ref().map_or("", |e| e.title.as_str()))
+                                naming::with_edition(
+                                    &m.title,
+                                    entry.as_ref().map_or("", |e| e.title.as_str()),
+                                )
                             });
                             let _ = library::apply_match(db, &key, &m, display.as_deref());
                         }
@@ -3128,7 +3625,9 @@ impl App {
                 self.series_search_input = text;
             }
             Message::RematchSeries => {
-                let Some(key) = self.series_page.as_ref().map(|s| s.path.clone()) else { return Task::none() };
+                let Some(key) = self.series_page.as_ref().map(|s| s.path.clone()) else {
+                    return Task::none();
+                };
                 if let Some(db) = &self.db {
                     library::set_search_override(db, &key, &self.series_search_input);
                     library::mark_meta(db, &key, "", false);
@@ -3142,7 +3641,9 @@ impl App {
                 return Task::batch([t, self.pump_meta()]);
             }
             Message::ClearSeriesMatch => {
-                if let (Some(db), Some(key)) = (&self.db, self.series_page.as_ref().map(|s| s.path.clone())) {
+                if let (Some(db), Some(key)) =
+                    (&self.db, self.series_page.as_ref().map(|s| s.path.clone()))
+                {
                     library::mark_meta(db, &key, "nomatch", true);
                 }
                 let t = self.refresh_views();
@@ -3156,8 +3657,12 @@ impl App {
                     library::reset_all_metadata(db);
                 }
                 self.meta_attempted.clear();
-                let keys: Vec<String> =
-                    self.library_entries.iter().filter(|e| !e.is_epub).map(|e| e.path.clone()).collect();
+                let keys: Vec<String> = self
+                    .library_entries
+                    .iter()
+                    .filter(|e| !e.is_epub)
+                    .map(|e| e.path.clone())
+                    .collect();
                 let tasks: Vec<_> = keys.into_iter().map(|k| self.enqueue_meta(k)).collect();
                 return Task::batch(tasks);
             }
@@ -3208,7 +3713,11 @@ impl App {
                     self.comic_info = info;
                 }
             }
-            Message::ChapterCoverReady { gen, chapter_idx, result } => {
+            Message::ChapterCoverReady {
+                gen,
+                chapter_idx,
+                result,
+            } => {
                 if gen != self.page_gen {
                     return Task::none();
                 }
@@ -3271,9 +3780,14 @@ impl App {
                 // unplugged (/mnt/usb) looks empty rather than missing.
                 // Never treat "suddenly empty" as "everything was deleted":
                 // hide the library instead, as for a missing folder.
-                let known = self.db.as_ref().map_or(0, |db| library::series_count_under_root(db, &root.to_string_lossy()));
+                let known = self.db.as_ref().map_or(0, |db| {
+                    library::series_count_under_root(db, &root.to_string_lossy())
+                });
                 if found.is_empty() && known > 0 {
-                    log::warn!("{} is empty now; keeping its {known} series hidden until it's back", root.display());
+                    log::warn!(
+                        "{} is empty now; keeping its {known} series hidden until it's back",
+                        root.display()
+                    );
                     self.missing_roots.insert(root);
                     return self.reload_library();
                 }
@@ -3283,7 +3797,10 @@ impl App {
                     let keys: Vec<String> = found.iter().map(|d| d.key.clone()).collect();
                     let removed = library::prune_root(db, &root.to_string_lossy(), &keys);
                     if removed > 0 {
-                        log::info!("removed {removed} series no longer under {}", root.display());
+                        log::info!(
+                            "removed {removed} series no longer under {}",
+                            root.display()
+                        );
                     }
                     for d in found {
                         let known = library::known_page_counts(db, &d.key);
@@ -3305,7 +3822,9 @@ impl App {
                                 library::upsert_scanned_series(db, &r.series)?;
                                 library::sync_issues(db, &r.series.path, &r.issues)
                             });
-                            if library::get_series(db, &r.series.path).is_some_and(|e| e.meta_fetched_at == 0) {
+                            if library::get_series(db, &r.series.path)
+                                .is_some_and(|e| e.meta_fetched_at == 0)
+                            {
                                 tasks.push(self.enqueue_meta(r.series.path.clone()));
                             }
                         }
@@ -3323,7 +3842,8 @@ impl App {
                 if self.series_page.as_ref().is_some_and(|s| s.path == key) {
                     let cover = library::chapter_cover_path(&key, idx);
                     if cover.exists() {
-                        self.series_page_covers.insert(idx, widget::image::Handle::from_path(cover));
+                        self.series_page_covers
+                            .insert(idx, widget::image::Handle::from_path(cover));
                     }
                 }
                 if idx == 0 {
@@ -3388,11 +3908,17 @@ impl App {
                 }
             }
             Message::SetTheme(idx) => {
-                let id = idx.checked_sub(1).and_then(|i| self.themes.get(i)).map(|t| t.id.clone());
+                let id = idx
+                    .checked_sub(1)
+                    .and_then(|i| self.themes.get(i))
+                    .map(|t| t.id.clone());
                 return self.select_theme(id);
             }
             Message::SetLanguage(idx) => {
-                let id = idx.checked_sub(1).and_then(|i| self.languages.get(i)).map(|l| l.id.clone());
+                let id = idx
+                    .checked_sub(1)
+                    .and_then(|i| self.languages.get(i))
+                    .map(|l| l.id.clone());
                 crate::i18n::select(id.as_deref());
                 self.settings.language = id;
                 self.settings.save();
@@ -3413,7 +3939,9 @@ impl App {
                             filter = filter.extension(ext);
                         }
                     }
-                    let dialog = file_chooser::open::Dialog::new().title("Import Theme").filter(filter);
+                    let dialog = file_chooser::open::Dialog::new()
+                        .title("Import Theme")
+                        .filter(filter);
                     match dialog.open_file().await {
                         Ok(r) => Message::ThemeFileSelected(r.url().to_owned()),
                         Err(file_chooser::Error::Cancelled) => Message::Cancelled,
@@ -3422,7 +3950,10 @@ impl App {
                 });
             }
             Message::ThemeFileSelected(url) => {
-                let imported = url.to_file_path().map_err(|()| fl!("not-a-local-file")).and_then(|p| themes::import(&p));
+                let imported = url
+                    .to_file_path()
+                    .map_err(|()| fl!("not-a-local-file"))
+                    .and_then(|p| themes::import(&p));
                 match imported {
                     Ok(id) => {
                         self.refresh_themes();
@@ -3490,25 +4021,34 @@ impl App {
             Message::DismissUpdatedBanner => self.just_updated = false,
             Message::UpdateNow => {
                 let plan = match &self.update {
-                    UpdateStatus::Available(release) => {
-                        crate::updater::Plan::for_release(crate::updates::Install::detect(), release)
-                    }
+                    UpdateStatus::Available(release) => crate::updater::Plan::for_release(
+                        crate::updates::Install::detect(),
+                        release,
+                    ),
                     _ => None,
                 };
                 if let Some(plan) = plan {
-                    if !matches!(self.update_job, UpdateJob::Downloading { .. } | UpdateJob::Ready(_)) {
-                        self.update_job = UpdateJob::Downloading { done: 0, total: None };
+                    if !matches!(
+                        self.update_job,
+                        UpdateJob::Downloading { .. } | UpdateJob::Ready(_)
+                    ) {
+                        self.update_job = UpdateJob::Downloading {
+                            done: 0,
+                            total: None,
+                        };
                         return cosmic::task::stream(cosmic::iced::futures::StreamExt::map(
                             crate::updater::start(plan),
                             Message::UpdateProgress,
                         ))
-                            .map(cosmic::Action::App);
+                        .map(cosmic::Action::App);
                     }
                 }
             }
             Message::UpdateProgress(progress) => {
                 self.update_job = match progress {
-                    crate::updater::Progress::Downloading { done, total } => UpdateJob::Downloading { done, total },
+                    crate::updater::Progress::Downloading { done, total } => {
+                        UpdateJob::Downloading { done, total }
+                    }
                     crate::updater::Progress::Ready(staged) => UpdateJob::Ready(staged),
                     crate::updater::Progress::Failed(e) => UpdateJob::Failed(e),
                 };
@@ -3520,7 +4060,9 @@ impl App {
                     self.persist_progress();
                     let _ = self.update(Message::Jf(JfMsg::Closing));
                 }
-                if let UpdateJob::Ready(staged) = std::mem::replace(&mut self.update_job, UpdateJob::Idle) {
+                if let UpdateJob::Ready(staged) =
+                    std::mem::replace(&mut self.update_job, UpdateJob::Idle)
+                {
                     match crate::updater::apply(&staged) {
                         Ok(()) => return cosmic::iced::exit(),
                         Err(e) => {
@@ -3570,9 +4112,17 @@ impl App {
             }
             Message::ToggleFullscreen => {
                 self.fullscreen = !self.fullscreen;
-                let mode = if self.fullscreen { window::Mode::Fullscreen } else { window::Mode::Windowed };
+                let mode = if self.fullscreen {
+                    window::Mode::Fullscreen
+                } else {
+                    window::Mode::Windowed
+                };
                 // Fresh time and battery right away, not at the next tick.
-                let status = if self.status_shown() { self.update(Message::StatusTick) } else { Task::none() };
+                let status = if self.status_shown() {
+                    self.update(Message::StatusTick)
+                } else {
+                    Task::none()
+                };
                 if let Some(id) = self.core.main_window_id() {
                     return Task::batch([window::set_mode(id, mode), status]);
                 }
@@ -3581,7 +4131,10 @@ impl App {
             Message::StatusTick => {
                 return cosmic::task::future(async {
                     let read = tokio::task::spawn_blocking(|| {
-                        (crate::platform::status::clock(), crate::platform::status::battery())
+                        (
+                            crate::platform::status::clock(),
+                            crate::platform::status::battery(),
+                        )
                     });
                     match read.await {
                         Ok((clock, battery)) => Message::StatusRead(clock, battery),
@@ -3606,10 +4159,16 @@ impl App {
                 self.settings.save();
             }
             Message::ToggleLayout => {
-                self.layout = match self.layout { Layout::Single => Layout::Dual, Layout::Dual => Layout::Single };
+                self.layout = match self.layout {
+                    Layout::Single => Layout::Dual,
+                    Layout::Dual => Layout::Single,
+                };
                 self.settings.dual_page = self.layout == Layout::Dual;
                 self.settings.save();
-                if self.layout == Layout::Dual && self.current_page % 2 != 0 && !self.is_spread(self.current_page - 1) {
+                if self.layout == Layout::Dual
+                    && self.current_page % 2 != 0
+                    && !self.is_spread(self.current_page - 1)
+                {
                     self.current_page = self.current_page.saturating_sub(1);
                 }
                 return self.refresh_window();
@@ -3626,7 +4185,14 @@ impl App {
                 self.fit_width = !self.fit_width;
                 self.fit_note_counter += 1;
                 let note = self.fit_note_counter;
-                self.fit_note = Some((if self.fit_width { fl!("fit-width-note") } else { fl!("whole-page-note") }, note));
+                self.fit_note = Some((
+                    if self.fit_width {
+                        fl!("fit-width-note")
+                    } else {
+                        fl!("whole-page-note")
+                    },
+                    note,
+                ));
                 let mut tasks = vec![cosmic::task::future(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
                     Message::HideFitNote(note)
@@ -3681,8 +4247,14 @@ impl App {
                     return copy_task(page.clone());
                 }
             }
-            Message::CopiedPage(r) => { if let Err(e) = r { self.error = Some(e); } }
-            Message::CloseError => { self.error = None; }
+            Message::CopiedPage(r) => {
+                if let Err(e) = r {
+                    self.error = Some(e);
+                }
+            }
+            Message::CloseError => {
+                self.error = None;
+            }
             Message::LibrarySearchChanged(q) => {
                 self.library_search = q;
                 return self.reload_library();
@@ -3701,6 +4273,9 @@ impl App {
                 if let Some(src) = LibrarySource::ALL.get(i) {
                     self.settings.library_source = *src;
                     self.settings.save();
+                    if *src == LibrarySource::Opds {
+                        return self.load_catalog_quick();
+                    }
                 }
             }
             Message::Key(key) => {
@@ -3712,7 +4287,9 @@ impl App {
             Message::ZoomBootstrapWheel(delta) => {
                 // Same mouse-or-touchpad call as the viewer (Windows reports
                 // touchpads as fractional lines).
-                let physical = self.wheel.is_physical_wheel(&delta, cosmic::iced::time::Instant::now());
+                let physical = self
+                    .wheel
+                    .is_physical_wheel(&delta, cosmic::iced::time::Instant::now());
                 // Ctrl (Cmd) + wheel scrolls a zoomed page; a whole page has
                 // nowhere to scroll, so it doesn't start zooming either.
                 let moving = physical && self.modifiers.command();
@@ -3751,15 +4328,22 @@ impl App {
             Message::Wiki(msg) => return self.update_wiki(msg),
             Message::Dl(msg) => return self.update_downloads(msg),
             Message::FitPage => {
-                let Some(page) = self.page_size(self.current_page) else { return Task::none() };
-                let Some(id) = self.core.main_window_id() else { return Task::none() };
+                let Some(page) = self.page_size(self.current_page) else {
+                    return Task::none();
+                };
+                let Some(id) = self.core.main_window_id() else {
+                    return Task::none();
+                };
                 if page.height == 0 {
                     return Task::none();
                 }
                 let aspect = page.width as f32 / page.height as f32;
                 return window::size(id)
                     .map(move |size| {
-                        Message::FitPageSize(cosmic::iced::Size::new(size.height * aspect, size.height))
+                        Message::FitPageSize(cosmic::iced::Size::new(
+                            size.height * aspect,
+                            size.height,
+                        ))
                     })
                     .map(cosmic::Action::App);
             }
@@ -3779,7 +4363,9 @@ impl App {
         if self.icon_open == Some(open) {
             return Task::none();
         }
-        let Some(id) = self.core.main_window_id() else { return Task::none() };
+        let Some(id) = self.core.main_window_id() else {
+            return Task::none();
+        };
         self.icon_open = Some(open);
         #[cfg(windows)]
         return window_icon::set_native(id, open);
@@ -3800,9 +4386,15 @@ fn fit_note(note: &str) -> Element<'_, Message> {
             .style(|theme: &cosmic::Theme| {
                 let c = theme.cosmic();
                 widget::container::Style {
-                    background: Some(Background::Color(Color { a: 0.85, ..c.bg_color().into() })),
+                    background: Some(Background::Color(Color {
+                        a: 0.85,
+                        ..c.bg_color().into()
+                    })),
                     text_color: Some(c.on_bg_color().into()),
-                    border: cosmic::iced::Border { radius: 999.0.into(), ..Default::default() },
+                    border: cosmic::iced::Border {
+                        radius: 999.0.into(),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 }
             }),
