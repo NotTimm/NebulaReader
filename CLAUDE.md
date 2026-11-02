@@ -263,6 +263,22 @@ the owner's laptop). Last updated 2026-11-01.
   search, Add to/Remove from Library). Progress stays local. No mock
   server yet (tests serve feeds in-process). Testing checklist: issue #12.
   Next: try it on Komga/Kavita.
+- OPDS as a library or a catalog (2026-11-01, unreleased, after
+  0.2.0-beta.1): `opds::Kind` per account, asked after Connect
+  (`OpdsMsg::AddAs`, catalog recommended without a username). A catalog's
+  key adds `\ncatalog` to the hash (a library's key is unchanged), it is
+  never walked: `fetch_library` returns `Account::saved` (books downloaded
+  from it, stored in opds.json with their links) as one root
+  `<account>/downloads`, shown as "Downloads · <catalog>". The Catalog page
+  for a catalog: list rows with thumbnails (memory only, `op.thumbs`),
+  book pages (`BookPage`: editions, summary, related feeds; a feed that's
+  one book opens as its page, as Gutenberg search results do), Download
+  per edition. Removing, stopping or failing a catalog book's download
+  forgets it (`forget_catalog_books`, called from `DlMsg::Remove` and
+  `Finished`). Libraries ask before adding the start feed or a folder of
+  1000+ books (`Confirm`). Tested against Gutenberg's real feed shapes
+  (trimmed copies in opds tests); the owner is trying the look and feel
+  with `cargo run`. Gutenberg's server is slow and sometimes answers 504.
 - Contributions: the owner welcomes outside issues and PRs (2026-10-28).
   `CONTRIBUTING.md` (build steps, code map, an "Ideas to pick up" list to
   keep in step with the open items here), the README's Contributing

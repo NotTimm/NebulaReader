@@ -334,17 +334,37 @@ python3 tools/mock-jellyfin.py ~/Comics/Manga --port 8097
 > been tried against a real Komga, Kavita, calibre-web or other server
 > yet. Reports, good or bad, are very welcome.
 
+Nebula can add an OPDS catalog in one of two ways, and asks which when
+you add it:
+
+- **As a library**, for a server of your own (Komga, Kavita,
+  calibre-web…): the folders you pick sync into your library like a
+  Jellyfin library, and comics stream from the server.
+- **As a catalog**, for big public collections like
+  [Project Gutenberg](https://www.gutenberg.org/ebooks.opds/): you browse
+  and search it, and download the books you want to read. Nothing else
+  is kept: the catalog isn't crawled or copied, and only your downloads
+  show in the library (under "Downloads · <catalog>").
+
+To add one:
+
 1. **Settings → OPDS**, type the catalog's address (for Komga that's
    `https://komga.example/opds/v1.2/catalog`, for Kavita the OPDS URL
-   from your user settings) and, if it asks for one, a username and
-   password. Press **Connect**.
-2. The **Catalog** page opens. Walk its folders, and press **Add to
-   Library** on the ones you want (a library, "All series", "By
-   series"…). Each folder of books becomes a series in your library;
-   books listed straight in a folder you added are grouped by the series
-   in their names. **Choose Folders** in settings comes back here.
-3. Everything you didn't add can still be browsed and searched on the
-   Catalog page.
+   from your user settings, for Project Gutenberg
+   `https://www.gutenberg.org/ebooks.opds/`) and, if it asks for one, a
+   username and password. Press **Connect**, then pick **Add as a
+   library** or **Add as a catalog**.
+2. **As a library:** the **Catalog** page opens. Walk its folders, and
+   press **Add to Library** on the ones you want (a library, "All
+   series", "By series"…). Each folder of books becomes a series in your
+   library; books listed straight in a folder you added are grouped by
+   the series in their names. A folder with a thousand books or more, or
+   the whole catalog, asks first. **Choose Folders** in settings comes
+   back here.
+3. **As a catalog:** browse its folders or search it. Open a book to see
+   its cover, description and editions, and press **Download**. It joins
+   your library; **Remove Download** takes it out again. The search
+   button in the library's header (**Browse catalogs**) comes back here.
 
 How it works:
 
@@ -363,7 +383,8 @@ How it works:
 - A username and password are kept in `opds.json` (owner-only) because
   OPDS has no tokens, and only ever sent to the catalog's own address,
   never to other sites a feed links to.
-- Books only for sale or loan show as **Open in Browser**.
+- Books only for sale or loan, or in a format Nebula can't read (Kindle,
+  PDF downloads from a catalog), show as **Open in Browser**.
 
 ## ComicVine metadata (optional)
 

@@ -284,6 +284,10 @@ impl App {
                                 .spacing(8)
                                 .push(widget::button::standard(fl!("open-file")).on_press(Message::OpenFile))
                                 .push(widget::button::standard(fl!("open-folder")).on_press(Message::OpenFolder))
+                                .push_maybe(self.catalog_to_browse().filter(|_| self.library_search.is_empty()).map(|c| {
+                                    widget::button::standard(fl!("opds-browse-catalog", catalog = c.name()))
+                                        .on_press(Message::Opds(super::opds_view::OpdsMsg::BrowseCatalogs))
+                                }))
                                 .push(
                                     widget::button::suggested(fl!("add-library-folder"))
                                         .on_press(Message::AddLibraryFolder),

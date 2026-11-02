@@ -228,6 +228,8 @@ impl App {
                 return self.pump_downloads();
             }
             DlMsg::Remove(issues) => {
+                // Books from a catalog leave the library with their download.
+                let forget = self.forget_catalog_books(&issues);
                 let Some(db) = &self.db else { return Task::none() };
                 let mut unreachable = 0;
                 for issue in issues {
@@ -251,10 +253,12 @@ impl App {
                     self.dl.error = Some(fl!("dl-unreachable", count = unreachable));
                 }
                 self.dl.reload(db);
-                return self.refresh_views();
+                return Task::batch([forget, self.refresh_views()]);
             }
             DlMsg::Finished(issue, series, result) => {
                 self.dl.current = None;
+                // A catalog book that didn't download doesn't stay.
+                let forget = if result.is_err() { self.forget_catalog_books(std::slice::from_ref(&issue)) } else { Task::none() };
                 match result {
                     Ok((file, size)) => {
                         if let Some(db) = &self.db {
@@ -273,7 +277,7 @@ impl App {
                     }
                 }
                 let next = self.pump_downloads();
-                return Task::batch([next, self.refresh_views()]);
+                return Task::batch([forget, next, self.refresh_views()]);
             }
             DlMsg::Tick => {
                 // On the Downloads page, notice a drive coming or going.

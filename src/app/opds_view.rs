@@ -1,20 +1,37 @@
-//! OPDS catalogs in the app: adding one in Settings, and the Catalog page
-//! for browsing it and picking which of its folders go in the library.
+//! OPDS catalogs in the app: adding one in Settings (as a library or as a
+//! catalog) and the Catalog page for browsing it.
+//!
+//! - **As a library** (a server of your own): the user picks folders on the
+//!   Catalog page and they're synced into the library like a Jellyfin
+//!   library. Adding a very big folder, or the whole catalog, asks first.
+//! - **As a catalog** (a big public collection like Project Gutenberg): the
+//!   Catalog page is a place to browse and search. Nothing is kept from it
+//!   but what's downloaded: a book page shows what the catalog says about a
+//!   book and downloads it, and only then does it join the library (in a
+//!   "Downloads · <catalog>" group). Removing the download removes it.
 //!
 //! Syncing, reading, covers, downloads and offline reading are shared with
 //! Jellyfin (`jellyfin_view`, through [`crate::remote::Account`]); what's
-//! here is only what OPDS needs on top: a catalog has no fixed layout, so
-//! the user walks its folders and adds the ones they want.
+//! here is only what OPDS needs on top.
 
-use cosmic::iced::{Alignment, Length};
+use std::collections::{HashMap, HashSet};
+
+use cosmic::iced::{Alignment, ContentFit, Length};
 use cosmic::widget::{self, icon};
 use cosmic::{app::Task, ApplicationExt, Element};
 
+use super::downloads::{human_size, DlState};
 use super::jellyfin_view::JfMsg;
-use super::{App, AppView, Message};
+use super::{App, AppView, DlMsg, Message};
 use crate::library;
-use crate::opds::{self, Feed, Root, Search};
+use crate::opds::{self, Book, Feed, Folder, Kind, Root, SavedBook, Search};
 use crate::remote::Account as RemoteAccount;
+
+/// A folder with at least this many books asks before it's added to a
+/// library: syncing it puts every one of them in the library.
+const BIG_FOLDER: usize = 1000;
+/// Pictures kept for the Catalog page before starting over.
+const MAX_THUMBS: usize = 400;
 
 #[derive(Clone, Debug)]
 pub enum OpdsMsg {
@@ -23,12 +40,17 @@ pub enum OpdsMsg {
     PasswordInput(String),
     Connect,
     Connected(Result<opds::Account, String>),
+    /// Adds the catalog that answered, as a library or as a catalog.
+    AddAs(Kind),
+    CancelAdd,
     Remove(String),
     /// Opens the Catalog page on an account's start feed.
     Browse(String),
+    /// The library's Browse Catalogs button: the last catalog browsed.
+    BrowseCatalogs,
     /// Goes into a folder: (title, url).
     Open(String, String),
-    /// Goes back up a folder.
+    /// Goes back up a folder (or out of a book's page).
     Back,
     Loaded(u64, Result<Feed, String>),
     More,
@@ -38,7 +60,20 @@ pub enum OpdsMsg {
     SearchFound(u64, String, Result<String, String>),
     /// Adds a folder to the library, or takes it out: (title, url).
     ToggleRoot(String, String),
+    /// Adds the big folder that's waiting for a yes.
+    ConfirmRoot,
+    CancelRoot,
     OpenInBrowser(String),
+    /// A book's page, by its place in the folder shown.
+    ShowBook(usize),
+    /// A picture for the Catalog page arrived: (url, image).
+    Thumb(String, Option<Vec<u8>>),
+    /// Downloads an edition of the book shown.
+    Download(usize),
+    /// Opens a downloaded book, by its catalog id.
+    Read(String),
+    /// Removes a downloaded book (or stops its download), by its catalog id.
+    RemoveSaved(String),
 }
 
 #[derive(Default)]
@@ -48,12 +83,30 @@ pub struct OpdsState {
     password_input: String,
     busy: bool,
     status: Option<String>,
+    /// A catalog that answered, waiting to be added as a library or a catalog.
+    pending: Option<opds::Account>,
     pub(super) browse: Option<Browse>,
     /// Counts loads, so an answer for a folder already left is ignored.
     generation: u64,
     /// Catalogs whose folders changed while a sync was running: synced
     /// again when it ends.
-    pub(super) resync: std::collections::HashSet<String>,
+    pub(super) resync: HashSet<String>,
+    /// Covers and thumbnails on the Catalog page, by URL: kept in memory
+    /// only, never saved. `None` while loading or when it failed.
+    thumbs: HashMap<String, Option<widget::image::Handle>>,
+    /// A big folder waiting for a yes before it's added to a library.
+    confirm: Option<Confirm>,
+    /// The catalog last browsed, for the library's Browse Catalogs button.
+    last_catalog: Option<String>,
+}
+
+#[derive(Clone)]
+struct Confirm {
+    title: String,
+    url: String,
+    count: Option<usize>,
+    /// The catalog's start page: everything in it.
+    whole: bool,
 }
 
 /// Where the Catalog page is.
@@ -67,6 +120,20 @@ pub struct Browse {
     error: Option<String>,
     search: Option<Search>,
     search_input: String,
+    /// A book's page, over the folder.
+    book: Option<BookPage>,
+}
+
+/// One book, as the catalog describes it.
+struct BookPage {
+    /// The book, and its other editions when the catalog has several files
+    /// of it ("with images", "no images").
+    editions: Vec<Book>,
+    /// Other feeds from here: more by the author, its subjects…
+    related: Vec<Folder>,
+    /// The folder was just this book (a search result opens its own feed):
+    /// Back leaves the folder too.
+    whole_feed: bool,
 }
 
 fn load_task(account: opds::Account, url: String, generation: u64, more: bool) -> Task<Message> {
@@ -76,10 +143,42 @@ fn load_task(account: opds::Account, url: String, generation: u64, more: bool) -
     })
 }
 
+/// A feed that's one book, maybe in a few editions, all with one title.
+fn single_book(feed: &Feed) -> bool {
+    let Some(first) = feed.books.first() else { return false };
+    let title = crate::naming::normalize_title(&first.title);
+    feed.books.len() <= 4 && feed.books.iter().all(|b| crate::naming::normalize_title(&b.title) == title)
+}
+
+fn book_page(books: Vec<Book>, extra: &[Folder], whole_feed: bool) -> BookPage {
+    let mut related: Vec<Folder> = Vec::new();
+    for f in books.iter().flat_map(|b| b.related.iter()).chain(extra) {
+        if !related.iter().any(|r| r.url == f.url) {
+            related.push(f.clone());
+        }
+    }
+    BookPage { editions: books, related, whole_feed }
+}
+
 impl App {
     fn browse_account(&self) -> Option<opds::Account> {
         let b = self.op.browse.as_ref()?;
         self.opds.find(&b.account_key).cloned()
+    }
+
+    /// The catalogs added as catalogs (not libraries).
+    fn catalogs(&self) -> impl Iterator<Item = &opds::Account> {
+        self.opds.accounts.iter().filter(|a| a.is_catalog())
+    }
+
+    pub(super) fn has_catalogs(&self) -> bool {
+        self.catalogs().next().is_some()
+    }
+
+    /// The catalog the Browse Catalogs button opens: the last one browsed.
+    pub(super) fn catalog_to_browse(&self) -> Option<&opds::Account> {
+        let last = self.op.last_catalog.as_deref();
+        self.catalogs().find(|a| Some(a.key().as_str()) == last).or_else(|| self.catalogs().next())
     }
 
     /// Loads the folder at the end of the trail.
@@ -91,6 +190,8 @@ impl App {
         b.loading = true;
         b.error = None;
         b.feed = None;
+        b.book = None;
+        self.op.confirm = None;
         self.set_header_title(title);
         load_task(account, url, self.op.generation, false)
     }
@@ -102,6 +203,63 @@ impl App {
             return Task::none();
         }
         Task::done(cosmic::Action::App(Message::Jf(JfMsg::Sync(key))))
+    }
+
+    /// Fetches the pictures not loaded yet (covers, thumbnails).
+    fn load_thumbs(&mut self, urls: Vec<String>) -> Task<Message> {
+        let Some(account) = self.browse_account() else { return Task::none() };
+        if self.op.thumbs.len() + urls.len() > MAX_THUMBS {
+            self.op.thumbs.clear();
+        }
+        let mut tasks = Vec::new();
+        for url in urls {
+            if self.op.thumbs.contains_key(&url) {
+                continue;
+            }
+            self.op.thumbs.insert(url.clone(), None);
+            let account = account.clone();
+            tasks.push(cosmic::task::future(async move {
+                let image = account.image(&url).await.ok();
+                Message::Opds(OpdsMsg::Thumb(url, image))
+            }));
+        }
+        Task::batch(tasks)
+    }
+
+    /// The pictures a folder's list shows (only for catalogs: a library's
+    /// folders are for picking, not browsing).
+    fn feed_thumbs(&mut self, feed: &Feed) -> Task<Message> {
+        if !self.browse_account().is_some_and(|a| a.is_catalog()) {
+            return Task::none();
+        }
+        let urls = feed
+            .folders
+            .iter()
+            .filter_map(|f| f.cover.clone())
+            .chain(feed.books.iter().filter_map(|b| b.links.cover.clone()))
+            .collect();
+        self.load_thumbs(urls)
+    }
+
+    /// Books downloaded from a catalog whose download was removed, stopped
+    /// or failed leave the library: a catalog keeps only its downloads.
+    pub(super) fn forget_catalog_books(&mut self, issues: &[String]) -> Task<Message> {
+        let mut changed: Vec<String> = Vec::new();
+        for issue in issues {
+            let Some((account_key, item_id)) = opds::parse_key(issue) else { continue };
+            let Some(a) = self.opds.find_mut(account_key).filter(|a| a.is_catalog()) else { continue };
+            let before = a.saved.len();
+            a.saved.retain(|b| opds::book_id(&b.id) != item_id);
+            if a.saved.len() != before && !changed.iter().any(|k| k == account_key) {
+                changed.push(account_key.to_string());
+            }
+        }
+        if changed.is_empty() {
+            return Task::none();
+        }
+        self.opds.save();
+        let tasks: Vec<Task<Message>> = changed.into_iter().map(|k| self.sync_opds(k)).collect();
+        Task::batch(tasks)
     }
 
     pub(super) fn update_opds(&mut self, msg: OpdsMsg) -> Task<Message> {
@@ -116,6 +274,7 @@ impl App {
                 }
                 let (user, password) = (self.op.user_input.clone(), self.op.password_input.clone());
                 self.op.busy = true;
+                self.op.pending = None;
                 self.op.status = Some(fl!("opds-connecting", address = url.as_str()));
                 return cosmic::task::future(async move {
                     Message::Opds(OpdsMsg::Connected(opds::connect(&url, &user, &password).await))
@@ -124,21 +283,36 @@ impl App {
             OpdsMsg::Connected(result) => {
                 self.op.busy = false;
                 match result {
-                    Ok(mut account) => {
-                        // Added again: keep the folders it had.
-                        if let Some(old) = self.opds.find(&account.key()) {
-                            account.roots = old.roots.clone();
-                        }
-                        self.op.url_input.clear();
-                        self.op.user_input.clear();
-                        self.op.password_input.clear();
-                        self.op.status = Some(fl!("opds-added", catalog = account.name()));
-                        let key = account.key();
-                        self.opds.upsert(account);
-                        return self.update_opds(OpdsMsg::Browse(key));
+                    // Asks how to add it.
+                    Ok(account) => {
+                        self.op.status = None;
+                        self.op.pending = Some(account);
                     }
                     Err(e) => self.op.status = Some(e),
                 }
+            }
+            OpdsMsg::AddAs(kind) => {
+                let Some(mut account) = self.op.pending.take() else { return Task::none() };
+                account.kind = kind;
+                // Added again the same way: keep its folders and downloads.
+                if let Some(old) = self.opds.find(&account.key()) {
+                    account.roots = old.roots.clone();
+                    account.saved = old.saved.clone();
+                }
+                self.op.url_input.clear();
+                self.op.user_input.clear();
+                self.op.password_input.clear();
+                self.op.status = Some(match kind {
+                    Kind::Library => fl!("opds-added", catalog = account.name()),
+                    Kind::Catalog => fl!("opds-added-catalog", catalog = account.name()),
+                });
+                let key = account.key();
+                self.opds.upsert(account);
+                return self.update_opds(OpdsMsg::Browse(key));
+            }
+            OpdsMsg::CancelAdd => {
+                self.op.pending = None;
+                self.op.status = None;
             }
             OpdsMsg::Remove(key) => {
                 let Some(account) = self.opds.find(&key).cloned() else { return Task::none() };
@@ -160,19 +334,29 @@ impl App {
             }
             OpdsMsg::Browse(key) => {
                 let Some(account) = self.opds.find(&key) else { return Task::none() };
+                if account.is_catalog() {
+                    self.op.last_catalog = Some(key.clone());
+                }
                 self.op.browse = Some(Browse {
-                    account_key: key,
                     trail: vec![(account.name().to_string(), account.url.clone())],
+                    account_key: key,
                     feed: None,
                     loading: false,
                     error: None,
                     search: None,
                     search_input: String::new(),
+                    book: None,
                 });
+                self.op.thumbs.clear();
                 self.set_show_context(false);
                 self.series_page = None;
                 self.app_view = AppView::Catalog;
                 return self.load_current();
+            }
+            OpdsMsg::BrowseCatalogs => {
+                if let Some(key) = self.catalog_to_browse().map(opds::Account::key) {
+                    return self.update_opds(OpdsMsg::Browse(key));
+                }
             }
             OpdsMsg::Open(title, url) => {
                 if let Some(b) = self.op.browse.as_mut() {
@@ -181,12 +365,22 @@ impl App {
                 }
             }
             OpdsMsg::Back => {
-                if let Some(b) = self.op.browse.as_mut().filter(|b| b.trail.len() > 1) {
+                let Some(b) = self.op.browse.as_mut() else { return Task::none() };
+                if let Some(page) = b.book.take() {
+                    // A folder that was only this book goes too.
+                    if page.whole_feed && b.trail.len() > 1 {
+                        b.trail.pop();
+                        return self.load_current();
+                    }
+                    return Task::none();
+                }
+                if b.trail.len() > 1 {
                     b.trail.pop();
                     return self.load_current();
                 }
             }
             OpdsMsg::Loaded(generation, result) => {
+                let catalog = self.browse_account().is_some_and(|a| a.is_catalog());
                 let Some(b) = self.op.browse.as_mut().filter(|_| generation == self.op.generation) else {
                     return Task::none();
                 };
@@ -197,7 +391,15 @@ impl App {
                         if feed.search.is_some() {
                             b.search = feed.search.clone();
                         }
-                        b.feed = Some(feed);
+                        // In a catalog, a folder that's one book is its page.
+                        if catalog && single_book(&feed) {
+                            b.book = Some(book_page(feed.books.clone(), &feed.folders, true));
+                        }
+                        let thumbs = self.feed_thumbs(&feed);
+                        if let Some(b) = self.op.browse.as_mut() {
+                            b.feed = Some(feed);
+                        }
+                        return thumbs;
                     }
                     Err(e) => b.error = Some(e),
                 }
@@ -219,9 +421,10 @@ impl App {
                 b.loading = false;
                 match (result, b.feed.as_mut()) {
                     (Ok(more), Some(feed)) => {
-                        feed.folders.extend(more.folders);
-                        feed.books.extend(more.books);
-                        feed.next = more.next;
+                        feed.folders.extend(more.folders.iter().cloned());
+                        feed.books.extend(more.books.iter().cloned());
+                        feed.next = more.next.clone();
+                        return self.feed_thumbs(&more);
                     }
                     (Err(e), _) => b.error = Some(e),
                     _ => {}
@@ -261,17 +464,99 @@ impl App {
                 }
             }
             OpdsMsg::ToggleRoot(title, url) => {
-                let Some(key) = self.op.browse.as_ref().map(|b| b.account_key.clone()) else { return Task::none() };
+                let Some(b) = self.op.browse.as_ref() else { return Task::none() };
+                let key = b.account_key.clone();
+                let Some(account) = self.opds.find(&key) else { return Task::none() };
+                let adding = !account.roots.iter().any(|r| r.url == url);
+                let confirmed = self.op.confirm.as_ref().is_some_and(|c| c.url == url);
+                if adding && !confirmed {
+                    // How big it is, when the catalog says: the folder's own
+                    // count, or the total of the folder being shown.
+                    let feed = b.feed.as_ref();
+                    let count = feed
+                        .and_then(|f| f.folders.iter().find(|x| x.url == url))
+                        .and_then(|x| x.count)
+                        .or_else(|| feed.filter(|_| b.trail.last().is_some_and(|(_, u)| *u == url)).and_then(|f| f.total));
+                    let whole = url == account.url;
+                    if whole || count.is_some_and(|n| n >= BIG_FOLDER) {
+                        self.op.confirm = Some(Confirm { title, url, count, whole });
+                        return Task::none();
+                    }
+                }
+                self.op.confirm = None;
                 let Some(account) = self.opds.find_mut(&key) else { return Task::none() };
-                if account.roots.iter().any(|r| r.url == url) {
-                    account.roots.retain(|r| r.url != url);
-                } else {
+                if adding {
                     account.roots.push(Root { url, title });
+                } else {
+                    account.roots.retain(|r| r.url != url);
                 }
                 self.opds.save();
                 return self.sync_opds(key);
             }
+            OpdsMsg::ConfirmRoot => {
+                if let Some(c) = self.op.confirm.clone() {
+                    return self.update_opds(OpdsMsg::ToggleRoot(c.title, c.url));
+                }
+            }
+            OpdsMsg::CancelRoot => self.op.confirm = None,
             OpdsMsg::OpenInBrowser(url) => crate::platform::open_url(&url),
+            OpdsMsg::ShowBook(i) => {
+                let Some(b) = self.op.browse.as_mut() else { return Task::none() };
+                let Some(book) = b.feed.as_ref().and_then(|f| f.books.get(i)).cloned() else { return Task::none() };
+                let cover = book.links.cover.clone();
+                b.book = Some(book_page(vec![book], &[], false));
+                return self.load_thumbs(cover.into_iter().collect());
+            }
+            OpdsMsg::Thumb(url, image) => {
+                if let Some(slot) = self.op.thumbs.get_mut(&url) {
+                    *slot = image.map(widget::image::Handle::from_bytes);
+                }
+            }
+            OpdsMsg::Download(i) => {
+                let Some(account) = self.browse_account().filter(|a| a.is_catalog()) else { return Task::none() };
+                let Some(book) = self.op.browse.as_ref().and_then(|b| b.book.as_ref()).and_then(|p| p.editions.get(i)).cloned()
+                else {
+                    return Task::none();
+                };
+                if !book.links.readable_file() {
+                    return Task::none();
+                }
+                let saved = SavedBook::from(&book);
+                let key = account.key();
+                let item_id = opds::book_id(&book.id);
+                let issue_key = account.item_key(&item_id);
+                let series_key = account.saved_series_key(&saved);
+                if let Some(a) = self.opds.find_mut(&key) {
+                    a.saved.retain(|b| b.id != book.id);
+                    a.saved.push(saved);
+                }
+                self.opds.save();
+                // Known before the sync that lists it, so the download can start.
+                opds::add_links(&key, &item_id, book.links.clone());
+                self.jf.extensions.insert(item_id, book.links.ext.clone());
+                let sync = self.sync_opds(key);
+                return Task::batch([
+                    sync,
+                    Task::done(cosmic::Action::App(Message::Dl(DlMsg::Download(vec![(issue_key, series_key)])))),
+                ]);
+            }
+            OpdsMsg::Read(id) => {
+                let Some(account) = self.browse_account() else { return Task::none() };
+                let Some(saved) = account.saved.iter().find(|b| b.id == id) else { return Task::none() };
+                let series = account.saved_series_key(saved);
+                let issue = account.item_key(&opds::book_id(&id));
+                let chapter = self
+                    .db
+                    .as_ref()
+                    .and_then(|db| library::issues_for(db, &series).iter().position(|i| i.path == issue))
+                    .unwrap_or(0);
+                return Task::done(cosmic::Action::App(Message::OpenEntry { key: series, chapter: Some(chapter) }));
+            }
+            OpdsMsg::RemoveSaved(id) => {
+                let Some(account) = self.browse_account() else { return Task::none() };
+                let issue = account.item_key(&opds::book_id(&id));
+                return Task::done(cosmic::Action::App(Message::Dl(DlMsg::Remove(vec![issue]))));
+            }
         }
         Task::none()
     }
@@ -287,23 +572,31 @@ impl App {
         );
         for account in &self.opds.accounts {
             let key = account.key();
-            let folders = if account.roots.is_empty() {
-                fl!("opds-no-folders")
+            let (button, tip) = if account.is_catalog() {
+                (fl!("opds-browse"), fl!("opds-as-catalog", count = account.saved.len()))
             } else {
-                fl!("opds-folder-count", count = account.roots.len())
+                let folders = if account.roots.is_empty() {
+                    fl!("opds-no-folders")
+                } else {
+                    fl!("opds-folder-count", count = account.roots.len())
+                };
+                (fl!("opds-choose-folders"), format!("{}\n{folders}", fl!("opds-as-library")))
             };
-            let choose = widget::tooltip(
-                widget::button::standard(fl!("opds-choose-folders")).on_press(Message::Opds(OpdsMsg::Browse(key.clone()))),
-                widget::text::body(folders),
+            let open = widget::tooltip(
+                widget::button::standard(button).on_press(Message::Opds(OpdsMsg::Browse(key.clone()))),
+                widget::text::body(tip),
                 widget::tooltip::Position::Top,
             );
             let remove = widget::button::standard(fl!("opds-remove")).on_press(Message::Opds(OpdsMsg::Remove(key)));
-            section = section.add(self.remote_account_row(&RemoteAccount::Opds(account.clone()), vec![choose.into()], remove.into()));
+            section = section.add(self.remote_account_row(&RemoteAccount::Opds(account.clone()), vec![open.into()], remove.into()));
         }
         // Download settings live with Jellyfin's when there's a Jellyfin
         // server; here when there are only catalogs.
         if self.jellyfin.accounts.is_empty() && !self.opds.accounts.is_empty() {
             section = section.add(self.downloads_settings());
+        }
+        if let Some(pending) = &self.op.pending {
+            return section.add(add_as_choice(pending)).into();
         }
         let busy = self.op.busy;
         section = section.add(
@@ -341,15 +634,49 @@ impl App {
         section.into()
     }
 
-    /// The Catalog page: one folder of a catalog, its folders (each can be
-    /// added to the library) and books, and the catalog's search.
+    /// A cover or thumbnail from the Catalog page's pictures, or a symbol
+    /// while there's none.
+    fn thumb<'a>(&self, url: Option<&str>, fallback: &'static str, w: f32, h: f32) -> Element<'a, Message> {
+        match url.and_then(|u| self.op.thumbs.get(u)).cloned().flatten() {
+            Some(handle) => widget::image(handle).width(Length::Fixed(w)).height(Length::Fixed(h)).content_fit(ContentFit::Contain).into(),
+            None => widget::container(icon::from_name(fallback).size((w.min(h) * 0.6) as u16))
+                .width(Length::Fixed(w))
+                .height(Length::Fixed(h))
+                .center_x(Length::Fixed(w))
+                .center_y(Length::Fixed(h))
+                .into(),
+        }
+    }
+
+    /// The Catalog page: one folder of a catalog, its folders and books, and
+    /// the catalog's search; or a book's page.
     pub(super) fn view_catalog(&self) -> Element<'_, Message> {
         let mut col = widget::Column::new().spacing(16).padding([16, 20]);
         let (Some(b), Some(account)) = (self.op.browse.as_ref(), self.browse_account()) else {
             return col.into();
         };
+        let catalog = account.is_catalog();
+        if let (true, Some(page)) = (catalog, b.book.as_ref()) {
+            return self.view_book_page(&account, page, b.trail.len() > 1 || !page.whole_feed);
+        }
         let roots = &account.roots;
         let in_library = |url: &str| roots.iter().any(|r| r.url == url);
+
+        // Other catalogs, to switch to.
+        let others: Vec<&opds::Account> = if catalog { self.catalogs().collect() } else { Vec::new() };
+        if others.len() > 1 {
+            let mut row = widget::row::with_capacity(others.len()).spacing(8);
+            for a in others {
+                let key = a.key();
+                let button = if key == b.account_key {
+                    widget::button::suggested(a.name().to_string())
+                } else {
+                    widget::button::standard(a.name().to_string())
+                };
+                row = row.push(button.on_press(Message::Opds(OpdsMsg::Browse(key))));
+            }
+            col = col.push(widget::scrollable::horizontal(row));
+        }
 
         // Where we are: Back, the trail, and this folder's own toggle.
         let (title, url) = b.trail.last().cloned().unwrap_or_default();
@@ -368,11 +695,14 @@ impl App {
                 .push(widget::text::title3(title.clone()))
                 .push(widget::text::caption(crumbs)),
         );
-        if b.feed.as_ref().is_some_and(|f| !f.books.is_empty()) {
+        if !catalog && b.feed.as_ref().is_some_and(|f| !f.books.is_empty()) {
             top = top.push(root_toggle(in_library(&url), &title, &url));
         }
         col = col.push(top);
 
+        if let Some(c) = &self.op.confirm {
+            col = col.push(confirm_banner(c));
+        }
         if b.search.is_some() {
             col = col.push(
                 widget::search_input(fl!("opds-search", catalog = account.name()), &b.search_input)
@@ -381,9 +711,8 @@ impl App {
             );
         }
         if b.trail.len() == 1 {
-            col = col
-                .push(widget::text::body(fl!("opds-pick-help")))
-                .push(widget::text::caption(fl!("opds-untested")));
+            col = col.push(widget::text::body(if catalog { fl!("opds-catalog-help", catalog = account.name()) } else { fl!("opds-pick-help") }));
+            col = col.push(widget::text::caption(fl!("opds-untested")));
         }
         if let Some(e) = &b.error {
             col = col.push(
@@ -398,17 +727,25 @@ impl App {
         if let Some(feed) = &b.feed {
             for f in &feed.folders {
                 let mut facts = Vec::new();
+                if !f.subtitle.is_empty() {
+                    facts.push(f.subtitle.clone());
+                }
                 if let Some(n) = f.count {
                     facts.push(fl!("opds-book-count", count = n));
                 }
                 if in_library(&f.url) {
                     facts.push(fl!("opds-in-library"));
                 }
+                let picture: Element<'_, Message> = if catalog && f.cover.is_some() {
+                    self.thumb(f.cover.as_deref(), "folder-symbolic", 36.0, 52.0)
+                } else {
+                    icon::from_name("folder-symbolic").size(20).into()
+                };
                 let row = widget::row::with_capacity(4)
                     .spacing(12)
                     .align_y(Alignment::Center)
                     .padding([6, 8])
-                    .push(icon::from_name("folder-symbolic").size(20))
+                    .push(picture)
                     .push(
                         widget::column::with_capacity(2)
                             .spacing(2)
@@ -416,7 +753,7 @@ impl App {
                             .push(widget::text::heading(f.title.clone()))
                             .push_maybe((!facts.is_empty()).then(|| widget::text::caption(facts.join("  ·  ")))),
                     )
-                    .push(root_toggle(in_library(&f.url), &f.title, &f.url))
+                    .push_maybe((!catalog).then(|| root_toggle(in_library(&f.url), &f.title, &f.url)))
                     .push(icon::from_name("go-next-symbolic").size(16));
                 col = col.push(
                     widget::mouse_area(row)
@@ -427,7 +764,7 @@ impl App {
             if !feed.books.is_empty() {
                 col = col.push(widget::text::heading(fl!("opds-book-count", count = feed.books.len())));
             }
-            for book in &feed.books {
+            for (i, book) in feed.books.iter().enumerate() {
                 let mut facts = Vec::new();
                 if !book.authors.is_empty() {
                     facts.push(book.authors.join(", "));
@@ -438,9 +775,34 @@ impl App {
                 if !book.links.ext.is_empty() {
                     facts.push(book.links.ext.to_uppercase());
                 }
-                let readable = book.links.readable();
+                let readable = if catalog { book.links.readable_file() } else { book.links.readable() };
                 if !readable {
                     facts.push(fl!("opds-not-readable"));
+                }
+                if catalog && account.has_saved(&book.id) {
+                    facts.push(fl!("downloaded"));
+                }
+                if catalog {
+                    // A catalog's books open their page.
+                    let row = widget::row::with_capacity(4)
+                        .spacing(12)
+                        .align_y(Alignment::Center)
+                        .padding([4, 8])
+                        .push(self.thumb(book.links.cover.as_deref(), "x-office-document-symbolic", 36.0, 52.0))
+                        .push(
+                            widget::column::with_capacity(2)
+                                .spacing(2)
+                                .width(Length::Fill)
+                                .push(widget::text::heading(book.title.clone()))
+                                .push_maybe((!facts.is_empty()).then(|| widget::text::caption(facts.join("  ·  ")))),
+                        )
+                        .push(icon::from_name("go-next-symbolic").size(16));
+                    col = col.push(
+                        widget::mouse_area(row)
+                            .on_press(Message::Opds(OpdsMsg::ShowBook(i)))
+                            .interaction(cosmic::iced::mouse::Interaction::Pointer),
+                    );
+                    continue;
                 }
                 let external = (!readable).then_some(book.external.clone()).flatten();
                 col = col.push(
@@ -472,6 +834,217 @@ impl App {
         }
         widget::scrollable(col).into()
     }
+
+    /// A catalog book's page: what the catalog says about it, and its
+    /// download (one per edition when it has several files).
+    fn view_book_page<'a>(&'a self, account: &opds::Account, page: &'a BookPage, back: bool) -> Element<'a, Message> {
+        let mut col = widget::Column::new().spacing(16).padding([16, 20]);
+        let Some(first) = page.editions.first() else { return col.into() };
+
+        let mut top = widget::row::with_capacity(2).spacing(12).align_y(Alignment::Center);
+        if back {
+            top = top.push(
+                widget::button::icon(icon::from_name("go-previous-symbolic"))
+                    .tooltip(fl!("opds-back"))
+                    .on_press(Message::Opds(OpdsMsg::Back)),
+            );
+        }
+        col = col.push(top.push(widget::text::caption(account.name().to_string()).width(Length::Fill)));
+
+        // What we know: from whichever edition says the most.
+        let summary = page.editions.iter().map(|e| e.summary.as_str()).max_by_key(|s| s.len()).unwrap_or("");
+        let cover = page.editions.iter().find_map(|e| e.links.cover.as_deref());
+        let mut facts = Vec::new();
+        if let Some((name, pos)) = &first.series {
+            facts.push(match pos {
+                Some(n) => format!("{name} #{n}"),
+                None => name.clone(),
+            });
+        }
+        if !first.date.is_empty() {
+            facts.push(first.date.clone());
+        }
+        let mut info = widget::column::with_capacity(5)
+            .spacing(6)
+            .width(Length::Fill)
+            .push(widget::text::title3(first.title.clone()));
+        if !first.authors.is_empty() {
+            info = info.push(widget::text::body(first.authors.join(", ")));
+        }
+        if !facts.is_empty() {
+            info = info.push(widget::text::caption(facts.join("  ·  ")));
+        }
+        // One edition: its button goes here; several: listed below.
+        if page.editions.len() == 1 {
+            info = info.push(widget::container(self.edition_actions(account, first, 0)).padding([6, 0, 0, 0]));
+        }
+        col = col.push(
+            widget::row::with_capacity(2)
+                .spacing(20)
+                .push(self.thumb(cover, "x-office-document-symbolic", 160.0, 240.0))
+                .push(info),
+        );
+
+        if page.editions.len() > 1 {
+            col = col.push(widget::text::heading(fl!("opds-editions")));
+            for (i, e) in page.editions.iter().enumerate() {
+                col = col.push(
+                    widget::row::with_capacity(2)
+                        .spacing(12)
+                        .align_y(Alignment::Center)
+                        .padding([2, 8])
+                        .push(widget::text::body(edition_label(e)).width(Length::Fill))
+                        .push(self.edition_actions(account, e, i)),
+                );
+            }
+        }
+        if !summary.is_empty() {
+            col = col.push(widget::text::body(summary.to_string()));
+        }
+        if !page.related.is_empty() {
+            col = col.push(widget::text::heading(fl!("opds-related")));
+            for f in &page.related {
+                let row = widget::row::with_capacity(3)
+                    .spacing(12)
+                    .align_y(Alignment::Center)
+                    .padding([4, 8])
+                    .push(icon::from_name("folder-symbolic").size(16))
+                    .push(widget::text::body(f.title.trim_end_matches('…').to_string()).width(Length::Fill))
+                    .push(icon::from_name("go-next-symbolic").size(16));
+                col = col.push(
+                    widget::mouse_area(row)
+                        .on_press(Message::Opds(OpdsMsg::Open(f.title.trim_end_matches('…').to_string(), f.url.clone())))
+                        .interaction(cosmic::iced::mouse::Interaction::Pointer),
+                );
+            }
+        }
+        widget::scrollable(col).into()
+    }
+
+    /// Download, its progress, or Read / Remove Download for one edition.
+    fn edition_actions<'a>(&self, account: &opds::Account, book: &Book, i: usize) -> Element<'a, Message> {
+        if !book.links.readable_file() {
+            let mut row = widget::row::with_capacity(2).spacing(8).align_y(Alignment::Center);
+            row = row.push(widget::text::caption(fl!("opds-not-readable")));
+            if let Some(u) = book.external.clone().or_else(|| book.links.file.clone()) {
+                row = row.push(widget::button::standard(fl!("opds-open-in-browser")).on_press(Message::Opds(OpdsMsg::OpenInBrowser(u))));
+            }
+            return row.into();
+        }
+        let issue = account.item_key(&opds::book_id(&book.id));
+        let state = if account.has_saved(&book.id) { self.dl.state(&issue) } else { DlState::None };
+        let remove = Message::Opds(OpdsMsg::RemoveSaved(book.id.clone()));
+        let busy = |ring: Element<'a, Message>, label: String| -> Element<'a, Message> {
+            widget::button::custom(
+                widget::row::with_capacity(2).spacing(8).align_y(Alignment::Center).push(ring).push(widget::text::body(label)),
+            )
+            .class(cosmic::theme::Button::Standard)
+            .on_press(remove.clone())
+            .into()
+        };
+        match state {
+            DlState::None => {
+                let label = match book.links.size {
+                    Some(size) => fl!("opds-download-size", size = human_size(size)),
+                    None => fl!("opds-download"),
+                };
+                widget::button::suggested(label)
+                    .leading_icon(icon::from_name("folder-download-symbolic"))
+                    .on_press(Message::Opds(OpdsMsg::Download(i)))
+                    .into()
+            }
+            DlState::Queued => busy(widget::indeterminate_circular().size(14.0).bar_height(2.0).into(), fl!("dl-waiting-cancel")),
+            DlState::Running(f) => busy(
+                widget::determinate_circular(f).size(14.0).bar_height(2.0).into(),
+                fl!("dl-running-cancel", percent = format!("{:.0}", f * 100.0)),
+            ),
+            DlState::Done => widget::row::with_capacity(2)
+                .spacing(8)
+                .push(widget::button::suggested(fl!("read")).on_press(Message::Opds(OpdsMsg::Read(book.id.clone()))))
+                .push(widget::button::standard(fl!("remove-download")).on_press(remove))
+                .into(),
+            DlState::Unavailable => widget::tooltip(
+                widget::button::standard(fl!("downloaded")).leading_icon(icon::from_name("drive-removable-media-symbolic")),
+                widget::text(fl!("dl-on-missing-drive")),
+                widget::tooltip::Position::Bottom,
+            )
+            .into(),
+        }
+    }
+}
+
+/// An edition's name: the catalog's ("EPUB3 (E-readers…)") or its type,
+/// and its size.
+fn edition_label(book: &Book) -> String {
+    let name = if book.links.label.is_empty() { book.links.ext.to_uppercase() } else { book.links.label.clone() };
+    match book.links.size {
+        Some(size) => format!("{name}  ·  {}", human_size(size)),
+        None => name,
+    }
+}
+
+/// Settings: how to add a catalog that answered, with the likelier way
+/// first: one you sign in to is probably your own server.
+fn add_as_choice<'a>(account: &opds::Account) -> Element<'a, Message> {
+    let recommended = if account.user.is_empty() { Kind::Catalog } else { Kind::Library };
+    let card = |kind: Kind| -> Element<'a, Message> {
+        let (title, body) = match kind {
+            Kind::Library => (fl!("opds-add-as-library"), fl!("opds-add-as-library-help")),
+            Kind::Catalog => (fl!("opds-add-as-catalog"), fl!("opds-add-as-catalog-help")),
+        };
+        let mut content = widget::column::with_capacity(3)
+            .spacing(4)
+            .padding(8)
+            .width(Length::Fill)
+            .push(widget::text::heading(title))
+            .push(widget::text::caption(body));
+        if kind == recommended {
+            content = content.push(widget::text::caption_heading(fl!("opds-recommended")));
+        }
+        widget::button::custom(content)
+            .class(cosmic::theme::Button::Standard)
+            .width(Length::Fill)
+            .on_press(Message::Opds(OpdsMsg::AddAs(kind)))
+            .into()
+    };
+    let (first, second) = if recommended == Kind::Library { (Kind::Library, Kind::Catalog) } else { (Kind::Catalog, Kind::Library) };
+    widget::Column::new()
+        .spacing(8)
+        .push(widget::text::body(fl!("opds-how-to-add", catalog = account.name())))
+        .push(card(first))
+        .push(card(second))
+        .push(widget::button::link(fl!("cancel")).on_press(Message::Opds(OpdsMsg::CancelAdd)))
+        .into()
+}
+
+/// Asks before a very big folder, or the whole catalog, goes in a library.
+fn confirm_banner<'a>(c: &Confirm) -> Element<'a, Message> {
+    let text = if c.whole {
+        fl!("opds-big-whole")
+    } else {
+        fl!("opds-big-folder", folder = c.title.as_str(), count = c.count.unwrap_or(BIG_FOLDER))
+    };
+    widget::container(
+        widget::column::with_capacity(2)
+            .spacing(8)
+            .push(
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(icon::from_name("dialog-warning-symbolic").size(16))
+                    .push(widget::text::body(text)),
+            )
+            .push(
+                widget::row::with_capacity(2)
+                    .spacing(8)
+                    .push(widget::button::standard(fl!("cancel")).on_press(Message::Opds(OpdsMsg::CancelRoot)))
+                    .push(widget::button::destructive(fl!("opds-add-anyway")).on_press(Message::Opds(OpdsMsg::ConfirmRoot))),
+            ),
+    )
+    .padding(12)
+    .class(cosmic::theme::Container::Card)
+    .width(Length::Fill)
+    .into()
 }
 
 /// Add to Library / Remove from Library for one folder.

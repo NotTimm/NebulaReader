@@ -1559,6 +1559,14 @@ impl Application for App {
                         .width(Length::Fixed(220.0))
                         .into(),
                 );
+                // OPDS catalogs added as catalogs: browse them.
+                if self.has_catalogs() {
+                    els.push(tip(
+                        widget::button::icon(icon::from_name("system-search-symbolic"))
+                            .on_press(Message::Opds(opds_view::OpdsMsg::BrowseCatalogs)),
+                        fl!("opds-browse-catalogs"),
+                    ));
+                }
                 // Downloads, once there are some.
                 if !self.dl.is_empty() {
                     els.push(tip(
