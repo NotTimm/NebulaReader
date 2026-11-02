@@ -5,6 +5,8 @@
 pub mod look;
 pub mod disk;
 pub mod status;
+#[cfg(windows)]
+pub mod pinch;
 
 use std::path::PathBuf;
 

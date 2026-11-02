@@ -3899,6 +3899,12 @@ impl App {
             Message::WindowOpened => {
                 // `update` re-sends the icon after this.
                 self.icon_open = None;
+                // Touchpad pinches arrive as Ctrl-flagged wheel messages
+                // winit doesn't read the Ctrl from (platform/pinch.rs).
+                #[cfg(windows)]
+                if let Some(id) = self.core.main_window_id() {
+                    return crate::platform::pinch::hook(id);
+                }
             }
             Message::SetLook(idx) => {
                 if let Some(look) = Look::ALL.get(idx).copied() {
