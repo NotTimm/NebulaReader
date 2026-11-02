@@ -108,6 +108,7 @@ pub enum WikiMsg {
     SelectEnd,
     /// A press somewhere that isn't text.
     SelectClear,
+    SelectAll,
     /// The mouse's height in the window while a selection is dragged.
     DragAt(f32),
     /// Where the page's scrolling area is in the window.
@@ -160,6 +161,24 @@ impl KeyScroll {
             }
         }
         Some(moved)
+    }
+}
+
+/// The right-click menu on a Wikipedia page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAction {
+    Copy,
+    SelectAll,
+}
+
+impl cosmic::widget::menu::Action for TextAction {
+    type Message = Message;
+
+    fn message(&self) -> Message {
+        Message::Wiki(match self {
+            TextAction::Copy => WikiMsg::Copy,
+            TextAction::SelectAll => WikiMsg::SelectAll,
+        })
     }
 }
 
@@ -662,6 +681,7 @@ impl App {
                 Key::Character(c) if c.eq_ignore_ascii_case("c") && self.modifiers.command() && self.wiki.sel.is_some() => {
                     Some(self.update_wiki(WikiMsg::Copy))
                 }
+                Key::Character(c) if c.eq_ignore_ascii_case("a") && self.modifiers.command() => Some(self.update_wiki(WikiMsg::SelectAll)),
                 Key::Character(c) if article && !self.modifiers.command() && c.eq_ignore_ascii_case("c") => {
                     Some(self.update_wiki(WikiMsg::ToggleToc))
                 }
@@ -961,6 +981,14 @@ impl App {
                     self.wiki.sel = None;
                 }
             }
+            WikiMsg::SelectAll => {
+                let texts = self.wiki.texts.borrow();
+                if let Some(last) = texts.len().checked_sub(1) {
+                    let end = (last, texts[last].len());
+                    drop(texts);
+                    self.wiki.sel = Some(TextSel { anchor: (0, 0), focus: end, dragging: false });
+                }
+            }
             WikiMsg::Copy => {
                 if let Some(text) = self.selected_text() {
                     return cosmic::iced::clipboard::write(text);
@@ -1170,6 +1198,17 @@ impl App {
             .id(scroll_id())
             .width(Length::Fill)
             .height(Length::Fill);
+        // Right-click: Copy (when something's selected) and Select All.
+        let page = {
+            use cosmic::widget::menu::{self, Item};
+            let copy = if self.wiki.sel.is_some_and(|s| { let (a, b) = s.ordered(); a != b }) {
+                Item::Button(fl!("wiki-copy"), None, TextAction::Copy)
+            } else {
+                Item::ButtonDisabled(fl!("wiki-copy"), None, TextAction::Copy)
+            };
+            let items = vec![copy, Item::Button(fl!("wiki-select-all"), None, TextAction::SelectAll)];
+            widget::context_menu(page, Some(menu::items(&HashMap::new(), items)))
+        };
         // The contents stay beside the article as it scrolls, like the site's.
         match (&self.wiki.page, &self.wiki.article) {
             (Some(WikiPage::Article(_)), Some(a)) if !self.wiki.toc_hidden && !self.wiki.loading && self.wiki.error.is_none() => {

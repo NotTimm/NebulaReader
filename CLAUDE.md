@@ -290,7 +290,8 @@ the owner's laptop). Last updated 2026-11-02.
   `window::frames`). Text can be selected across paragraphs (patch 17:
   `Rich::on_select`/`selection`; the app keeps `TextSel` over keys
   handed out in reading order as `view` lays texts out, `wiki.texts`):
-  drag, double-click a word, triple-click a text, Ctrl+C copies, Linux
+  drag, double-click a word, triple-click a text, Ctrl+C copies, Ctrl+A
+  and the page's right-click menu (`TextAction`: Copy, Select All), Linux
   primary selection on release. Dragging near or past the page's top or
   bottom edge scrolls it (`drag_scroll_speed`: 30 px band, faster further
   out, up to 3000 px/s); the texts re-hit-test every frame while dragging
