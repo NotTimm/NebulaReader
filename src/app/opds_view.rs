@@ -201,6 +201,16 @@ impl Browse {
     }
 }
 
+/// The trail for a place opened from the library's shelf: under the
+/// catalog's start, unless it is the start.
+fn shelf_trail(account: &opds::Account, title: String, url: String) -> Vec<(String, String)> {
+    let mut trail = vec![(account.name().to_string(), account.url.clone())];
+    if url != account.url {
+        trail.push((title, url));
+    }
+    trail
+}
+
 fn at_catalog_start_feed(browse: &Browse, account: &opds::Account) -> bool {
     browse.trail.len() == 1
         && browse
@@ -523,16 +533,23 @@ impl App {
                 }
             }
             OpdsMsg::BrowseTo(key, title, url) => {
-                if self.opds.find(&key).is_none() {
+                let Some(account) = self.opds.find(&key) else {
                     return Task::none();
-                }
+                };
+                // Under the catalog's start, as if opened from there: the
+                // trail reads "Project Gutenberg › Popular", and Back and
+                // Esc go up to the catalog, not straight home.
+                let trail = shelf_trail(account, title, url);
+                // The catalog's search, from its start feed when the shelf
+                // has it.
+                let search = self.op.quick.get(&key).and_then(|q| q.feed.as_ref()).and_then(|f| f.search.clone());
                 self.op.browse = Some(Browse {
-                    trail: vec![(title, url)],
+                    trail,
                     account_key: key.clone(),
                     feed: None,
                     loading: false,
                     error: None,
-                    search: None,
+                    search,
                     search_input: String::new(),
                     search_at: None,
                     book: None,
@@ -598,11 +615,17 @@ impl App {
                     }
                 }
                 if let Ok(url) = result {
-                    return self.update_opds(OpdsMsg::BrowseTo(
+                    let task = self.update_opds(OpdsMsg::BrowseTo(
                         key,
                         fl!("opds-search-results", query = query.as_str()),
                         url,
                     ));
+                    // Results, so a search from them replaces them.
+                    if let Some(b) = self.op.browse.as_mut() {
+                        b.search_at = Some(1);
+                        b.search_input = query;
+                    }
+                    return task;
                 }
             }
             OpdsMsg::Open(title, url) => {
@@ -1796,6 +1819,25 @@ mod tests {
         assert!(b.up() && b.up());
         assert!(!b.up());
         assert_eq!(titles(&b), ["Catalog"]);
+    }
+
+    #[test]
+    fn shelf_sections_open_under_the_catalog() {
+        let account = opds::Account {
+            url: "https://www.gutenberg.org/ebooks.opds/".into(),
+            title: "Project Gutenberg".into(),
+            ..Default::default()
+        };
+        let trail = shelf_trail(&account, "Popular".into(), "https://www.gutenberg.org/ebooks/search.opds/?sort_order=downloads".into());
+        let titles: Vec<&str> = trail.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(titles, ["Project Gutenberg", "Popular"]);
+        // So Back goes to the catalog, not home.
+        let mut b = browse();
+        b.trail = trail;
+        assert!(b.up());
+        assert!(at_catalog_start_feed(&b, &account));
+        // The start itself isn't doubled.
+        assert_eq!(shelf_trail(&account, "Start".into(), account.url.clone()).len(), 1);
     }
 
     #[test]
