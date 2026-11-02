@@ -339,6 +339,14 @@ the owner's laptop). Last updated 2026-11-02.
   iced row can't fill height on a scrolling page); columns weighted by
   their longest text (`column_weights`: capped at 32, at least the longest
   word + 2); header cells get the grey band.
+- Frosted glass (2026-11-02): outside theater mode the comic reader
+  paints no background of its own with the Theme background (libcosmic's
+  frame shows the window's, frosted on COSMIC); Black is black at
+  `background_opacity` (slider shown for Black only); theater stays
+  black. Books: `BookSettings::frosted` (on by default) applies only where
+  the window is frosted (`App::window_frosted` = libcosmic
+  `Core::frosted`), and the switch shows only then; System theme = no
+  page background, others keep `FROSTED_TINT` (0.75) of their colour.
 - Book reader's top bar: "Chapter n of m" counts only parts whose title
   names a numbered chapter (`epub::is_numbered_chapter`,
   `EpubBook::chapter_label`); others show their title.

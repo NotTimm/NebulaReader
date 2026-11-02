@@ -133,7 +133,8 @@ pub struct BookSettings {
     pub layout: BookLayout,
     /// The page lets the window's background show through (frosted glass
     /// on COSMIC): with the System theme it's the window's own, with the
-    /// others their colour, tinting it.
+    /// others their colour, tinting it. On by default; it only applies
+    /// where the window is frosted (`App::book_frosted`).
     pub frosted: bool,
 }
 
@@ -153,7 +154,8 @@ impl Default for BookSettings {
             theme: BookTheme::Auto,
             justify: true,
             layout: BookLayout::Page,
-            frosted: false,
+            // On, but it only takes effect where the window is frosted.
+            frosted: true,
         }
     }
 }
@@ -258,5 +260,21 @@ impl Settings {
         if let Ok(json) = serde_json::to_vec_pretty(self) {
             let _ = std::fs::write(path, json);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn book_frosted_glass_is_on_unless_turned_off() {
+        // Saved before the switch existed: on.
+        let old: BookSettings = serde_json::from_str(r#"{"font_size": 21, "justify": false}"#).unwrap();
+        assert!(old.frosted);
+        assert_eq!(old.font_size, 21);
+        // Turned off: stays off.
+        let off: BookSettings = serde_json::from_str(r#"{"frosted": false}"#).unwrap();
+        assert!(!off.frosted);
     }
 }
