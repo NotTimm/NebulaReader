@@ -576,8 +576,6 @@ pub fn collect_sources(path: &Path) -> Result<(Vec<PageSource>, Vec<ChapterInfo>
 #[derive(Clone, Debug)]
 pub struct IssueFile {
     pub path: PathBuf,
-    /// File (or directory) name, extension included.
-    pub name: String,
 }
 
 /// Lists a series folder's issues (recursively), in reading order, without
@@ -588,11 +586,11 @@ pub fn list_issue_files(dir: &Path) -> Vec<IssueFile> {
     find_sources(dir, &mut raw);
     raw.sort_by(|(a, _), (b, _)| natural_key(a).cmp(&natural_key(b)));
     raw.into_iter()
-        .map(|(name, source)| {
+        .map(|(_, source)| {
             let path = match source {
                 Source::Zip(p) | Source::Rar(p) | Source::ImageDir(p) => p,
             };
-            IssueFile { path, name }
+            IssueFile { path }
         })
         .collect()
 }

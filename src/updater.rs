@@ -694,6 +694,7 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
         fs::rename(&aside, &exe).unwrap();
     }
 
+    #[cfg(any(windows, target_os = "macos"))]
     fn wait_for(path: &Path, secs: u64) -> bool {
         for _ in 0..secs * 10 {
             if path.exists() {

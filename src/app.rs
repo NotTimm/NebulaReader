@@ -560,7 +560,6 @@ fn build_query(entry: &SeriesEntry, issues: &[IssueEntry]) -> metadata::SeriesQu
     metadata::SeriesQuery {
         search,
         year: entry.year,
-        volume: entry.volume,
         issue_numbers: issues.iter().filter(|i| !i.number.is_empty()).map(|i| i.number.clone()).collect(),
         looks_manga,
     }

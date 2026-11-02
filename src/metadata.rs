@@ -14,7 +14,6 @@ use crate::naming::{normalize_number, similarity};
 pub struct SeriesQuery {
     pub search: String,
     pub year: Option<u32>,
-    pub volume: Option<u32>,
     /// Normalized issue numbers of the local issues.
     pub issue_numbers: Vec<String>,
     /// Chapters named "Ch N…" (manga-tui etc.) rather than "#N"/"001".
@@ -443,7 +442,6 @@ mod tests {
             let q = SeriesQuery {
                 search: c.search.clone(),
                 year: c.year,
-                volume: c.volume,
                 issue_numbers: (1..=*n).map(|i| i.to_string()).collect(),
                 looks_manga: *manga,
             };

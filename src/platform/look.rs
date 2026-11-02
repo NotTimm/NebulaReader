@@ -487,7 +487,9 @@ mod macos {
     }
 
     /// `AppleAccentColor` is an index into the system palette; unset means
-    /// the default "multicolor", which is blue.
+    /// the default "multicolor", which is blue. (Tested everywhere, used
+    /// on a Mac.)
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn accent(index: Option<i32>) -> Srgb {
         let hex = match index {
             Some(-1) => 0x8c8c8c, // graphite

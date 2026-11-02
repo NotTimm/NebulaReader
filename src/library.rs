@@ -44,7 +44,6 @@ pub struct SeriesEntry {
     /// Canonical online name when the match was confident; else empty.
     pub display_title: String,
     pub description: String,
-    pub status: String,
     pub genres: String,
     pub publisher: String,
     pub year: Option<u32>,
@@ -64,7 +63,6 @@ pub struct SeriesEntry {
     pub total_pages: usize,
     pub date_added: i64,
     pub last_opened: i64,
-    pub is_series: bool,
     pub is_epub: bool,
     // Derived from the issues table.
     pub issue_count: usize,
@@ -118,7 +116,6 @@ impl SeriesEntry {
 #[derive(Clone, Debug, Default)]
 pub struct IssueEntry {
     pub id: i64,
-    pub series_path: String,
     pub path: String,
     pub idx: usize,
     pub name: String,
@@ -728,7 +725,6 @@ pub fn issues_for(conn: &Connection, series_path: &str) -> Vec<IssueEntry> {
     st.query_map(params![series_path], |r| {
         Ok(IssueEntry {
             id: r.get(0)?,
-            series_path: r.get(1)?,
             path: r.get(2)?,
             idx: r.get::<_, i64>(3)? as usize,
             name: r.get(4)?,
@@ -1177,7 +1173,6 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SeriesEntry> {
         title: row.get(2)?,
         display_title: row.get(3)?,
         description: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-        status: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
         genres: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
         publisher: row.get(7)?,
         year: row.get::<_, Option<i64>>(8)?.map(|v| v as u32),
@@ -1195,7 +1190,6 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SeriesEntry> {
         total_pages: row.get::<_, i64>(20)? as usize,
         date_added: row.get(21)?,
         last_opened: row.get(22)?,
-        is_series: row.get::<_, i64>(23)? != 0,
         issue_count: row.get::<_, i64>(24)? as usize,
         issues_read: row.get::<_, i64>(25)? as usize,
         current_issue_fraction: row.get::<_, Option<f64>>(26)?.unwrap_or(0.0) as f32,
