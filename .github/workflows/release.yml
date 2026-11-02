@@ -269,7 +269,7 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           spec=packaging/fedora/nebula-reader.spec
-          v="$(sed -n 's/^Version: *//p' "$spec")"
+          v="$(sed -n 's/^Version: *//p' "$spec" | tr '~' '-')"
           git archive --prefix="NebulaReader-$v/" -o "rpmbuild/SOURCES/NebulaReader-$v.tar.gz" HEAD
           dnf builddep -y "$spec"
           rpmbuild --define "_topdir $PWD/rpmbuild" -ba "$spec"

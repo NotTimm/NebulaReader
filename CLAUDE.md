@@ -181,7 +181,8 @@ the owner's laptop). Last updated 2026-11-01.
   and the second Dependabot batch, as a GitHub pre-release. Betas (any
   version with a hyphen) skip the `copr` and `winget` jobs, and the
   update check (`releases/latest`) never sees them, so nobody is offered
-  one; the Fedora spec stays at the last stable version. The metainfo
+  one. The Fedora spec carries `0.2.0~beta.1` (`upstream_version`
+  turns it back into the tag form for its sources). The metainfo
   entry is `type="development"`.
 - Released 0.1.16 (2026-10-28): Continue Reading counts chapters with a
   page saved on the Jellyfin server (`SeriesEntry::issues_in_progress`);

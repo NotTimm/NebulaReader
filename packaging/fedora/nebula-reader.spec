@@ -8,7 +8,9 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.1.16
+Version:        0.2.0~beta.1
+# The release tag and file names use the upstream form (0.2.0-beta.1).
+%global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
 Summary:        Comic, manga and ebook reader with Jellyfin support
 
@@ -48,8 +50,8 @@ SourceLicense:  GPL-3.0-only
 # Zlib OR Apache-2.0 OR MIT
 License:        (Apache-2.0 OR MIT) AND BSD-3-Clause AND (MIT OR Apache-2.0) AND Unicode-3.0 AND (0BSD OR MIT OR Apache-2.0) AND Apache-2.0 AND Apache-2.0 AND MIT AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR GPL-2.0-only) AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND BSD-2-Clause AND (BSD-2-Clause OR Apache-2.0 OR MIT) AND BSD-3-Clause AND (BSD-3-Clause OR Apache-2.0) AND (BSD-3-Clause OR MIT OR Apache-2.0) AND BSL-1.0 AND CC0-1.0 AND (CC0-1.0 OR MIT-0) AND (CC0-1.0 OR MIT-0 OR Apache-2.0) AND GPL-3.0-only AND ISC AND MIT AND (MIT OR Apache-2.0) AND (MIT OR Apache-2.0 OR CC0-1.0) AND (MIT OR Apache-2.0 OR LGPL-2.1-or-later) AND (MIT OR Apache-2.0 OR Zlib) AND (MIT OR LGPL-3.0-or-later) AND (MIT OR Zlib OR Apache-2.0) AND MPL-2.0 AND Unicode-3.0 AND (Unlicense OR MIT) AND Zlib AND (Zlib OR Apache-2.0 OR MIT) AND bzip2-1.0.6
 URL:            https://github.com/NotTimm/NebulaReader
-Source0:        %{url}/archive/v%{version}/NebulaReader-%{version}.tar.gz
-Source1:        %{url}/releases/download/v%{version}/%{name}-%{version}-vendor.tar.xz
+Source0:        %{url}/archive/v%{upstream_version}/NebulaReader-%{upstream_version}.tar.gz
+Source1:        %{url}/releases/download/v%{upstream_version}/%{name}-%{upstream_version}-vendor.tar.xz
 
 %global app_id io.github.NotTimm.NebulaReader
 
@@ -76,7 +78,7 @@ metadata on AniList and ComicVine. It follows the COSMIC, KDE or GNOME
 look.
 
 %prep
-%autosetup -n NebulaReader-%{version} -p1 -a1
+%autosetup -n NebulaReader-%{upstream_version} -p1 -a1
 %cargo_prep -v vendor
 # %%cargo_prep only redirects crates.io; libcosmic and its git
 # dependencies are vendored too.
@@ -119,6 +121,11 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Sun Nov 01 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0~beta.1-1
+- OPDS catalogs as a library source (untested on real servers)
+- Translations: English and Spanish, language setting
+- Up and Down scroll a zoomed or fitted comic page
+
 * Wed Oct 28 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.1.16-1
 - Continue Reading shows series started on the Jellyfin server
 - Link the system libzstd
