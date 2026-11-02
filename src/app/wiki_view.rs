@@ -102,6 +102,13 @@ pub enum WikiMsg {
     ScrollFrame(std::time::Instant),
     /// The window's height, for the arrows' speed.
     WindowHeight(f32),
+    /// Pressing on or dragging over a text (by its key).
+    Select(usize, cosmic::iced::widget::text::Select),
+    /// The left button let go.
+    SelectEnd,
+    /// A press somewhere that isn't text.
+    SelectClear,
+    Copy,
 }
 
 /// Up or Down held on a Wikipedia page: it scrolls at a speed that follows
@@ -179,6 +186,10 @@ pub struct WikiState {
     /// The picture shown full window, by its place in `gallery`.
     viewer: Option<usize>,
     key_scroll: Option<KeyScroll>,
+    sel: Option<TextSel>,
+    /// The page's selectable texts in reading order, as the last `view`
+    /// laid them out (a text's place here is its key in [`TextSel`]).
+    texts: std::cell::RefCell<Vec<String>>,
     /// The window's height (0 until it's known).
     window_height: f32,
 }
@@ -279,6 +290,31 @@ fn decode(bytes: &[u8], max: u32) -> Result<(u32, u32, Vec<u8>), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_selection_covers_the_texts_between_its_ends() {
+        let sel = TextSel { anchor: (4, 7), focus: (2, 3), dragging: false };
+        assert_eq!(sel.range(1), None);
+        assert_eq!(sel.range(2), Some((3, usize::MAX)));
+        assert_eq!(sel.range(3), Some((0, usize::MAX)));
+        assert_eq!(sel.range(4), Some((0, 7)));
+        assert_eq!(sel.range(5), None);
+        let one = TextSel { anchor: (1, 9), focus: (1, 2), dragging: true };
+        assert_eq!(one.range(1), Some((2, 9)));
+        let empty = TextSel { anchor: (1, 2), focus: (1, 2), dragging: true };
+        assert_eq!(empty.range(1), None);
+    }
+
+    #[test]
+    fn double_click_takes_the_word() {
+        let t = "The cat’s café, 1990.";
+        assert_eq!(&t[..][word_at(t, 6).0..word_at(t, 6).1], "cat’s");
+        let (a, b) = word_at(t, t.find("caf").unwrap() + 1);
+        assert_eq!(&t[a..b], "café");
+        assert_eq!(word_at(t, 3), (0, 3));
+        assert_eq!(slice("héllo", 2, usize::MAX), "éllo");
+        assert_eq!(slice("héllo", 0, 2), "hé");
+    }
 
     #[test]
     fn pictures_are_scaled_to_the_size_shown() {
@@ -403,25 +439,56 @@ fn run_span<'a>(r: &Run, text: std::borrow::Cow<'a, str>, pal: &Palette, size: f
     }
 }
 
-fn line_text<'a>(line: &'a Line, pal: &Palette, size: f32) -> Element<'a, Message> {
-    let spans: Vec<Span<'a, String, Font>> = line.iter().map(|r| run_span(r, r.text.as_str().into(), pal, size)).collect();
-    rich_text(spans)
-        .size(size)
-        .line_height(LineHeight::Relative(LINE))
-        .on_link_click(|l| Message::Wiki(WikiMsg::Link(l)))
-        .width(Length::Fill)
-        .into()
+type Rich<'a> = cosmic::iced::widget::text::Rich<'a, String, Message, cosmic::Theme, cosmic::Renderer>;
+
+/// A place in the page's selectable text: which text (in reading order)
+/// and a byte offset into it.
+type TextPos = (usize, usize);
+
+/// Text selected on a Wikipedia page, possibly across many paragraphs.
+#[derive(Clone, Copy, Debug)]
+struct TextSel {
+    anchor: TextPos,
+    focus: TextPos,
+    /// The left button is still down.
+    dragging: bool,
 }
 
-/// [`line_text`] for a line made on the spot.
-fn owned_text<'a>(line: Line, pal: &Palette, size: f32) -> Element<'a, Message> {
-    let spans: Vec<Span<'a, String, Font>> = line.iter().map(|r| run_span(r, r.text.clone().into(), pal, size)).collect();
-    rich_text(spans)
-        .size(size)
-        .line_height(LineHeight::Relative(LINE))
-        .on_link_click(|l| Message::Wiki(WikiMsg::Link(l)))
-        .width(Length::Fill)
-        .into()
+impl TextSel {
+    fn ordered(&self) -> (TextPos, TextPos) {
+        if self.anchor <= self.focus { (self.anchor, self.focus) } else { (self.focus, self.anchor) }
+    }
+
+    /// The selected part of text `k`; an end of `usize::MAX` is its end.
+    fn range(&self, k: usize) -> Option<(usize, usize)> {
+        let (s, e) = self.ordered();
+        if s == e || k < s.0 || k > e.0 {
+            return None;
+        }
+        Some((if k == s.0 { s.1 } else { 0 }, if k == e.0 { e.1 } else { usize::MAX }))
+    }
+}
+
+/// The word around a byte offset of `text`.
+fn word_at(text: &str, offset: usize) -> (usize, usize) {
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'' || c == '’';
+    let offset = offset.min(text.len());
+    let start = text[..offset].char_indices().rev().take_while(|(_, c)| word(*c)).last().map_or(offset, |(i, _)| i);
+    let end = text[offset..].char_indices().find(|(_, c)| !word(*c)).map_or(text.len(), |(i, _)| offset + i);
+    (start, end)
+}
+
+/// `text[start..end]`, with the ends clamped to the text and its characters.
+fn slice(text: &str, start: usize, end: usize) -> &str {
+    let mut start = start.min(text.len());
+    while !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = end.min(text.len()).max(start);
+    while !text.is_char_boundary(end) {
+        end += 1;
+    }
+    &text[start..end]
 }
 
 fn link_run(title: &str, bold: bool) -> Run {
@@ -460,6 +527,7 @@ impl App {
         self.wiki.error = None;
         self.wiki.loading = true;
         self.wiki.viewer = None;
+        self.wiki.sel = None;
         self.app_view = AppView::Wikipedia;
         self.set_show_context(false);
         let generation = self.wiki.generation;
@@ -526,6 +594,9 @@ impl App {
         if self.wiki.viewer.is_none() {
             let article = matches!(self.wiki.page, Some(WikiPage::Article(_))) && self.wiki.article.is_some();
             return match key {
+                Key::Character(c) if c.eq_ignore_ascii_case("c") && self.modifiers.command() && self.wiki.sel.is_some() => {
+                    Some(self.update_wiki(WikiMsg::Copy))
+                }
                 Key::Character(c) if article && !self.modifiers.command() && c.eq_ignore_ascii_case("c") => {
                     Some(self.update_wiki(WikiMsg::ToggleToc))
                 }
@@ -542,7 +613,7 @@ impl App {
 
     pub(super) fn wiki_subscription(&self) -> Subscription<Message> {
         if self.settings.wikipedia {
-            use cosmic::iced::{event, keyboard, window};
+            use cosmic::iced::{event, keyboard, mouse, window};
             let pictures = Subscription::run(arrivals).map(|batch| Message::Wiki(WikiMsg::Pictures(batch)));
             let height = event::listen_with(|event, _, _| match event {
                 event::Event::Window(window::Event::Opened { size, .. } | window::Event::Resized(size)) => {
@@ -566,6 +637,11 @@ impl App {
                     arrow(&key).map(|d| Message::Wiki(WikiMsg::ArrowDown(d)))
                 }
                 event::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => arrow(&key).map(|d| Message::Wiki(WikiMsg::ArrowUp(d))),
+                // Selecting text: a press on text is captured by it.
+                event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => Some(Message::Wiki(WikiMsg::SelectEnd)),
+                event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if status == event::Status::Ignored => {
+                    Some(Message::Wiki(WikiMsg::SelectClear))
+                }
                 _ => None,
             });
             let frames = if self.wiki.key_scroll.is_some() {
@@ -747,6 +823,44 @@ impl App {
                 };
             }
             WikiMsg::WindowHeight(h) => self.wiki.window_height = h,
+            WikiMsg::Select(k, cosmic::iced::widget::text::Select::Press { offset, clicks }) => {
+                let len = self.wiki.texts.borrow().get(k).map_or(0, String::len);
+                let (anchor, focus) = match clicks {
+                    1 => (offset, offset),
+                    2 => self.wiki.texts.borrow().get(k).map_or((offset, offset), |t| word_at(t, offset)),
+                    _ => (0, len),
+                };
+                self.wiki.sel = Some(TextSel { anchor: (k, anchor), focus: (k, focus), dragging: true });
+            }
+            WikiMsg::Select(k, cosmic::iced::widget::text::Select::Drag { offset }) => {
+                if let Some(sel) = &mut self.wiki.sel {
+                    if sel.dragging {
+                        sel.focus = (k, offset);
+                    }
+                }
+            }
+            WikiMsg::SelectEnd => {
+                let Some(sel) = &mut self.wiki.sel else { return Task::none() };
+                if !sel.dragging {
+                    return Task::none();
+                }
+                sel.dragging = false;
+                // Linux's middle-click paste takes what's selected.
+                #[cfg(target_os = "linux")]
+                if let Some(text) = self.selected_text() {
+                    return cosmic::iced::clipboard::write_primary(text);
+                }
+            }
+            WikiMsg::SelectClear => {
+                if self.wiki.sel.is_some_and(|s| !s.dragging) {
+                    self.wiki.sel = None;
+                }
+            }
+            WikiMsg::Copy => {
+                if let Some(text) = self.selected_text() {
+                    return cosmic::iced::clipboard::write(text);
+                }
+            }
             WikiMsg::ToggleTocSection(i) => {
                 if !self.wiki.toc_open.remove(&i) {
                     self.wiki.toc_open.insert(i);
@@ -820,6 +934,55 @@ impl App {
 
     /// A picture at a given size: clickable to view it full window. While
     /// it loads, a frame of its size holds its place; `None` if it failed.
+    /// A text that can be selected: it takes the next key in reading order.
+    fn sel_rich<'a>(&self, spans: Vec<Span<'a, String, Font>>, pal: &Palette) -> Rich<'a> {
+        let k = {
+            let mut texts = self.wiki.texts.borrow_mut();
+            texts.push(spans.iter().map(|s| s.text.as_ref()).collect());
+            texts.len() - 1
+        };
+        let color = Color { a: 0.3, ..pal.link };
+        rich_text(spans)
+            .on_select(move |s| Message::Wiki(WikiMsg::Select(k, s)))
+            .dragging(self.wiki.sel.is_some_and(|s| s.dragging))
+            .selection(self.wiki.sel.and_then(|s| s.range(k)), color)
+            .on_link_click(|l| Message::Wiki(WikiMsg::Link(l)))
+    }
+
+    fn line_text<'a>(&self, line: &'a Line, pal: &Palette, size: f32) -> Element<'a, Message> {
+        let spans: Vec<Span<'a, String, Font>> = line.iter().map(|r| run_span(r, r.text.as_str().into(), pal, size)).collect();
+        self.sel_rich(spans, pal).size(size).line_height(LineHeight::Relative(LINE)).width(Length::Fill).into()
+    }
+
+    /// [`App::line_text`] for a line made on the spot.
+    fn owned_text<'a>(&self, line: Line, pal: &Palette, size: f32) -> Element<'a, Message> {
+        let spans: Vec<Span<'a, String, Font>> = line.iter().map(|r| run_span(r, r.text.clone().into(), pal, size)).collect();
+        self.sel_rich(spans, pal).size(size).line_height(LineHeight::Relative(LINE)).width(Length::Fill).into()
+    }
+
+    /// A heading or title, selectable like the text.
+    fn heading<'a>(&self, text: &str, size: f32, font: Font, pal: &Palette) -> Element<'a, Message> {
+        self.sel_rich(vec![span(text.to_string()).font(font)], pal).size(size).into()
+    }
+
+    /// The selected text, the texts' parts on their own lines.
+    fn selected_text(&self) -> Option<String> {
+        let sel = self.wiki.sel?;
+        let (s, e) = sel.ordered();
+        if s == e {
+            return None;
+        }
+        let texts = self.wiki.texts.borrow();
+        let parts: Vec<&str> = (s.0..=e.0.min(texts.len().saturating_sub(1)))
+            .filter_map(|k| {
+                let (a, b) = sel.range(k)?;
+                Some(slice(texts.get(k)?, a, b))
+            })
+            .collect();
+        let text = parts.join("\n");
+        (!text.trim().is_empty()).then_some(text)
+    }
+
     fn wiki_pic<'a>(&self, url: &str, max: u32, width: Length, height: Length, pal: &Palette) -> Option<Element<'a, Message>> {
         let el: Element<'a, Message> = match self.wiki.pics.get(&pic_key(url, max)) {
             Some(Pic::Ready(h)) => widget::image(h.clone()).width(width).height(height).content_fit(ContentFit::Contain).into(),
@@ -879,6 +1042,8 @@ impl App {
     }
 
     pub(super) fn view_wiki(&self) -> Element<'_, Message> {
+        // Texts take their keys afresh as the page is laid out.
+        self.wiki.texts.borrow_mut().clear();
         let pal = palette();
         if let Some(i) = self.wiki.viewer {
             return self.view_wiki_viewer(i, &pal);
@@ -942,7 +1107,7 @@ impl App {
         };
         let mut col = widget::column::with_capacity(3).push(bar).push(picture);
         if !caption.is_empty() {
-            col = col.push(widget::container(line_text(caption, pal, TEXT)).padding([8, 24]).max_height(160.0));
+            col = col.push(widget::container(self.line_text(caption, pal, TEXT)).padding([8, 24]).max_height(160.0));
         }
         widget::container(col).width(Length::Fill).height(Length::Fill).class(cosmic::theme::Container::Background).into()
     }
@@ -965,7 +1130,7 @@ impl App {
         let mut left = widget::column::with_capacity(3).spacing(16).width(Length::FillPortion(3));
         if let Some(a) = &f.article {
             let mut text = widget::column::with_capacity(3).spacing(6).width(Length::Fill);
-            text = text.push(owned_text(vec![link_run(&a.title, true)], pal, TEXT));
+            text = text.push(self.owned_text(vec![link_run(&a.title, true)], pal, TEXT));
             text = text.push(widget::text(a.extract.clone()).size(TEXT).line_height(LineHeight::Relative(LINE)));
             text = text.push(widget::button::link(fl!("wiki-full-article")).on_press(Message::Wiki(WikiMsg::Go(WikiPage::Article(a.title.clone())))));
             let mut row = widget::row::with_capacity(2).spacing(12);
@@ -985,7 +1150,7 @@ impl App {
                 row = row.push(
                     widget::column::with_capacity(2)
                         .width(Length::Fill)
-                        .push(owned_text(vec![link_run(&a.title, true)], pal, TEXT))
+                        .push(self.owned_text(vec![link_run(&a.title, true)], pal, TEXT))
                         .push(muted(a.description.clone(), TEXT - 2.0, pal)),
                 );
                 list = list.push(row);
@@ -997,7 +1162,7 @@ impl App {
         if !f.news.is_empty() {
             let mut list = widget::column::with_capacity(f.news.len()).spacing(6);
             for story in &f.news {
-                list = list.push(widget::row::with_capacity(2).spacing(6).push(widget::text("•").size(TEXT)).push(line_text(story, pal, TEXT)));
+                list = list.push(widget::row::with_capacity(2).spacing(6).push(widget::text("•").size(TEXT)).push(self.line_text(story, pal, TEXT)));
             }
             right = right.push(main_box(fl!("wiki-in-the-news"), [0xce, 0xdf, 0xf2], list.into()));
         }
@@ -1011,7 +1176,7 @@ impl App {
                     line.push(link_run(&p.title, false));
                     line.push(Run { text: ")".into(), ..Default::default() });
                 }
-                list = list.push(owned_text(line, pal, TEXT));
+                list = list.push(self.owned_text(line, pal, TEXT));
             }
             right = right.push(main_box(fl!("wiki-on-this-day"), [0xce, 0xdf, 0xf2], list.into()));
         }
@@ -1068,7 +1233,7 @@ impl App {
                 widget::column::with_capacity(3)
                     .spacing(2)
                     .width(Length::Fill)
-                    .push(owned_text(vec![link_run(&s.title, false)], pal, TEXT + 2.0))
+                    .push(self.owned_text(vec![link_run(&s.title, false)], pal, TEXT + 2.0))
                     .push_maybe((!s.description.is_empty()).then(|| muted(s.description.clone(), TEXT - 1.0, pal)))
                     .push(widget::text(s.extract.clone()).size(TEXT - 1.0)),
             );
@@ -1087,7 +1252,7 @@ impl App {
             widget::container(
                 widget::column::with_capacity(3)
                     .spacing(8)
-                    .push(widget::text(a.title.clone()).size(32.0).font(serif()))
+                    .push(self.heading(&a.title, 32.0, serif(), pal))
                     .push(rule(pal.border))
                     .push(muted(fl!("wiki-from"), TEXT - 1.0, pal)),
             )
@@ -1101,7 +1266,7 @@ impl App {
                         widget::container(
                             widget::column::with_capacity(2)
                                 .spacing(4)
-                                .push(widget::text(s.title.clone()).size(25.0).font(serif()))
+                                .push(self.heading(&s.title, 25.0, serif(), pal))
                                 .push(rule(pal.border)),
                         )
                         .padding([12, 0, 0, 0])
@@ -1110,7 +1275,7 @@ impl App {
                 }
                 level => {
                     let size = if level == 3 { 18.0 } else { 16.0 };
-                    flow = flow.push(widget::container(widget::text(s.title.clone()).size(size).font(bold())).padding([6, 0, 0, 0]).id(section_id(i)));
+                    flow = flow.push(widget::container(self.heading(&s.title, size, bold(), pal)).padding([6, 0, 0, 0]).id(section_id(i)));
                 }
             }
             // The lead: hatnotes across the page, then the infobox floats.
@@ -1127,7 +1292,7 @@ impl App {
                 flow = match b {
                     Block::Figure { image, caption } => match self.wiki_figure(image, caption, pal) {
                         Some(fig) => flow.float(fig),
-                        None if !caption.is_empty() => flow.push(line_text(caption, pal, TEXT - 2.0)),
+                        None if !caption.is_empty() => flow.push(self.line_text(caption, pal, TEXT - 2.0)),
                         None => flow,
                     },
                     Block::Table(t) if t.float_right => flow.float(widget::container(self.wiki_table(t, pal, false)).width(Length::Fixed(360.0))),
@@ -1211,7 +1376,7 @@ impl App {
                     .spacing(6)
                     .width(Length::Fixed(w))
                     .push(pic)
-                    .push_maybe((!caption.is_empty()).then(|| line_text(caption, pal, TEXT - 2.0))),
+                    .push_maybe((!caption.is_empty()).then(|| self.line_text(caption, pal, TEXT - 2.0))),
                 pal.panel,
                 pal.border,
             )
@@ -1222,9 +1387,9 @@ impl App {
 
     fn wiki_block<'a>(&'a self, b: &'a Block, pal: &Palette) -> Element<'a, Message> {
         match b {
-            Block::Para(l) => line_text(l, pal, TEXT),
-            Block::Hatnote(l) => widget::container(line_text(l, pal, TEXT - 1.0)).padding([0, 0, 0, 24]).into(),
-            Block::Quote(l) => widget::container(line_text(l, pal, TEXT)).padding([0, 32]).into(),
+            Block::Para(l) => self.line_text(l, pal, TEXT),
+            Block::Hatnote(l) => widget::container(self.line_text(l, pal, TEXT - 1.0)).padding([0, 0, 0, 24]).into(),
+            Block::Quote(l) => widget::container(self.line_text(l, pal, TEXT)).padding([0, 32]).into(),
             Block::List { ordered, items } => {
                 let mut col = widget::column::with_capacity(items.len()).spacing(4);
                 let mut n = [0usize; 8];
@@ -1240,14 +1405,14 @@ impl App {
                             .spacing(8)
                             .push(widget::Space::new().width(Length::Fixed(12.0 + 20.0 * d as f32)))
                             .push(widget::text(mark).size(TEXT).line_height(LineHeight::Relative(LINE)))
-                            .push(line_text(line, pal, TEXT)),
+                            .push(self.line_text(line, pal, TEXT)),
                     );
                 }
                 col.into()
             }
             Block::Figure { image, caption } => match self.wiki_figure(image, caption, pal) {
                 Some(fig) => widget::container(fig).width(Length::Fill).align_x(Alignment::End).into(),
-                None => line_text(caption, pal, TEXT - 2.0),
+                None => self.line_text(caption, pal, TEXT - 2.0),
             },
             Block::Table(t) => self.wiki_table(t, pal, false),
             Block::Bar(em) => {
@@ -1263,7 +1428,7 @@ impl App {
     fn wiki_table<'a>(&'a self, t: &'a Table, pal: &Palette, infobox: bool) -> Element<'a, Message> {
         let mut col = widget::column::with_capacity(t.rows.len() + 1).spacing(if infobox { 4 } else { 0 });
         if !t.caption.is_empty() {
-            col = col.push(widget::container(line_text(&t.caption, pal, TEXT)).padding([4, 8]));
+            col = col.push(widget::container(self.line_text(&t.caption, pal, TEXT)).padding([4, 8]));
         }
         let size = if infobox { TEXT - 2.0 } else { TEXT - 1.0 };
         for r in &t.rows {
@@ -1295,13 +1460,13 @@ impl App {
                 Block::Bar(_) => {
                     let mut row = widget::row::with_capacity(2).spacing(6).align_y(Alignment::Center).push(self.wiki_block(b, pal));
                     if let Some(Block::Para(l)) = blocks.next_if(|n| matches!(n, Block::Para(_))) {
-                        row = row.push(line_text(l, pal, size));
+                        row = row.push(self.line_text(l, pal, size));
                     }
                     row.into()
                 }
                 Block::Para(l) => {
                     let spans: Vec<Span<'a, String, Font>> = l.iter().map(|r| run_span(r, r.text.as_str().into(), pal, size)).collect();
-                    let t = rich_text(spans).size(size).line_height(LineHeight::Relative(1.45)).on_link_click(|l| Message::Wiki(WikiMsg::Link(l)));
+                    let t = self.sel_rich(spans, pal).size(size).line_height(LineHeight::Relative(1.45));
                     if c.center {
                         t.align_x(cosmic::iced::widget::text::Alignment::Center).width(Length::Fill).into()
                     } else {
@@ -1316,7 +1481,7 @@ impl App {
                         .align_x(Alignment::Center)
                         .width(Length::Fill)
                         .push_maybe(self.wiki_pic(&image.url, THUMB, Length::Fixed(w), Length::Fixed(h), pal))
-                        .push_maybe((!caption.is_empty()).then(|| line_text(caption, pal, size)))
+                        .push_maybe((!caption.is_empty()).then(|| self.line_text(caption, pal, size)))
                         .into()
                 }
                 other => self.wiki_block(other, pal),

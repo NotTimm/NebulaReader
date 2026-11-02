@@ -87,11 +87,14 @@ rust-embed = "8"
 #    own strings (Close, Cancel...) follow the app's language setting.
 # 16. In image::Viewer, Up and Down scroll a zoomed or fitted page while
 #    held, easing up to a steady speed and gliding briefly to a stop.
+# 17. Rich text can be selected: `Rich::on_select` reports presses and
+#    drags as offsets into its text, the app keeps the selection (across
+#    many texts) and hands each its part with `Rich::selection`.
 # Kept in sync with upstream by merging (never rebasing): run
 # tools/libcosmic-drift.sh and see "The libcosmic fork" in docs/DEVELOPING.md.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "e5db6d49fec4043e05720760a01996d6e15fbe81"
+rev = "a30796774365338e3e8438cd44433b14f06495b1"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -99,7 +102,7 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "settings"] }
 
@@ -108,7 +111,7 @@ ashpd = { version = "0.13", default-features = false, features = ["tokio", "sett
 libc = "0.2"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).
@@ -173,8 +176,8 @@ fluent-syntax = "0.12"
 # tarball) refuses the same crate from two sources. Keep the rev in step
 # with the libcosmic dependency above.
 [patch."https://github.com/pop-os/libcosmic"]
-build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81" }
-cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81" }
-cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81" }
-iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81" }
-iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "e5db6d49fec4043e05720760a01996d6e15fbe81" }
+build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1" }
+cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1" }
+cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1" }
+iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1" }
+iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "a30796774365338e3e8438cd44433b14f06495b1" }
