@@ -1934,6 +1934,11 @@ impl App {
                 if self.fit_width { return self.update(Message::ToggleFitWidth); }
                 if self.zoom_active { self.zoom_active = false; self.zoom = 1.0; }
                 else if self.show_chapter_select { self.show_chapter_select = false; }
+                // In a catalog, Esc goes back like its Back button; home
+                // only from the catalog's start.
+                else if self.app_view == AppView::Catalog && self.catalog_can_go_back() {
+                    return self.update(Message::Opds(OpdsMsg::Back));
+                }
                 else if self.app_view != AppView::Library { return self.update(Message::GoToLibrary); }
             }
             Key::Character(c)

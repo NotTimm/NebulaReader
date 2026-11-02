@@ -16,6 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use cosmic::iced::widget::scrollable::{self as scroll_mod, AbsoluteOffset, RelativeOffset, Viewport};
 use cosmic::iced::{Alignment, ContentFit, Length};
 use cosmic::widget::{self, icon};
 use cosmic::{app::Task, ApplicationExt, Element};
@@ -30,6 +31,15 @@ use crate::remote::Account as RemoteAccount;
 /// A folder with at least this many books asks before it's added to a
 /// library: syncing it puts every one of them in the library.
 const BIG_FOLDER: usize = 1000;
+/// The Catalog page's scrolling area (a folder's list, or a book's page).
+fn catalog_scroll_id() -> widget::Id {
+    widget::Id::new("opds-catalog")
+}
+
+fn to_top() -> Task<Message> {
+    scroll_mod::snap_to(catalog_scroll_id(), RelativeOffset { x: None, y: Some(0.0) })
+}
+
 /// Pictures kept for the Catalog page before starting over.
 const MAX_THUMBS: usize = 400;
 
@@ -68,6 +78,8 @@ pub enum OpdsMsg {
     Facet(String),
     /// A book's page, by its place in the folder shown.
     ShowBook(usize),
+    /// The folder's list scrolled (kept, to come back to from a book).
+    ListScrolled(Viewport),
     /// A picture for the Catalog page arrived: (url, image).
     Thumb(String, Option<Vec<u8>>),
     /// Downloads an edition of the book shown.
@@ -100,6 +112,8 @@ pub struct OpdsState {
     confirm: Option<Confirm>,
     /// The catalog last browsed, for the library's Browse Catalogs button.
     last_catalog: Option<String>,
+    /// How far down the folder's list was, for Back from a book's page.
+    list_offset: f32,
 }
 
 #[derive(Clone)]
@@ -195,7 +209,14 @@ impl App {
         b.book = None;
         self.op.confirm = None;
         self.set_header_title(title);
-        load_task(account, url, self.op.generation, false)
+        self.op.list_offset = 0.0;
+        Task::batch([load_task(account, url, self.op.generation, false), to_top()])
+    }
+
+    /// Whether the Catalog page's Back has somewhere to go (out of a
+    /// book's page, or up a folder), for Esc.
+    pub(super) fn catalog_can_go_back(&self) -> bool {
+        self.op.browse.as_ref().is_some_and(|b| b.book.is_some() || b.trail.len() > 1)
     }
 
     /// Starts a sync of a catalog, or one after the running one.
@@ -374,7 +395,8 @@ impl App {
                         b.trail.pop();
                         return self.load_current();
                     }
-                    return Task::none();
+                    // Back to the list where it was.
+                    return scroll_mod::scroll_to(catalog_scroll_id(), AbsoluteOffset { x: None, y: Some(self.op.list_offset) });
                 }
                 if b.trail.len() > 1 {
                     b.trail.pop();
@@ -401,7 +423,7 @@ impl App {
                         if let Some(b) = self.op.browse.as_mut() {
                             b.feed = Some(feed);
                         }
-                        return thumbs;
+                        return Task::batch([thumbs, to_top()]);
                     }
                     Err(e) => b.error = Some(e),
                 }
@@ -515,7 +537,12 @@ impl App {
                 let Some(book) = b.feed.as_ref().and_then(|f| f.books.get(i)).cloned() else { return Task::none() };
                 let cover = book.links.cover.clone();
                 b.book = Some(book_page(vec![book], &[], false));
-                return self.load_thumbs(cover.into_iter().collect());
+                return Task::batch([self.load_thumbs(cover.into_iter().collect()), to_top()]);
+            }
+            OpdsMsg::ListScrolled(v) => {
+                if self.op.browse.as_ref().is_some_and(|b| b.book.is_none()) {
+                    self.op.list_offset = v.absolute_offset().y;
+                }
             }
             OpdsMsg::Thumb(url, image) => {
                 if let Some(slot) = self.op.thumbs.get_mut(&url) {
@@ -854,7 +881,10 @@ impl App {
         if b.loading {
             col = col.push(widget::text::body(fl!("opds-loading")));
         }
-        widget::scrollable(col).into()
+        widget::scrollable(col)
+            .id(catalog_scroll_id())
+            .on_scroll(|v| Message::Opds(OpdsMsg::ListScrolled(v)))
+            .into()
     }
 
     /// A catalog book's page: what the catalog says about it, and its
@@ -940,7 +970,7 @@ impl App {
                 );
             }
         }
-        widget::scrollable(col).into()
+        widget::scrollable(col).id(catalog_scroll_id()).into()
     }
 
     /// Download, its progress, or Read / Remove Download for one edition.
