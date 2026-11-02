@@ -4,10 +4,11 @@
 //! once it ends they take the whole width again. A float below another one
 //! starts under it, as with `clear: right`.
 //!
-//! An item beside a float is laid out at the narrower width whole, so a
-//! paragraph that runs past the float's end stays narrow to its last line
-//! (a browser would widen it mid-paragraph); between paragraphs the text
-//! goes back to full width.
+//! An item beside floats is laid out whole at the width left by every
+//! float it runs past, so a paragraph that runs past a float's end stays
+//! narrow to its last line (a browser would widen it mid-paragraph), and
+//! one that a float starts beside partway down never runs under it;
+//! between paragraphs the text goes back to full width.
 
 use cosmic::iced::advanced::layout::{self, Layout};
 use cosmic::iced::advanced::widget::{Operation, Tree};
@@ -88,10 +89,29 @@ pub fn place(
                 y += spacing;
             }
             first = false;
-            // Narrower beside the float at this height, if there is one.
-            let beside = placed.iter().filter(|&&(_, top, bottom)| top <= y && y < bottom).map(|&(left, _, _)| left).fold(f32::INFINITY, f32::min);
-            let avail = if beside.is_finite() { (beside - gap).max(1.0) } else { width };
-            let size = measure(i, avail);
+            // Narrower beside every float it runs past, not only the one
+            // at its first line: a float can start partway down it (one
+            // placed under a shorter float), and a wider one would cover
+            // its lower lines. Narrowing makes it taller, so it may then
+            // reach another float: measure until the width settles.
+            let left_of = |top: f32, bottom: f32| {
+                placed
+                    .iter()
+                    .filter(|&&(_, f_top, f_bottom)| f_top < bottom && top < f_bottom)
+                    .map(|&(left, _, _)| left)
+                    .fold(f32::INFINITY, f32::min)
+            };
+            let avail_for = |edge: f32| if edge.is_finite() { (edge - gap).max(1.0) } else { width };
+            let mut avail = avail_for(left_of(y, y + 1.0));
+            let mut size = measure(i, avail);
+            for _ in 0..4 {
+                let narrower = avail_for(left_of(y, y + size.height.max(1.0)));
+                if narrower >= avail {
+                    break;
+                }
+                avail = narrower;
+                size = measure(i, avail);
+            }
             out.push((Point::new(0.0, y), Size::new(avail, size.height)));
             y += size.height;
         }
@@ -243,6 +263,27 @@ mod tests {
         // Below its end: the whole width again.
         assert_eq!((spots[4].0.y, spots[4].1.width), (330.0, 1000.0));
         assert_eq!(height, 430.0);
+    }
+
+    #[test]
+    fn a_paragraph_stays_clear_of_a_float_starting_partway_down_it() {
+        // A short infobox, then a wider table that floats under it, then a
+        // long paragraph that starts beside the infobox: the paragraph
+        // would run under the table at the infobox's width.
+        let floats = [true, true, false, false];
+        let (spots, _) = place(1000.0, &floats, 10.0, 20.0, |i, w| match i {
+            0 => Size::new(300.0, 100.0),
+            1 => Size::new(450.0, 120.0),
+            // 120 000 units of text: taller when narrower (177 beside the
+            // infobox alone, so it would reach the table at 110).
+            _ => Size::new(w, (120_000.0 / w).ceil()),
+        });
+        assert_eq!(spots[1].0, Point::new(550.0, 110.0));
+        // The paragraph keeps clear of the table's left edge all the way.
+        assert_eq!(spots[2].1.width, 530.0);
+        assert!(spots[2].0.x + spots[2].1.width <= spots[1].0.x);
+        // The next one starts below the table, at the whole width.
+        assert_eq!(spots[3].1.width, 1000.0);
     }
 
     #[test]
