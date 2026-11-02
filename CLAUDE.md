@@ -275,7 +275,8 @@ the owner's laptop). Last updated 2026-11-02.
   Parsoid, rest.php search, random; a small HTML tree → `Article` of
   sections, `Block`s, infobox `Table` with cell colours; hidden classes
   dropped) and `src/app/wiki_view.rs` (`AppView::Wikipedia`: main page
-  boxes, article as one scrolling page like the site, collapsible
+  boxes, article as one scrolling page like the site, collapsible (closed
+  by default, `wiki.toc_shown`)
   contents sidebar jumping via a widget `Operation` (`FindSection`),
   figures beside the following text, credit + CC BY-SA + View on
   Wikipedia). It's a source in the library's dropdown

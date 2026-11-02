@@ -230,7 +230,8 @@ pub struct WikiState {
     results: Vec<Summary>,
     /// Pictures by [`pic_key`], kept in memory while the page is open.
     pics: HashMap<String, Pic>,
-    toc_hidden: bool,
+    /// The contents sidebar is open (it starts closed; the button or C opens it).
+    toc_shown: bool,
     /// Sections (by index) whose subsections are shown in the contents.
     toc_open: std::collections::HashSet<usize>,
     search_input: String,
@@ -1054,14 +1055,14 @@ impl App {
                 // The article gets wider or narrower and its text wraps
                 // anew: find the place being read first, to stay on it.
                 let Some(a) = self.wiki.article.as_ref().filter(|_| matches!(self.wiki.page, Some(WikiPage::Article(_)))) else {
-                    self.wiki.toc_hidden = !self.wiki.toc_hidden;
+                    self.wiki.toc_shown = !self.wiki.toc_shown;
                     return Task::none();
                 };
                 return cosmic::iced::runtime::task::widget(MeasureSections::new(a.sections.len()))
                     .map(|l| cosmic::Action::App(Message::Wiki(WikiMsg::TocToggled(l.and_then(|l| l.anchor())))));
             }
             WikiMsg::TocToggled(anchor) => {
-                self.wiki.toc_hidden = !self.wiki.toc_hidden;
+                self.wiki.toc_shown = !self.wiki.toc_shown;
                 let (Some(anchor), Some(a)) = (anchor, self.wiki.article.as_ref()) else { return Task::none() };
                 return cosmic::iced::runtime::task::widget(MeasureSections::new(a.sections.len()))
                     .map(move |l| cosmic::Action::App(Message::Wiki(WikiMsg::ScrollTo(l.and_then(|l| l.resolve(anchor))))));
@@ -1347,7 +1348,7 @@ impl App {
                 widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::Wiki(WikiMsg::Back)),
                 fl!("opds-back"),
             ))
-            .push_maybe((article && self.wiki.toc_hidden).then(|| {
+            .push_maybe((article && !self.wiki.toc_shown).then(|| {
                 tip(
                     widget::button::icon(icon::from_name("view-list-symbolic")).on_press(Message::Wiki(WikiMsg::ToggleToc)),
                     fl!("wiki-contents"),
@@ -1418,7 +1419,7 @@ impl App {
         // The page always second in the row, so showing or hiding the
         // contents keeps its scrolling where it is.
         let toc: Element<'_, Message> = match (&self.wiki.page, &self.wiki.article) {
-            (Some(WikiPage::Article(_)), Some(a)) if !self.wiki.toc_hidden && !self.wiki.loading && self.wiki.error.is_none() => {
+            (Some(WikiPage::Article(_)), Some(a)) if self.wiki.toc_shown && !self.wiki.loading && self.wiki.error.is_none() => {
                 widget::scrollable(widget::container(self.wiki_toc(a, &pal)).padding([24, 8, 24, 20])).width(Length::Fixed(TOC_WIDTH + 28.0)).height(Length::Fill).into()
             }
             _ => widget::Space::new().width(Length::Fixed(0.0)).into(),
