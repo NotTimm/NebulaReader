@@ -69,6 +69,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.0-beta.3" date="2026-11-02" type="development">
+      <description>
+        <ul>
+          <li>Wikipedia, if you turn it on: its main page, search and articles, laid out like the site, with a picture viewer</li>
+          <li>OPDS catalogs get a shelf in the library with their search and main sections</li>
+          <li>Books downloaded from a catalog keep the catalog's description</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0-beta.2" date="2026-11-02" type="development">
       <description>
         <ul>

@@ -179,6 +179,14 @@ the owner's laptop). Last updated 2026-11-01.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Beta 0.2.0-beta.3 (2026-11-02): Wikipedia (opt-in), the OPDS
+  catalog shelf in the library (Copilot, PR #13: `view_catalog_quick_sections`,
+  `OpdsMsg::BrowseTo`, which opens under the catalog's start via
+  `shelf_trail`), catalog descriptions on downloaded books
+  (`library::apply_fallback_metadata`, source "opds") and "Title; Or,
+  Subtitle" one-shots shown by their title (`apply_fallback_display_title`).
+  PR #13 ran rustfmt over app.rs, library_view.rs and opds_view.rs (the
+  project has no rustfmt.toml and isn't otherwise formatted that way).
 - Beta 0.2.0-beta.2 (2026-11-02): catalog mode, facets, EPUB chapter
   splitting and links, touchpad swipes, beta versions toggle, downloads
   folder rename and Downloads page by source, twelve themes. The first
