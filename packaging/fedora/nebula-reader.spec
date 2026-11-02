@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.0~beta.1
+Version:        0.2.0~beta.2
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,11 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Mon Nov 02 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0~beta.2-1
+- OPDS catalogs can be added as a catalog: browse, search, download
+- EPUB chapters split at the contents, links in books work
+- Beta versions toggle for self-updating installs, more colour themes
+
 * Sun Nov 01 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0~beta.1-1
 - OPDS catalogs as a library source (untested on real servers)
 - Translations: English and Spanish, language setting

@@ -69,6 +69,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.0-beta.2" date="2026-11-02" type="development">
+      <description>
+        <ul>
+          <li>OPDS catalogs can be added as a catalog, for big public collections like Project Gutenberg: browse, search, read about a book and download it</li>
+          <li>Books: files holding several chapters are split into them, links in a book work, and a touchpad swipe turns one page</li>
+          <li>Beta versions can be turned on in Settings on Windows and Mac, with their own copy of the library</li>
+          <li>Twelve more colour themes, including two warm browns</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0-beta.1" date="2026-11-01" type="development">
       <description>
         <ul>
