@@ -1210,7 +1210,8 @@ impl App {
             widget::context_menu(page, Some(menu::items(&HashMap::new(), items)))
         };
         // The contents stay beside the article as it scrolls, like the site's.
-        match (&self.wiki.page, &self.wiki.article) {
+        // Both scroll smoothly, gliding like a browser's (see `gestures`).
+        let page: Element<'_, Message> = match (&self.wiki.page, &self.wiki.article) {
             (Some(WikiPage::Article(_)), Some(a)) if !self.wiki.toc_hidden && !self.wiki.loading && self.wiki.error.is_none() => {
                 widget::row::with_capacity(2)
                     .push(widget::scrollable(widget::container(self.wiki_toc(a, &pal)).padding([24, 8, 24, 20])).width(Length::Fixed(TOC_WIDTH + 28.0)).height(Length::Fill))
@@ -1218,7 +1219,8 @@ impl App {
                     .into()
             }
             _ => page.into(),
-        }
+        };
+        super::gestures::gestures(page).into()
     }
 
     /// A picture full window: zoomable, with its caption, and Left / Right

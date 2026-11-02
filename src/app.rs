@@ -32,6 +32,7 @@ mod book_view;
 mod chapter_list;
 mod downloads;
 mod float_flow;
+mod gestures;
 mod jellyfin_view;
 mod library_view;
 mod opds_view;

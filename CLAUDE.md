@@ -296,6 +296,9 @@ the owner's laptop). Last updated 2026-11-02.
   bottom edge scrolls it (`drag_scroll_speed`: 30 px band, faster further
   out, up to 3000 px/s); the texts re-hit-test every frame while dragging
   (patch 17's second commit), so the selection follows.
+  Wheel and touchpad scrolling glide like a browser (`app/gestures.rs`,
+  ported from NebulaPlayer's `input.rs`: wheel steps ease out over
+  ~75 ms, touchpad swipes fling), wrapped around the whole wiki page.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
 - Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows
