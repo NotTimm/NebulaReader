@@ -67,6 +67,44 @@ pub fn book_id(opds_id: &str) -> String {
     format!("o{}", hash(opds_id))
 }
 
+/// The bytes of a `data:` URL (what follows `data:`): base64 or plain.
+fn decode_data_url(rest: &str) -> Option<Vec<u8>> {
+    let (meta, data) = rest.split_once(',')?;
+    if !meta.ends_with(";base64") {
+        return Some(data.as_bytes().to_vec());
+    }
+    let mut out = Vec::with_capacity(data.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in data.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            b'=' | b' ' | b'\n' | b'\r' | b'\t' => continue,
+            _ => return None,
+        } as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
+/// The series id of a book downloaded from a catalog: the series it names,
+/// else its own.
+fn saved_series_id(book: &SavedBook) -> String {
+    match book.series.as_ref().map(|(n, _)| crate::naming::normalize_title(n)).filter(|n| !n.is_empty()) {
+        Some(norm) => format!("s{}", hash(&format!("downloads\n{norm}"))),
+        None => format!("b{}", hash(&book.id)),
+    }
+}
+
 // ── Accounts ────────────────────────────────────────────────────────────────
 
 /// A folder of the catalog that goes in the library.
@@ -74,6 +112,49 @@ pub fn book_id(opds_id: &str) -> String {
 pub struct Root {
     pub url: String,
     pub title: String,
+}
+
+/// How a catalog is used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Kind {
+    /// Added as a library: picked folders are synced into the library and
+    /// read from the server, like a Jellyfin library. For servers of your
+    /// own (Komga, Kavita, calibre-web…).
+    #[default]
+    Library,
+    /// Added as a catalog: browsed and searched live, and only the books
+    /// downloaded from it are kept. For big public collections (Project
+    /// Gutenberg…), which mustn't be crawled.
+    Catalog,
+}
+
+/// A book downloaded from a catalog: what the library needs to show it
+/// without asking the catalog again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedBook {
+    /// The catalog's own id for it.
+    pub id: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub date: String,
+    pub summary: String,
+    pub series: Option<(String, Option<f32>)>,
+    pub links: Links,
+}
+
+impl From<&Book> for SavedBook {
+    fn from(b: &Book) -> Self {
+        SavedBook {
+            id: b.id.clone(),
+            title: b.title.clone(),
+            authors: b.authors.clone(),
+            date: b.date.clone(),
+            summary: b.summary.clone(),
+            series: b.series.clone(),
+            links: b.links.clone(),
+        }
+    }
 }
 
 /// One catalog (and user, when it has sign-in).
@@ -86,14 +167,36 @@ pub struct Account {
     pub title: String,
     pub user: String,
     pub password: String,
-    /// The folders put in the library.
+    /// The folders put in the library (as a library).
     pub roots: Vec<Root>,
+    pub kind: Kind,
+    /// The books downloaded from it (as a catalog).
+    pub saved: Vec<SavedBook>,
 }
 
 impl Account {
-    /// Stable id for this catalog + user, used in library keys.
+    /// Stable id for this catalog + user, used in library keys. The same
+    /// catalog can be added both ways; a library keeps the key it always had.
     pub fn key(&self) -> String {
-        format!("opds-{}", hash(&format!("{}\n{}", self.url, self.user)))
+        match self.kind {
+            Kind::Library => format!("opds-{}", hash(&format!("{}\n{}", self.url, self.user))),
+            Kind::Catalog => format!("opds-{}", hash(&format!("{}\n{}\ncatalog", self.url, self.user))),
+        }
+    }
+
+    pub fn is_catalog(&self) -> bool {
+        self.kind == Kind::Catalog
+    }
+
+    /// The library series a downloaded book goes in: the series it names,
+    /// else on its own.
+    pub fn saved_series_key(&self, book: &SavedBook) -> String {
+        self.item_key(&saved_series_id(book))
+    }
+
+    /// Whether a book (by its catalog id) has been downloaded from here.
+    pub fn has_saved(&self, opds_id: &str) -> bool {
+        self.saved.iter().any(|b| b.id == opds_id)
     }
 
     /// Library key for one of this account's items.
@@ -173,7 +276,16 @@ impl Account {
     /// An item's cover image.
     pub async fn cover(&self, item_id: &str) -> Result<Vec<u8>, String> {
         let url = self.links(item_id).and_then(|l| l.cover).ok_or("no cover")?;
-        let resp = self.get(&url).send().await.map_err(|e| e.to_string())?;
+        self.image(&url).await
+    }
+
+    /// An image the catalog links to (a cover or thumbnail), which may be
+    /// written into the feed itself as a `data:` URL.
+    pub async fn image(&self, url: &str) -> Result<Vec<u8>, String> {
+        if let Some(data) = url.strip_prefix("data:") {
+            return decode_data_url(data).ok_or_else(|| "bad data URL".to_string());
+        }
+        let resp = self.get(url).send().await.map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
@@ -288,6 +400,11 @@ pub struct Links {
     pub file: Option<String>,
     /// The file's type as an extension: "cbz", "cbr", "epub", "pdf"…
     pub ext: String,
+    /// The file's size in bytes, when the catalog says.
+    pub size: Option<u64>,
+    /// What the catalog calls the file ("EPUB3 (E-readers incl.
+    /// Send-to-Kindle)"), when it names it.
+    pub label: String,
     pub cover: Option<String>,
     /// Page streaming: one image per page.
     pub pages: Option<PageLinks>,
@@ -371,6 +488,15 @@ fn remember_links(account_key: &str, map: HashMap<String, Links>) {
     if let Ok(mut s) = link_store().write() {
         s.insert(account_key.to_string(), map);
     }
+}
+
+/// Adds one book's links to what's known (a book just downloaded from a
+/// catalog, before the sync that lists it has run).
+pub fn add_links(account_key: &str, item_id: &str, l: Links) {
+    let _ = links(account_key, "");
+    let mut map = link_store().read().ok().and_then(|s| s.get(account_key).cloned()).unwrap_or_default();
+    map.insert(item_id.to_string(), l);
+    remember_links(account_key, map);
 }
 
 fn forget_links(account_key: &str) {
@@ -643,6 +769,8 @@ pub struct Feed {
     /// The next page of this feed.
     pub next: Option<String>,
     pub search: Option<Search>,
+    /// How many items the whole feed has, when the server says.
+    pub total: Option<usize>,
 }
 
 /// A link to another feed.
@@ -652,6 +780,11 @@ pub struct Folder {
     pub url: String,
     /// How many items the server says are in it, when it says.
     pub count: Option<usize>,
+    /// Its picture, when the catalog gives one (a search result that's
+    /// really one book shows its cover).
+    pub cover: Option<String>,
+    /// A line about it ("Bram Stoker"), when there's a short one.
+    pub subtitle: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -679,6 +812,8 @@ pub struct Book {
     /// The server's page-streaming position: last page read, and when.
     pub last_page: Option<usize>,
     pub last_read: i64,
+    /// Feeds it links to: more by the author, its subjects…
+    pub related: Vec<Folder>,
 }
 
 /// Reads a feed: OPDS 2 JSON or OPDS 1.2 Atom. `None` when it's neither.
@@ -718,6 +853,7 @@ struct AtomLink {
     kind: String,
     title: String,
     count: Option<usize>,
+    length: Option<u64>,
     last_read: Option<usize>,
     last_read_date: Option<String>,
 }
@@ -744,6 +880,9 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
     let mut entry: Option<AtomEntry> = None;
     let mut path: Vec<String> = Vec::new();
     let mut text = String::new();
+    // Inside an entry's HTML summary: the depth of its element, and whether
+    // the HTML is escaped text (`type="html"`) rather than elements.
+    let mut markup: Option<(usize, bool)> = None;
 
     let read_link = |e: &quick_xml::events::BytesStart| AtomLink {
         rel: attr(e, "rel").unwrap_or_default(),
@@ -751,6 +890,7 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
         kind: attr(e, "type").unwrap_or_default(),
         title: attr(e, "title").unwrap_or_default(),
         count: attr(e, "count").and_then(|c| c.trim().parse().ok()),
+        length: attr(e, "length").and_then(|c| c.trim().parse().ok()),
         last_read: attr(e, "lastRead").and_then(|c| c.trim().parse().ok()),
         last_read_date: attr(e, "lastReadDate"),
     };
@@ -761,6 +901,17 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
                 let name = local_name(&e.name());
                 let empty = matches!(ev, Ok(Event::Empty(_)));
+                if markup.is_some_and(|(depth, _)| path.len() > depth) {
+                    // An element of the summary: only its paragraphs count.
+                    if is_block(&name) {
+                        text.push(BREAK);
+                    }
+                    if !empty {
+                        path.push(name);
+                    }
+                    buf.clear();
+                    continue;
+                }
                 match name.as_str() {
                     "feed" => seen_feed = true,
                     "entry" => entry = Some(AtomEntry::default()),
@@ -774,6 +925,12 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
                     _ => {}
                 }
                 if !empty {
+                    if entry.is_some() && matches!(name.as_str(), "content" | "summary") {
+                        let kind = attr(e, "type").unwrap_or_default();
+                        if kind == "xhtml" || kind == "html" {
+                            markup = Some((path.len() + 1, kind == "html"));
+                        }
+                    }
                     path.push(name);
                     text.clear();
                 }
@@ -782,6 +939,17 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
             Ok(Event::CData(t)) => text.push_str(&t),
             Ok(Event::End(_)) => {
                 let name = path.pop().unwrap_or_default();
+                if let Some((depth, escaped)) = markup {
+                    if path.len() >= depth {
+                        if is_block(&name) {
+                            text.push(BREAK);
+                        }
+                        buf.clear();
+                        continue;
+                    }
+                    markup = None;
+                    text = markup_text(&text, escaped);
+                }
                 let parent = path.last().map(String::as_str).unwrap_or("");
                 let value = text.trim().to_string();
                 match (entry.as_mut(), name.as_str(), parent) {
@@ -797,6 +965,7 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
                     (Some(en), "updated", "entry") if en.date.is_empty() => en.date = day(&value),
                     (Some(en), "summary" | "content", "entry") if en.summary.is_empty() => en.summary = value,
                     (None, "title", "feed") => feed.title = value,
+                    (None, "totalResults", "feed") => feed.total = value.parse().ok(),
                     (None, "icon", "feed") => feed.icon = join(base, &value),
                     _ => {}
                 }
@@ -809,6 +978,44 @@ fn parse_atom(xml: &str, base: &url::Url) -> Option<Feed> {
         buf.clear();
     }
     seen_feed.then_some(feed)
+}
+
+/// Marks a paragraph break in a summary's text while it's read.
+const BREAK: char = '\u{1}';
+
+fn is_block(name: &str) -> bool {
+    matches!(name, "p" | "div" | "br" | "li" | "ul" | "ol" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote")
+}
+
+/// An HTML summary as plain paragraphs. `escaped`: the HTML came as text
+/// (`type="html"`), so its tags are still in it.
+fn markup_text(s: &str, escaped: bool) -> String {
+    let mut plain = String::with_capacity(s.len());
+    if escaped {
+        let mut rest = s;
+        while let Some(start) = rest.find('<') {
+            plain.push_str(&rest[..start]);
+            let Some(end) = rest[start..].find('>') else {
+                rest = "";
+                break;
+            };
+            let tag = rest[start + 1..start + end].trim_start_matches('/');
+            let name: String = tag.chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+            if is_block(&name) {
+                plain.push(BREAK);
+            }
+            rest = &rest[start + end + 1..];
+        }
+        plain.push_str(rest);
+    } else {
+        plain.push_str(s);
+    }
+    plain
+        .split(BREAK)
+        .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// A link at the top of a feed: its next page or its search.
@@ -859,6 +1066,8 @@ fn add_entry(feed: &mut Feed, en: AtomEntry, base: &url::Url) {
                 rank = file_rank(ext);
                 book.links.file = join(base, &l.href);
                 book.links.ext = ext.to_string();
+                book.links.size = l.length;
+                book.links.label = l.title.clone();
             }
         } else if rel.starts_with(ACQUISITION) {
             // buy, borrow, subscribe, sample
@@ -868,11 +1077,19 @@ fn add_entry(feed: &mut Feed, en: AtomEntry, base: &url::Url) {
             book.links.cover = join(base, &l.href);
         } else if rel == "http://opds-spec.org/image/thumbnail" || rel == "http://opds-spec.org/thumbnail" {
             book.links.cover = book.links.cover.take().or_else(|| join(base, &l.href));
+        } else if is_feed_type(&l.kind) && matches!(rel, "related" | "alternate" | "author" | "collection") {
+            if let Some(url) = join(base, &l.href).filter(|_| !l.title.is_empty()) {
+                book.related.push(Folder { title: l.title.clone(), url, ..Default::default() });
+            }
+            if folder.is_none() {
+                folder = join(base, &l.href).map(|url| Folder { title: book.title.clone(), url, count: l.count, ..Default::default() });
+            }
         } else if is_feed_type(&l.kind) && folder.is_none() {
             folder = join(base, &l.href).map(|url| Folder {
                 title: if book.title.is_empty() { l.title.clone() } else { book.title.clone() },
                 url,
                 count: l.count,
+                ..Default::default()
             });
         }
     }
@@ -884,7 +1101,16 @@ fn add_entry(feed: &mut Feed, en: AtomEntry, base: &url::Url) {
             }
         }
         feed.books.push(book);
-    } else if let Some(f) = folder {
+    } else if let Some(mut f) = folder {
+        f.cover = book.links.cover;
+        // A short line about it: who wrote it, or a summary that fits.
+        f.subtitle = if !book.authors.is_empty() {
+            book.authors.join(", ")
+        } else if book.summary.chars().count() <= 80 && !book.summary.contains('\n') {
+            book.summary
+        } else {
+            String::new()
+        };
         feed.folders.push(f);
     }
 }
@@ -928,7 +1154,11 @@ fn parse_json(json: &serde_json::Value, base: &url::Url) -> Option<Feed> {
     if !json.is_object() || !(meta.is_object() || json.get("links").is_some()) {
         return None;
     }
-    let mut feed = Feed { title: meta["title"].as_str().unwrap_or_default().to_string(), ..Default::default() };
+    let mut feed = Feed {
+        title: meta["title"].as_str().unwrap_or_default().to_string(),
+        total: meta["numberOfItems"].as_u64().map(|n| n as usize),
+        ..Default::default()
+    };
     for l in as_list(&json["links"]) {
         let href = l["href"].as_str().unwrap_or_default();
         for rel in rels(l) {
@@ -955,6 +1185,7 @@ fn parse_json(json: &serde_json::Value, base: &url::Url) -> Option<Feed> {
                     title: l["title"].as_str().unwrap_or_default().to_string(),
                     url: join(base, l["href"].as_str()?)?,
                     count: l["properties"]["numberOfItems"].as_u64().map(|n| n as usize),
+                    ..Default::default()
                 })
             })
             .collect()
@@ -968,7 +1199,7 @@ fn parse_json(json: &serde_json::Value, base: &url::Url) -> Option<Feed> {
         if let Some(own) = as_list(&g["links"]).into_iter().find(|l| rels(l).contains(&"self")) {
             if let Some(url) = own["href"].as_str().and_then(|h| join(base, h)) {
                 let title = g["metadata"]["title"].as_str().unwrap_or_default().to_string();
-                feed.folders.push(Folder { title, url, count: g["metadata"]["numberOfItems"].as_u64().map(|n| n as usize) });
+                feed.folders.push(Folder { title, url, count: g["metadata"]["numberOfItems"].as_u64().map(|n| n as usize), ..Default::default() });
             }
         }
         feed.books.extend(as_list(&g["publications"]).into_iter().filter_map(|p| json_book(p, base)));
@@ -1001,9 +1232,15 @@ fn json_book(p: &serde_json::Value, base: &url::Url) -> Option<Book> {
                     rank = file_rank(ext);
                     book.links.file = join(base, href);
                     book.links.ext = ext.to_string();
+                    book.links.size = l["properties"]["size"].as_u64().or_else(|| l["length"].as_u64());
+                    book.links.label = l["title"].as_str().unwrap_or_default().to_string();
                 }
             } else if rel.starts_with(ACQUISITION) {
                 book.external = book.external.take().or_else(|| join(base, href));
+            } else if rel == "related" || rel == "author" || rel == "collection" {
+                if let Some(url) = join(base, href).filter(|_| is_feed_type(kind)) {
+                    book.related.push(Folder { title: l["title"].as_str().unwrap_or_default().to_string(), url, ..Default::default() });
+                }
             } else if rel == PSE_STREAM {
                 if let (Some(template), Some(count)) = (page_template(base, href), l["properties"]["count"].as_u64()) {
                     book.links.pages = Some(PageLinks { template, count: count as usize });
@@ -1055,6 +1292,9 @@ struct WholeFeed {
 /// Fails rather than returning part of a folder, since what's missing
 /// would be taken out of the library.
 pub async fn fetch_library(account: &Account) -> Result<Vec<RemoteSeries>, String> {
+    if account.is_catalog() {
+        return Ok(catalog_library(account));
+    }
     let mut walk = Walk::default();
     for root in &account.roots {
         let root_key = account.item_key(&format!("r{}", hash(&root.url)));
@@ -1112,6 +1352,67 @@ pub async fn fetch_library(account: &Account) -> Result<Vec<RemoteSeries>, Strin
     }
     remember_links(&account.key(), links);
     Ok(out)
+}
+
+/// A catalog's part of the library: the books downloaded from it, one
+/// group ("Downloads · Project Gutenberg"). Nothing is fetched.
+fn catalog_library(account: &Account) -> Vec<RemoteSeries> {
+    let root = account.item_key("downloads");
+    let mut out: Vec<RemoteSeries> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut links = HashMap::new();
+    let mut positions: HashMap<String, f32> = HashMap::new();
+    for book in &account.saved {
+        let item_id = book_id(&book.id);
+        let key = account.saved_series_key(book);
+        let issue = RemoteIssue {
+            key: account.item_key(&item_id),
+            item_id: item_id.clone(),
+            name: book.title.clone(),
+            extension: book.links.ext.clone(),
+            played: false,
+            page: 0,
+            last_read: 0,
+            release_date: book.date.clone(),
+            creators: crate::library::format_credits(book.authors.iter().map(|a| ("Author", a.as_str()))),
+        };
+        if let Some(pos) = book.series.as_ref().and_then(|(_, p)| *p) {
+            positions.insert(issue.key.clone(), pos);
+        }
+        let has_cover = book.links.cover.is_some();
+        links.insert(item_id.clone(), book.links.clone());
+        let i = *index.entry(key.clone()).or_insert_with(|| {
+            let (title, is_folder) = match &book.series {
+                Some((name, _)) if !name.trim().is_empty() => (name.clone(), true),
+                _ => (book.title.clone(), false),
+            };
+            out.push(RemoteSeries {
+                key: key.clone(),
+                title,
+                is_folder,
+                library_root: root.clone(),
+                library_name: fl!("opds-downloads-group"),
+                cover_item: None,
+                issues: Vec::new(),
+            });
+            out.len() - 1
+        });
+        let s = &mut out[i];
+        if s.cover_item.is_none() && has_cover {
+            s.cover_item = Some(item_id);
+        }
+        s.issues.push(issue);
+    }
+    for s in &mut out {
+        if s.cover_item.is_none() {
+            s.cover_item = s.issues.first().map(|i| i.item_id.clone());
+        }
+        if s.issues.iter().all(|i| positions.contains_key(&i.key)) {
+            s.issues.sort_by(|a, b| positions[&a.key].total_cmp(&positions[&b.key]));
+        }
+    }
+    remember_links(&account.key(), links);
+    out
 }
 
 /// Fetches a level's feeds, a few at a time, in their order.
@@ -1486,5 +1787,164 @@ mod tests {
         assert_eq!(book_id("urn:x:1"), format!("o{}", hash("urn:x:1")));
         let key = Account { url: "https://c".into(), ..Default::default() }.item_key("o1");
         assert_eq!(parse_key(&key).map(|(_, id)| id), Some("o1"));
+    }
+
+    /// A Project Gutenberg search, trimmed: its results are folders, each a
+    /// feed of one book, with the author as their text.
+    const GUTENBERG_SEARCH: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+<id>http://www.gutenberg.org/ebooks/search.opds/?query=dracula</id>
+<title>Books: dracula</title>
+<link rel="search" type="application/opensearchdescription+xml" href="https://www.gutenberg.org/catalog/osd-books.xml"/>
+<opensearch:totalResults>7</opensearch:totalResults>
+<opensearch:itemsPerPage>25</opensearch:itemsPerPage>
+<entry>
+<id>https://www.gutenberg.org/ebooks/345.opds</id>
+<title>Dracula</title>
+<content type="text">Bram Stoker</content>
+<link type="application/atom+xml;profile=opds-catalog" rel="subsection" href="/ebooks/345.opds"/>
+<link type="image/png" rel="http://opds-spec.org/image/thumbnail" href="data:image/png;base64,iVBORw0KGgo="/>
+</entry>
+</feed>"#;
+
+    /// A Gutenberg book's own feed, trimmed: two editions, an XHTML summary,
+    /// file sizes, and related feeds.
+    const GUTENBERG_BOOK: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<id>http://www.gutenberg.org/ebooks/345.opds</id>
+<title>Dracula by Bram Stoker</title>
+<entry>
+<title>Dracula</title>
+<content type="xhtml">
+<div xmlns="http://www.w3.org/1999/xhtml">
+<p>This edition had all images removed.</p>
+<p>
+Summary:
+"Dracula" by Bram Stoker is a Gothic horror novel &amp; more.
+</p>
+<p>Language: English</p>
+</div>
+</content>
+<id>urn:gutenberg:345:2</id>
+<published>1995-10-01T00:00:00+00:00</published>
+<author><name>Stoker, Bram</name></author>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB (older e-readers, no images)" length="433654" href="https://www.gutenberg.org/ebooks/345.epub.noimages"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="Kindle (no images)" length="606305" href="https://www.gutenberg.org/ebooks/345.kindle.noimages"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image" href="https://www.gutenberg.org/cache/epub/345/pg345.cover.medium.jpg"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/author/190.opds" title="By Stoker, Bram…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/1222.opds" title="On Horror tales…"/>
+</entry>
+<entry>
+<title>Dracula</title>
+<id>urn:gutenberg:345:3</id>
+<author><name>Stoker, Bram</name></author>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB3 (E-readers incl. Send-to-Kindle)" length="602902" href="https://www.gutenberg.org/ebooks/345.epub3.images"/>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB (older e-readers)" length="602043" href="https://www.gutenberg.org/ebooks/345.epub.images"/>
+</entry>
+</feed>"#;
+
+    #[test]
+    fn reads_gutenberg_search_results_as_folders() {
+        let base = url::Url::parse("https://www.gutenberg.org/ebooks/search.opds/?query=dracula").unwrap();
+        let feed = parse_feed(GUTENBERG_SEARCH, &base).unwrap();
+        assert_eq!(feed.total, Some(7));
+        assert!(feed.books.is_empty());
+        let f = &feed.folders[0];
+        assert_eq!((f.title.as_str(), f.url.as_str()), ("Dracula", "https://www.gutenberg.org/ebooks/345.opds"));
+        assert_eq!(f.subtitle, "Bram Stoker");
+        assert!(f.cover.as_deref().is_some_and(|c| c.starts_with("data:image/png;base64,")));
+    }
+
+    #[test]
+    fn reads_a_gutenberg_book_feed() {
+        let base = url::Url::parse("https://www.gutenberg.org/ebooks/345.opds").unwrap();
+        let feed = parse_feed(GUTENBERG_BOOK, &base).unwrap();
+        assert_eq!(feed.books.len(), 2);
+        let b = &feed.books[0];
+        assert_eq!(b.id, "urn:gutenberg:345:2");
+        assert_eq!(b.authors, ["Stoker, Bram"]);
+        assert_eq!(b.date, "1995-10-01");
+        // The XHTML summary as paragraphs, not just its last bit of text.
+        assert_eq!(
+            b.summary,
+            "This edition had all images removed.\n\nSummary: \"Dracula\" by Bram Stoker is a Gothic horror novel & more.\n\nLanguage: English"
+        );
+        // The EPUB is taken over the Kindle file, with its name and size.
+        assert_eq!(b.links.ext, "epub");
+        assert_eq!(b.links.file.as_deref(), Some("https://www.gutenberg.org/ebooks/345.epub.noimages"));
+        assert_eq!(b.links.size, Some(433654));
+        assert_eq!(b.links.label, "EPUB (older e-readers, no images)");
+        assert!(b.links.readable_file());
+        let related: Vec<(&str, &str)> = b.related.iter().map(|f| (f.title.as_str(), f.url.as_str())).collect();
+        assert_eq!(
+            related,
+            [
+                ("By Stoker, Bram…", "https://www.gutenberg.org/ebooks/author/190.opds"),
+                ("On Horror tales…", "https://www.gutenberg.org/ebooks/subject/1222.opds")
+            ]
+        );
+        // The first of two EPUBs wins.
+        assert_eq!(feed.books[1].links.label, "EPUB3 (E-readers incl. Send-to-Kindle)");
+        assert!(feed.folders.is_empty());
+    }
+
+    #[test]
+    fn html_summaries_become_paragraphs() {
+        assert_eq!(markup_text("<p>One  two</p><p>three<br/>four</p>", true), "One two\n\nthree\n\nfour");
+        assert_eq!(markup_text("plain <b>bold</b> text", true), "plain bold text");
+    }
+
+    #[test]
+    fn decodes_data_urls() {
+        assert_eq!(decode_data_url("image/png;base64,aGVsbG8gd29ybGQ=").as_deref(), Some(&b"hello world"[..]));
+        assert_eq!(decode_data_url("text/plain,hi").as_deref(), Some(&b"hi"[..]));
+        assert!(decode_data_url("image/png;base64,***").is_none());
+    }
+
+    #[test]
+    fn a_catalog_has_its_own_key_and_a_library_keeps_its_old_one() {
+        let library = Account { url: "https://c.example/opds".into(), user: "me".into(), ..Default::default() };
+        assert_eq!(library.key(), format!("opds-{}", hash("https://c.example/opds\nme")));
+        let catalog = Account { kind: Kind::Catalog, ..library.clone() };
+        assert_ne!(catalog.key(), library.key());
+        // Saved before catalogs existed: a library.
+        let old: Account = serde_json::from_str(r#"{"url":"https://c.example/opds","user":"me","roots":[]}"#).unwrap();
+        assert_eq!(old.kind, Kind::Library);
+        assert_eq!(old.key(), library.key());
+    }
+
+    #[test]
+    fn a_catalogs_library_is_its_downloads() {
+        let book = |id: &str, title: &str, series: Option<(&str, f32)>| SavedBook {
+            id: id.into(),
+            title: title.into(),
+            series: series.map(|(n, p)| (n.to_string(), Some(p))),
+            links: Links { file: Some(format!("https://c.example/{id}.epub")), ext: "epub".into(), ..Default::default() },
+            ..Default::default()
+        };
+        let account = Account {
+            url: "https://c.example/opds".into(),
+            kind: Kind::Catalog,
+            saved: vec![
+                book("a", "Dracula", None),
+                book("b2", "Saga Vol. 2", Some(("Saga", 2.0))),
+                book("b1", "Saga Vol. 1", Some(("Saga", 1.0))),
+            ],
+            ..Default::default()
+        };
+        let series = catalog_library(&account);
+        assert_eq!(series.len(), 2);
+        let root = account.item_key("downloads");
+        assert!(series.iter().all(|s| s.library_root == root));
+        // A book on its own is a one-shot; books naming a series are in it, in order.
+        let dracula = series.iter().find(|s| s.title == "Dracula").unwrap();
+        assert!(!dracula.is_folder);
+        assert_eq!(dracula.key, account.saved_series_key(&account.saved[0]));
+        let saga = series.iter().find(|s| s.title == "Saga").unwrap();
+        assert!(saga.is_folder);
+        let names: Vec<&str> = saga.issues.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["Saga Vol. 1", "Saga Vol. 2"]);
+        // Their links are known for reading and downloading.
+        assert_eq!(account.file(&book_id("a")).url, "https://c.example/a.epub");
     }
 }

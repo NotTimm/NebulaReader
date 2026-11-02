@@ -424,6 +424,32 @@ opds-back = Back
 opds-progress-local = Progress: kept on this computer (OPDS can't save it to the server)
 opds-item-pages = This book: streamed from the catalog page by page
 kind-opds-series = Series in an OPDS catalog
+# OPDS: adding a catalog as a library or as a catalog.
+opds-how-to-add = { $catalog } answered. How do you want to use it?
+opds-add-as-library = Add as a library
+opds-add-as-library-help = Pick folders and they sync into your library, and comics stream from the server, like a Jellyfin library. Best for a server of your own (Komga, Kavita, calibre-web…).
+opds-add-as-catalog = Add as a catalog
+opds-add-as-catalog-help = Browse and search it, and download the books you want to read. Only your downloads are kept. Best for big public collections like Project Gutenberg.
+opds-recommended = Recommended
+opds-added-catalog = Added { $catalog }. Browse or search it, and download what you want to read.
+opds-as-library = Added as a library
+opds-as-catalog = Added as a catalog: { $count ->
+    [one] 1 download
+   *[other] { $count } downloads
+}
+opds-browse = Browse
+opds-browse-catalogs = Browse catalogs
+opds-browse-catalog = Browse { $catalog }
+opds-catalog-help = Browse the folders or search the catalog, open a book to see what it's about, and download it to read it. Downloaded books show in your library under “Downloads · { $catalog }”.
+# The library group for books downloaded from a catalog ("Downloads · Project Gutenberg").
+opds-downloads-group = Downloads
+opds-editions = Editions
+opds-related = More from here
+opds-download = Download
+opds-download-size = Download ({ $size })
+opds-big-whole = This is the whole catalog. Syncing it puts every book in it in your library, which can take a long time and a lot of space on a big catalog. Adding the folders you want is usually better.
+opds-big-folder = “{ $folder }” has { $count } books. Syncing it puts every one of them in your library, which can take a long time.
+opds-add-anyway = Add Anyway
 kind-opds-book = Book in an OPDS catalog
 kind-opds-comic = Comic in an OPDS catalog
 

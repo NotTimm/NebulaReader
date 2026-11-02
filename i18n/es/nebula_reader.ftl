@@ -409,6 +409,32 @@ opds-back = Atrás
 opds-progress-local = Progreso: guardado en este equipo (OPDS no puede guardarlo en el servidor)
 opds-item-pages = Este libro: se recibe del catálogo página a página
 kind-opds-series = Serie en un catálogo OPDS
+# OPDS: adding a catalog as a library or as a catalog.
+opds-how-to-add = { $catalog } respondió. ¿Cómo quieres usarlo?
+opds-add-as-library = Añadir como biblioteca
+opds-add-as-library-help = Elige carpetas y se sincronizan con tu biblioteca, y los cómics se leen desde el servidor, como una biblioteca de Jellyfin. Lo mejor para un servidor propio (Komga, Kavita, calibre-web…).
+opds-add-as-catalog = Añadir como catálogo
+opds-add-as-catalog-help = Explóralo y busca en él, y descarga los libros que quieras leer. Solo se guardan tus descargas. Lo mejor para grandes colecciones públicas como el Proyecto Gutenberg.
+opds-recommended = Recomendado
+opds-added-catalog = Se añadió { $catalog }. Explóralo o busca en él, y descarga lo que quieras leer.
+opds-as-library = Añadido como biblioteca
+opds-as-catalog = Añadido como catálogo: { $count ->
+    [one] 1 descarga
+   *[other] { $count } descargas
+}
+opds-browse = Explorar
+opds-browse-catalogs = Explorar catálogos
+opds-browse-catalog = Explorar { $catalog }
+opds-catalog-help = Explora las carpetas o busca en el catálogo, abre un libro para ver de qué trata y descárgalo para leerlo. Los libros descargados aparecen en tu biblioteca en «Descargas · { $catalog }».
+# The library group for books downloaded from a catalog ("Downloads · Project Gutenberg").
+opds-downloads-group = Descargas
+opds-editions = Ediciones
+opds-related = Más desde aquí
+opds-download = Descargar
+opds-download-size = Descargar ({ $size })
+opds-big-whole = Este es el catálogo entero. Sincronizarlo pone todos sus libros en tu biblioteca, lo que puede llevar mucho tiempo y ocupar mucho espacio en un catálogo grande. Suele ser mejor añadir las carpetas que quieras.
+opds-big-folder = «{ $folder }» tiene { $count } libros. Sincronizarla pone todos ellos en tu biblioteca, lo que puede llevar mucho tiempo.
+opds-add-anyway = Añadir de todos modos
 kind-opds-book = Libro en un catálogo OPDS
 kind-opds-comic = Cómic en un catálogo OPDS
 
