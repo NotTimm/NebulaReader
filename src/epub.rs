@@ -187,6 +187,15 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
         let file_title = entries.iter().find(|t| t.fragment.is_none()).map(|t| t.title.clone());
         let mut parts: Vec<(Option<String>, Vec<Block>)> = vec![(file_title, Vec::new())];
         let mut anchor_part: Vec<(String, usize)> = Vec::new();
+        // Ids seen since the last text or picture. A link target is often
+        // an empty marker a little before what it's for (Gutenberg puts
+        // `<a id="link2HCH0001">` before some spacing and the chapter's
+        // heading), so an id goes with the next content, in whichever
+        // chapter that turns out to be, not the content before it.
+        let mut waiting: Vec<String> = Vec::new();
+        let place = |waiting: &mut Vec<String>, anchor_part: &mut Vec<(String, usize)>, part: usize| {
+            anchor_part.extend(waiting.drain(..).map(|id| (id, part)));
+        };
         for block in parse_xhtml_body(&xhtml, &chapter_path, &css, &wanted) {
             match block {
                 Parsed::Anchor(id) => {
@@ -198,10 +207,13 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
                             last.0 = Some(title.to_string());
                         }
                     }
-                    anchor_part.push((id, parts.len() - 1));
+                    waiting.push(id);
                 }
-                Parsed::Id(id) => anchor_part.push((id, parts.len() - 1)),
-                Parsed::Block(b) => parts.last_mut().unwrap().1.push(b),
+                Parsed::Id(id) => waiting.push(id),
+                Parsed::Block(b) => {
+                    place(&mut waiting, &mut anchor_part, parts.len() - 1);
+                    parts.last_mut().unwrap().1.push(b);
+                }
                 Parsed::ImageSrc(src) => {
                     let p = join_epub_path(&chapter_dir, &src);
                     let idx = match image_index.get(&p) {
@@ -216,11 +228,14 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
                     // tall) mean nothing as a block of their own.
                     let tiny = idx.and_then(|i| image_size(&images[i])).is_some_and(|(w, h)| w.max(h) <= 32);
                     if let (Some(i), false) = (idx, tiny) {
+                        place(&mut waiting, &mut anchor_part, parts.len() - 1);
                         parts.last_mut().unwrap().1.push(Block::Image(i));
                     }
                 }
             }
         }
+        // Ids at the very end: the next chapter (the start of the next file).
+        place(&mut waiting, &mut anchor_part, parts.len());
 
         // Parts become chapters (empty ones are dropped: an anchor in one
         // means the next chapter).
@@ -236,7 +251,9 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
                     Block::Heading { spans, .. }
                     | Block::Paragraph { spans, .. }
                     | Block::Quote(spans)
-                    | Block::ListItem(spans) => spans.iter().map(|s| s.text.split_whitespace().count()).sum(),
+                    // The whole block's text: a link ending mid-word or
+                    // before a comma doesn't make an extra word.
+                    | Block::ListItem(spans) => spans.iter().map(|s| s.text.as_str()).collect::<String>().split_whitespace().count(),
                     _ => 0,
                 })
                 .sum();
@@ -253,7 +270,9 @@ pub fn open(path: &Path) -> Result<EpubBook, String> {
             chapters.push(EpubChapter { title, blocks, words });
         }
         for (id, part) in anchor_part {
-            chapter_for_anchor.insert((chapter_path.clone(), id), part_chapter[part]);
+            // Past the last part: the next chapter, the next file's first.
+            let chapter = part_chapter.get(part).copied().unwrap_or(chapters.len());
+            chapter_for_anchor.insert((chapter_path.clone(), id), chapter);
         }
     }
 
@@ -949,6 +968,11 @@ impl BodyParser<'_> {
 
     fn open(&mut self, e: &BytesStart, empty: bool) {
         let name = local_name(&e.name()).to_ascii_lowercase();
+        // A block element ends the one before it first, so its id comes
+        // after that block, with its own content.
+        if block_kind(&name).is_some() {
+            self.flush();
+        }
         if let Some(id) = attr(e, "id").or_else(|| if name == "a" { attr(e, "name") } else { None }) {
             if self.anchors.contains(&id) {
                 self.flush();
@@ -1206,8 +1230,9 @@ mod tests {
             ),
             (
                 "OEBPS/a.xhtml",
-                r##"<html><body><p>Title page. <a href="#link-c2">Chapter 2</a> <a href="https://www.gutenberg.org">Gutenberg</a></p>
+                r##"<html><body><p>Title page. <a href="#link-c2">Chapter 2</a> <a href="https://www.gutenberg.org">Gutenberg</a> <a href="#m2">Two</a></p>
 <h2 id="c1">CHAPTER 1</h2><p>Call me Ishmael.</p><p id="s1">A section.</p><p>More of one.</p>
+<p><a id="m2"></a></p><div style="height: 4em"><br/><br/></div>
 <div><a id="c2"></a></div><h2 id="link-c2">CHAPTER 2</h2><p>The carpet-bag.</p></body></html>"##,
             ),
         ];
@@ -1238,9 +1263,14 @@ mod tests {
                 ("Title page. ", None),
                 ("Chapter 2", Some("OEBPS/a.xhtml#link-c2")),
                 (" ", None),
-                ("Gutenberg", Some("https://www.gutenberg.org"))
+                ("Gutenberg", Some("https://www.gutenberg.org")),
+                (" ", None),
+                ("Two", Some("OEBPS/a.xhtml#m2"))
             ]
         );
+        // An empty marker before some spacing and the next chapter (how
+        // Gutenberg marks its link targets) goes with that chapter.
+        assert_eq!(book.chapter_for_link("OEBPS/a.xhtml#m2"), Some(2));
         assert_eq!(book.chapter_for_link("OEBPS/a.xhtml#link-c2"), Some(2));
         assert_eq!(book.chapter_for_link("OEBPS/a.xhtml#s1"), Some(1));
         // An unknown id in a known file: that file's start.
@@ -1310,6 +1340,43 @@ mod tests {
         for t in book.toc.iter().take(12) {
             println!("  toc {}{} -> ch {}", "  ".repeat(t.level), t.title, t.chapter);
         }
+        // Where the book's own links go (its printed contents).
+        let mut shown = 0;
+        for ch in &book.chapters {
+            for b in &ch.blocks {
+                let (Block::Paragraph { spans, .. } | Block::Heading { spans, .. } | Block::Quote(spans) | Block::ListItem(spans)) = b else {
+                    continue;
+                };
+                for sp in spans.iter().filter(|s| s.link.as_deref().is_some_and(|l| !l.contains("://"))) {
+                    if shown < 12 {
+                        let to = sp.link.as_deref().and_then(|l| book.chapter_for_link(l));
+                        println!("  link {:?} -> {:?}", sp.text, to.map(|c| book.chapters[c].title.as_str()));
+                        shown += 1;
+                    }
+                }
+            }
+        }
+        // Links named like a chapter that open another one.
+        let norm = |t: &str| t.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+        let (mut named, mut wrong) = (0, 0);
+        for ch in &book.chapters {
+            for b in &ch.blocks {
+                let (Block::Paragraph { spans, .. } | Block::Heading { spans, .. } | Block::Quote(spans) | Block::ListItem(spans)) = b else {
+                    continue;
+                };
+                for sp in spans {
+                    let Some(to) = sp.link.as_deref().and_then(|l| book.chapter_for_link(l)) else { continue };
+                    if book.chapters.iter().any(|c| norm(&c.title) == norm(&sp.text)) {
+                        named += 1;
+                        if norm(&book.chapters[to].title) != norm(&sp.text) {
+                            wrong += 1;
+                            println!("  WRONG {:?} -> {:?}", sp.text, book.chapters[to].title);
+                        }
+                    }
+                }
+            }
+        }
+        println!("  {named} links named like a chapter, {wrong} open another");
         if let Some(ch) = book.chapters.iter().find(|c| c.words > 2000) {
             println!("== {} ({} words)", ch.title, ch.words);
             for b in ch.blocks.iter().take(6) {
