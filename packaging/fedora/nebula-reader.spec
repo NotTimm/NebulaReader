@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.0~beta.3
+Version:        0.2.0~beta.4
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,11 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Mon Nov 02 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0~beta.4-1
+- Wikipedia in 30 languages, text selection and copying, smooth scrolling
+- Wikipedia keeps your place; arrow keys scroll; C toggles the contents
+- Windows touchpad pinch zooms
+
 * Mon Nov 02 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0~beta.3-1
 - Wikipedia, opt-in: main page, search and articles laid out like the site
 - OPDS catalog shelves in the library; catalog descriptions kept on downloads

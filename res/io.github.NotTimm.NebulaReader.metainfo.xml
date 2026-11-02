@@ -69,6 +69,16 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.0-beta.4" date="2026-11-02" type="development">
+      <description>
+        <ul>
+          <li>Wikipedia in 30 languages, chosen on its main page</li>
+          <li>Select and copy Wikipedia text across paragraphs, with right-click Copy and Select All</li>
+          <li>Smooth scrolling and arrow-key scrolling in Wikipedia, which keeps your place when you show the contents, open a picture or go Back</li>
+          <li>Touchpad pinch zooms on Windows</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0-beta.3" date="2026-11-02" type="development">
       <description>
         <ul>

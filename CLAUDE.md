@@ -179,6 +179,12 @@ the owner's laptop). Last updated 2026-11-02.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Beta 0.2.0-beta.4 (2026-11-02): Wikipedia polish (30 languages,
+  selection and copy, smooth/arrow scrolling, kept scroll place, C for
+  the contents), the FloatFlow fix and the Windows pinch hook. Owner
+  calls Wikipedia polished and tested (on Linux); OPDS is where they want
+  it for now (tried on Gutenberg only). The owner is testing the beta on
+  their other laptop.
 - Beta 0.2.0-beta.3 (2026-11-02): Wikipedia (opt-in), the OPDS
   catalog shelf in the library (Copilot, PR #13: `view_catalog_quick_sections`,
   `OpdsMsg::BrowseTo`, which opens under the catalog's start via

@@ -134,13 +134,14 @@ comes from and whether it's online, and what you're reading shows on the
 server's dashboard. **Download** whole series or single chapters to read
 when the server can't be reached. [How it works](#jellyfin)
 
-### 📡 OPDS catalogs (new, untested)
+### 📡 OPDS catalogs (new)
 
 Add an OPDS catalog (Komga, Kavita, calibre-web, Stump and many more
 have one), pick the folders you want, and they're synced into your
 library just like a Jellyfin library, with streaming, downloads and
 offline reading. Everything else in the catalog stays browsable and
-searchable. **Not tried against real servers yet**: please
+searchable. Tried with Project Gutenberg's catalog, **not yet with a
+Komga, Kavita or other server of your own**: please
 [report](https://github.com/NotTimm/NebulaReader/issues/new/choose) how
 it goes with yours. [How it works](#opds-catalogs)
 
@@ -332,10 +333,11 @@ python3 tools/mock-jellyfin.py ~/Comics/Manga --port 8097
 
 ## OPDS catalogs
 
-> **Untested.** OPDS support is built from the OPDS 1.2 and 2.0 specs and
-> the Page Streaming Extension, and covered by unit tests, but it hasn't
-> been tried against a real Komga, Kavita, calibre-web or other server
-> yet. Reports, good or bad, are very welcome.
+> **New.** OPDS support is built from the OPDS 1.2 and 2.0 specs and the
+> Page Streaming Extension and covered by unit tests. Adding a catalog
+> such as Project Gutenberg has been tried for real; a library on a
+> Komga, Kavita, calibre-web or other server of your own hasn't yet.
+> Reports, good or bad, are very welcome.
 
 Nebula can add an OPDS catalog in one of two ways, and asks which when
 you add it:
@@ -405,11 +407,23 @@ a web view, and laid out like the site: one scrolling page with a
 collapsible contents sidebar, the infobox beside the lead, pictures
 beside the text, and links that open other articles.
 
+- **30 languages:** the menu on the main page's top bar switches between
+  Wikipedias (English by default, remembered).
+- **Select and copy:** drag across as much of an article as you like
+  (double-click a word, triple-click a paragraph, drag to the top or
+  bottom edge to scroll). `Ctrl+C` copies, `Ctrl+A` selects all, and
+  right-click has Copy and Select All.
+- **Scrolling** glides like a browser's, and `Up`/`Down` held scroll the
+  page. `C` shows or hides the contents. Your place is kept when you
+  show the contents, open a picture, or go Back to a page.
+- **Pictures:** click one to see it full window; `Left`/`Right` step
+  through the page's pictures, `Esc` closes.
+
 Articles come from Wikipedia's public API under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) and are
 credited on every page, with a link to read them on Wikipedia. Nebula
 isn't made by or connected to Wikipedia or the Wikimedia Foundation.
-English Wikipedia only for now. It's off unless you turn it on.
+It's off unless you turn it on.
 
 ## ComicVine metadata (optional)
 

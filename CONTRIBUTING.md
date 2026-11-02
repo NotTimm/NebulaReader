@@ -39,9 +39,10 @@ Some things that are known and wanted but nobody's working on yet:
   once, and not reopening archives that haven't changed.
 - **Jellyfin**: fetch a server's libraries in parallel, and sync a book's
   reading position *from* the server, not just to it.
-- **OPDS on real servers**: OPDS catalogs are new and untested (see the
-  README); trying them with Komga, Kavita, calibre-web, Stump or others
-  and reporting what happens helps most.
+- **OPDS on real servers**: OPDS is new and so far tried only with
+  Project Gutenberg's catalog (see the README); adding a library from
+  Komga, Kavita, calibre-web, Stump or others and reporting what happens
+  helps most.
 - **Cleaner names**: scan-group tags such as `Jaimini's~box~` in file
   names aren't stripped yet.
 - **More languages**: see [i18n/README.md](i18n/README.md). The app's
@@ -88,6 +89,10 @@ serves a folder of your own comics as a small fake Jellyfin server:
   offline reading work the same for both (`src/app/jellyfin_view.rs`,
   `src/app/opds_view.rs`); `src/remote_zip.rs`, `src/remote_rar.rs`:
   streaming pages over the network.
+- `src/wikipedia.rs`, `src/app/wiki_view.rs`: Wikipedia (its API and
+  article parsing, and the pages drawn from it); `src/app/float_flow.rs`
+  lays text out beside floating pictures and `src/app/gestures.rs` gives
+  the page its smooth scrolling.
 - `src/platform/`: anything specific to Linux, Windows or macOS, and
   following each desktop's colours (`look.rs`).
 - `i18n/`, `src/i18n.rs`: the interface text in each language. Use
