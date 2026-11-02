@@ -136,8 +136,36 @@ pub struct Browse {
     error: Option<String>,
     search: Option<Search>,
     search_input: String,
+    /// Where in the trail the search results are: a new search replaces
+    /// them (and anything opened from them) instead of adding a level.
+    search_at: Option<usize>,
     /// A book's page, over the folder.
     book: Option<BookPage>,
+}
+
+impl Browse {
+    /// Shows search results: in place of the last search's (and anything
+    /// opened from them), so searching again doesn't add a level.
+    fn push_search(&mut self, title: String, url: String) {
+        if let Some(at) = self.search_at {
+            self.trail.truncate(at);
+        }
+        self.search_at = Some(self.trail.len());
+        self.trail.push((title, url));
+    }
+
+    /// Up one folder; false at the catalog's start.
+    fn up(&mut self) -> bool {
+        if self.trail.len() <= 1 {
+            return false;
+        }
+        self.trail.pop();
+        // Out of the search results: the next search starts from here.
+        if self.search_at.is_some_and(|at| self.trail.len() <= at) {
+            self.search_at = None;
+        }
+        true
+    }
 }
 
 /// One book, as the catalog describes it.
@@ -368,6 +396,7 @@ impl App {
                     error: None,
                     search: None,
                     search_input: String::new(),
+                    search_at: None,
                     book: None,
                 });
                 self.op.thumbs.clear();
@@ -391,15 +420,13 @@ impl App {
                 let Some(b) = self.op.browse.as_mut() else { return Task::none() };
                 if let Some(page) = b.book.take() {
                     // A folder that was only this book goes too.
-                    if page.whole_feed && b.trail.len() > 1 {
-                        b.trail.pop();
+                    if page.whole_feed && b.up() {
                         return self.load_current();
                     }
                     // Back to the list where it was.
                     return scroll_mod::scroll_to(catalog_scroll_id(), AbsoluteOffset { x: None, y: Some(self.op.list_offset) });
                 }
-                if b.trail.len() > 1 {
-                    b.trail.pop();
+                if b.up() {
                     return self.load_current();
                 }
             }
@@ -478,7 +505,7 @@ impl App {
                 };
                 match result {
                     Ok(url) => {
-                        b.trail.push((fl!("opds-search-results", query = query.as_str()), url));
+                        b.push_search(fl!("opds-search-results", query = query.as_str()), url);
                         return self.load_current();
                     }
                     Err(e) => {
@@ -1130,5 +1157,57 @@ fn root_toggle<'a>(added: bool, title: &str, url: &str) -> Element<'a, Message> 
         widget::button::standard(fl!("opds-remove-folder")).on_press(msg).into()
     } else {
         widget::button::suggested(fl!("opds-add-folder")).on_press(msg).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn browse() -> Browse {
+        Browse {
+            account_key: String::new(),
+            trail: vec![("Catalog".into(), "/".into())],
+            feed: None,
+            loading: false,
+            error: None,
+            search: None,
+            search_input: String::new(),
+            search_at: None,
+            book: None,
+        }
+    }
+
+    fn titles(b: &Browse) -> Vec<&str> {
+        b.trail.iter().map(|(t, _)| t.as_str()).collect()
+    }
+
+    #[test]
+    fn searching_again_replaces_the_results() {
+        let mut b = browse();
+        b.push_search("hamlet".into(), "/s?q=hamlet".into());
+        b.push_search("foundation".into(), "/s?q=foundation".into());
+        b.push_search("foundation".into(), "/s?q=foundation".into());
+        assert_eq!(titles(&b), ["Catalog", "foundation"]);
+        // A folder opened from the results goes too.
+        b.trail.push(("Authors".into(), "/a".into()));
+        b.push_search("dracula".into(), "/s?q=dracula".into());
+        assert_eq!(titles(&b), ["Catalog", "dracula"]);
+    }
+
+    #[test]
+    fn a_search_from_a_folder_comes_back_to_it() {
+        let mut b = browse();
+        b.trail.push(("Popular".into(), "/p".into()));
+        b.push_search("whale".into(), "/s?q=whale".into());
+        assert_eq!(titles(&b), ["Catalog", "Popular", "whale"]);
+        assert!(b.up());
+        assert_eq!(titles(&b), ["Catalog", "Popular"]);
+        // Out of the results, a new search is added from here.
+        b.push_search("sea".into(), "/s?q=sea".into());
+        assert_eq!(titles(&b), ["Catalog", "Popular", "sea"]);
+        assert!(b.up() && b.up());
+        assert!(!b.up());
+        assert_eq!(titles(&b), ["Catalog"]);
     }
 }
