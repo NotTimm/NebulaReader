@@ -23,6 +23,7 @@ mod settings;
 mod themes;
 mod updater;
 mod updates;
+mod wikipedia;
 
 use cosmic::app::Settings;
 use cosmic::iced::Size;

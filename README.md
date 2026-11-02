@@ -394,6 +394,22 @@ How it works:
 - Books only for sale or loan, or in a format Nebula can't read (Kindle,
   PDF downloads from a catalog), show as **Open in Browser**.
 
+## Wikipedia (optional, new)
+
+**Settings → Wikipedia → Read Wikipedia in Nebula** adds a dictionary
+button to the library's header. It opens Wikipedia's main page (today's
+featured article, In the news, On this day, most read, the picture of
+the day), search and random articles. Articles are drawn by Nebula, not
+a web view, and laid out like the site: one scrolling page with a
+collapsible contents sidebar, the infobox beside the lead, pictures
+beside the text, and links that open other articles.
+
+Articles come from Wikipedia's public API under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) and are
+credited on every page, with a link to read them on Wikipedia. Nebula
+isn't made by or connected to Wikipedia or the Wikimedia Foundation.
+English Wikipedia only for now. It's off unless you turn it on.
+
 ## ComicVine metadata (optional)
 
 AniList only knows manga, so Western comics (Marvel, DC and so on) are

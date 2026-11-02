@@ -185,6 +185,8 @@ pub struct Settings {
     pub dismissed_update: Option<String>,
     /// Books whose web links open without asking (their file paths).
     pub open_links_from: Vec<String>,
+    /// The Wikipedia page is on (it's opt-in).
+    pub wikipedia: bool,
     /// Interface language (an `i18n/` folder name); `None` follows the
     /// system.
     pub language: Option<String>,
@@ -211,6 +213,7 @@ impl Default for Settings {
             last_version: None,
             dismissed_update: None,
             open_links_from: Vec::new(),
+            wikipedia: false,
             language: None,
         }
     }

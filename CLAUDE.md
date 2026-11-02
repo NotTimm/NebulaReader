@@ -256,6 +256,19 @@ the owner's laptop). Last updated 2026-11-01.
   "Nebula Reader Beta". Linux packages and dev builds are unaffected.
   0.2.0-beta.1 predates this (no toggle, checks only regular releases):
   the next beta has to be installed by hand once. Untried on Windows/Mac.
+- Wikipedia (2026-11-02, unreleased, first go; opt-in `Settings::wikipedia`,
+  off by default): `src/wikipedia.rs` (REST API: feed/featured, page/html
+  Parsoid, rest.php search, random; a small HTML tree → `Article` of
+  sections, `Block`s, infobox `Table` with cell colours; hidden classes
+  dropped) and `src/app/wiki_view.rs` (`AppView::Wikipedia`: main page
+  boxes, article as one scrolling page like the site, collapsible
+  contents sidebar jumping via a widget `Operation` (`FindSection`),
+  figures beside the following text, credit + CC BY-SA + View on
+  Wikipedia). Owner wants the site's look, no web view, no tools/main
+  menu, scrolling only (no pages). Never ship the Wikipedia logo or
+  wordmark (trademarks); User-Agent names the app. English only.
+  `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
+  `NEBULA_WIKI_TEST=page.html` parses a saved article.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
 - Translations (2026-10-30, unreleased): Fluent via i18n-embed
   (`src/i18n.rs`, `i18n/<lang>/nebula_reader.ftl`, `i18n.toml`); every

@@ -34,6 +34,7 @@ mod library_view;
 mod window_icon;
 mod jellyfin_view;
 mod opds_view;
+mod wiki_view;
 mod downloads;
 mod properties;
 mod rar_index;
@@ -42,6 +43,7 @@ mod chapter_list;
 use book_view::{BookMsg, BookScroll};
 use jellyfin_view::{JfMsg, JfState, RemoteReading};
 use opds_view::{OpdsMsg, OpdsState};
+use wiki_view::{WikiMsg, WikiState};
 use downloads::{DlMsg, Downloads};
 
 /// The modifier key named in hints: Cmd on a Mac, Ctrl elsewhere.
@@ -95,7 +97,7 @@ const CACHE_RADIUS: usize = 14;
 // ── View modes ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum AppView { Library, Series, Reader, Downloads, Catalog }
+pub enum AppView { Library, Series, Reader, Downloads, Catalog, Wikipedia }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Layout { Single, Dual }
@@ -243,6 +245,7 @@ pub enum Message {
     Jf(JfMsg),
     /// OPDS catalogs: adding them and the Catalog page.
     Opds(OpdsMsg),
+    Wiki(WikiMsg),
     /// Jellyfin downloads for offline reading.
     Dl(DlMsg),
     /// A library card was right-clicked.
@@ -414,6 +417,7 @@ pub struct App {
     /// OPDS catalogs added.
     opds: crate::opds::Accounts,
     op: OpdsState,
+    wiki: WikiState,
     dl: Downloads,
     /// The Jellyfin series being read, if any.
     remote: Option<RemoteReading>,
@@ -1441,6 +1445,7 @@ impl Application for App {
             jf: JfState::default(),
             opds: crate::opds::Accounts::load(),
             op: OpdsState::default(),
+            wiki: WikiState::default(),
             dl,
             remote: None,
             context_page: ContextPage::Settings,
@@ -1561,7 +1566,7 @@ impl Application for App {
                 ),
                 self.source_label(),
             ],
-            AppView::Series | AppView::Downloads | AppView::Catalog => vec![tip(
+            AppView::Series | AppView::Downloads | AppView::Catalog | AppView::Wikipedia => vec![tip(
                 widget::button::icon(icon::from_name("go-home-symbolic")).on_press(Message::GoToLibrary),
                 fl!("back-to-library"),
             )],
@@ -1575,7 +1580,7 @@ impl Application for App {
         let mut els: Vec<Element<'_, Message>> = Vec::new();
 
         match self.app_view {
-            AppView::Series | AppView::Downloads | AppView::Catalog => {
+            AppView::Series | AppView::Downloads | AppView::Catalog | AppView::Wikipedia => {
                 els.push(
                     widget::button::icon(icon::from_name("emblem-system-symbolic"))
                         .on_press(Message::ToggleSettings)
@@ -1589,6 +1594,14 @@ impl Application for App {
                         .width(Length::Fixed(220.0))
                         .into(),
                 );
+                // Wikipedia, when it's turned on.
+                if self.settings.wikipedia {
+                    els.push(tip(
+                        widget::button::icon(icon::from_name("accessories-dictionary-symbolic"))
+                            .on_press(Message::Wiki(WikiMsg::Open)),
+                        "Wikipedia".to_string(),
+                    ));
+                }
                 // OPDS catalogs added as catalogs: browse them.
                 if self.has_catalogs() {
                     els.push(tip(
@@ -1831,6 +1844,7 @@ impl Application for App {
             AppView::Reader => self.view_reader(),
             AppView::Downloads => self.view_downloads(),
             AppView::Catalog => self.view_catalog(),
+            AppView::Wikipedia => self.view_wiki(),
         };
 
         // While the settings or details drawer is open, a click anywhere
@@ -1943,6 +1957,9 @@ impl App {
                 // only from the catalog's start.
                 else if self.app_view == AppView::Catalog && self.catalog_can_go_back() {
                     return self.update(Message::Opds(OpdsMsg::Back));
+                }
+                else if self.app_view == AppView::Wikipedia && self.wiki_can_go_back() {
+                    return self.update(Message::Wiki(WikiMsg::Back));
                 }
                 else if self.app_view != AppView::Library { return self.update(Message::GoToLibrary); }
             }
@@ -2394,6 +2411,7 @@ impl App {
             add_folder_row.into(),
             self.build_jellyfin_section(),
             self.build_opds_section(),
+            self.build_wiki_section(),
             self.build_about_section(),
         ])
         .into()
@@ -3722,6 +3740,7 @@ impl App {
             Message::Book(msg) => return self.update_book(msg),
             Message::Jf(msg) => return self.update_jellyfin(msg),
             Message::Opds(msg) => return self.update_opds(msg),
+            Message::Wiki(msg) => return self.update_wiki(msg),
             Message::Dl(msg) => return self.update_downloads(msg),
             Message::FitPage => {
                 let Some(page) = self.page_size(self.current_page) else { return Task::none() };
