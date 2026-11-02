@@ -976,6 +976,23 @@ pub fn apply_fallback_metadata(
     Ok(())
 }
 
+/// Sets a display title only when there isn't one already, so explicit
+/// online matches or user rematches keep winning.
+pub fn apply_fallback_display_title(
+    conn: &Connection,
+    series_path: &str,
+    display_title: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE series SET
+             display_title = CASE WHEN display_title = '' THEN ?2 ELSE display_title END
+         WHERE path = ?1",
+        params![series_path, display_title],
+    )
+    .map_err(|e| format!("apply_fallback_display_title: {e}"))?;
+    Ok(())
+}
+
 /// Records that a lookup ran without a usable match (or failed).
 pub fn mark_meta(conn: &Connection, series_path: &str, status: &str, clear_match: bool) {
     let now = now_unix();

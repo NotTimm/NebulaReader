@@ -469,6 +469,19 @@ fn unreachable(e: &str) -> bool {
     !e.starts_with("HTTP") && e != fl!("opds-too-big")
 }
 
+/// A cleaner fallback display title for OPDS catalog one-shots, while
+/// keeping the original title for search and matching.
+fn opds_display_title(raw: &str) -> Option<String> {
+    let (head, tail) = raw.split_once(';')?;
+    let head = head.trim();
+    if head.is_empty() {
+        return None;
+    }
+    let tail = tail.trim_start().to_ascii_lowercase();
+    (tail.starts_with("or, ") || tail.starts_with("or "))
+        .then(|| head.to_string())
+}
+
 fn session_task(report: impl std::future::Future<Output = Result<(), String>> + Send + 'static) -> Task<Message> {
     cosmic::task::future(async move { Message::Jf(JfMsg::SessionReported(report.await)) })
 }
@@ -1350,6 +1363,11 @@ impl App {
                         "opds",
                         account.url(),
                     );
+                }
+                if !s.is_folder && s.issues.len() == 1 {
+                    if let Some(title) = opds_display_title(&s.title) {
+                        let _ = library::apply_fallback_display_title(db, &s.key, &title);
+                    }
                 }
             }
             for i in &s.issues {
