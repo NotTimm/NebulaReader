@@ -299,6 +299,12 @@ the owner's laptop). Last updated 2026-11-02.
   Wheel and touchpad scrolling glide like a browser (`app/gestures.rs`,
   ported from NebulaPlayer's `input.rs`: wheel steps ease out over
   ~75 ms, touchpad swipes fling), wrapped around the whole wiki page.
+  Its `throttle` passes the page's `Scrolled` reports every 400 px and
+  once settled, into `wiki.offset`; history entries keep their offset
+  (Back restores it via `wiki.restore` once the page loads), and closing
+  the picture viewer or coming back from the library scrolls back to it.
+  The contents keep a slot (empty when hidden) so the page's scroll state
+  survives toggling them.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
 - Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows

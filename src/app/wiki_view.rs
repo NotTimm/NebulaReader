@@ -102,6 +102,8 @@ pub enum WikiMsg {
     ScrollFrame(std::time::Instant),
     /// The window's height, for the arrows' speed.
     WindowHeight(f32),
+    /// How far down the page is scrolled.
+    Scrolled(f32),
     /// Pressing on or dragging over a text (by its key).
     Select(usize, cosmic::iced::widget::text::Select),
     /// The left button let go.
@@ -191,7 +193,13 @@ fn language_names() -> &'static [&'static str] {
 #[derive(Default)]
 pub struct WikiState {
     page: Option<WikiPage>,
-    history: Vec<WikiPage>,
+    /// Pages to go Back to, each with how far down it was scrolled.
+    history: Vec<(WikiPage, f32)>,
+    /// How far down the page is scrolled now (from the scrollable's
+    /// reports, throttled: exact once scrolling settles).
+    offset: f32,
+    /// Where to scroll once the page being loaded arrives (going Back).
+    restore: Option<f32>,
     generation: u64,
     loading: bool,
     error: Option<String>,
@@ -602,10 +610,11 @@ impl App {
         if remember {
             if let Some(current) = self.wiki.page.take() {
                 if current != page {
-                    self.wiki.history.push(current);
+                    self.wiki.history.push((current, self.wiki.offset));
                 }
             }
         }
+        self.wiki.offset = 0.0;
         self.wiki.page = Some(page.clone());
         self.wiki.generation += 1;
         self.wiki.error = None;
@@ -620,6 +629,8 @@ impl App {
             WikiPage::Home => {
                 self.set_header_title(fl!("wiki-main-page"));
                 if let Some(f) = self.wiki.featured.clone() {
+                    // Going Back to it: `HomeLoaded` scrolls to where it was.
+                    let top = if self.wiki.restore.is_some() { Task::none() } else { top };
                     return Task::batch([self.update_wiki(WikiMsg::HomeLoaded(generation, Ok(f))), top]);
                 }
                 cosmic::task::future(async move { Message::Wiki(WikiMsg::HomeLoaded(generation, wikipedia::featured().await)) })
@@ -758,6 +769,22 @@ impl App {
         (speed != 0.0).then_some(speed)
     }
 
+    /// Scrolls a page shown again back to where it was.
+    fn wiki_scroll_back(&self) -> Task<Message> {
+        scroll_mod::scroll_to(scroll_id(), AbsoluteOffset { x: None, y: Some(self.wiki.offset) })
+    }
+
+    /// Going Back: once the page has arrived, scrolls to where it was.
+    fn wiki_restore(&mut self) -> Task<Message> {
+        match self.wiki.restore.take() {
+            Some(y) => {
+                self.wiki.offset = y;
+                self.wiki_scroll_back()
+            }
+            None => Task::none(),
+        }
+    }
+
     /// The page's height, near enough: the window's.
     fn wiki_height(&self) -> f32 {
         if self.wiki.window_height > 0.0 { self.wiki.window_height } else { 800.0 }
@@ -773,17 +800,18 @@ impl App {
         match msg {
             WikiMsg::Open => {
                 if self.wiki.page.is_some() && !self.wiki.loading && self.wiki.error.is_none() {
-                    // Back where it was.
+                    // Back where it was, scrolled as it was.
                     self.app_view = AppView::Wikipedia;
                     self.set_show_context(false);
-                    return Task::none();
+                    return self.wiki_scroll_back();
                 }
                 let page = self.wiki.page.clone().unwrap_or(WikiPage::Home);
                 return self.wiki_go(page, false);
             }
             WikiMsg::Go(page) => return self.wiki_go(page, true),
             WikiMsg::Back => {
-                if let Some(page) = self.wiki.history.pop() {
+                if let Some((page, offset)) = self.wiki.history.pop() {
+                    self.wiki.restore = Some(offset);
                     return self.wiki_go(page, false);
                 }
                 return self.update(Message::GoToLibrary);
@@ -821,7 +849,8 @@ impl App {
                         // The day's picture, large (the full file, scaled here).
                         extra.extend(f.picture.iter().map(|p| (p.image.clone(), LARGE)));
                         self.wiki.featured = Some(f);
-                        return self.page_pictures(gallery, extra);
+                        let pictures = self.page_pictures(gallery, extra);
+                        return Task::batch([pictures, self.wiki_restore()]);
                     }
                     Err(e) => self.wiki.error = Some(e),
                 }
@@ -835,7 +864,8 @@ impl App {
                     Ok(a) => {
                         let gallery = a.gallery().into_iter().map(|(i, c)| (i.url, c)).collect();
                         self.wiki.article = Some(Arc::new(a));
-                        return self.page_pictures(gallery, Vec::new());
+                        let pictures = self.page_pictures(gallery, Vec::new());
+                        return Task::batch([pictures, self.wiki_restore()]);
                     }
                     Err(e) => self.wiki.error = Some(e),
                 }
@@ -849,7 +879,8 @@ impl App {
                     Ok(r) => {
                         let extra = r.iter().filter_map(|s| s.thumbnail.clone()).map(|u| (u, THUMB)).collect();
                         self.wiki.results = r;
-                        return self.page_pictures(Vec::new(), extra);
+                        let pictures = self.page_pictures(Vec::new(), extra);
+                        return Task::batch([pictures, self.wiki_restore()]);
                     }
                     Err(e) => self.wiki.error = Some(e),
                 }
@@ -936,6 +967,13 @@ impl App {
                 }
             }
             WikiMsg::WindowHeight(h) => self.wiki.window_height = h,
+            WikiMsg::Scrolled(y) => {
+                // Only the page's own reports: not while it's loading (a
+                // spinner is short) or hidden behind the viewer.
+                if self.app_view == AppView::Wikipedia && !self.wiki.loading && self.wiki.viewer.is_none() {
+                    self.wiki.offset = y;
+                }
+            }
             WikiMsg::Select(k, cosmic::iced::widget::text::Select::Press { offset, clicks }) => {
                 let len = self.wiki.texts.borrow().get(k).map_or(0, String::len);
                 let (anchor, focus) = match clicks {
@@ -1035,7 +1073,11 @@ impl App {
                     return self.show_picture(next);
                 }
             }
-            WikiMsg::ViewClose => self.wiki.viewer = None,
+            WikiMsg::ViewClose => {
+                // The page was taken down for the viewer: back where it was.
+                self.wiki.viewer = None;
+                return self.wiki_scroll_back();
+            }
         }
         Task::none()
     }
@@ -1196,6 +1238,7 @@ impl App {
         let page = widget::column::with_capacity(2).spacing(16).padding([16, 24]).push(self.wiki_bar()).push(body);
         let page = widget::scrollable(widget::container(page).max_width(1500).width(Length::Fill).center_x(Length::Fill))
             .id(scroll_id())
+            .on_scroll(|v| Message::Wiki(WikiMsg::Scrolled(v.absolute_offset().y)))
             .width(Length::Fill)
             .height(Length::Fill);
         // Right-click: Copy (when something's selected) and Select All.
@@ -1211,16 +1254,24 @@ impl App {
         };
         // The contents stay beside the article as it scrolls, like the site's.
         // Both scroll smoothly, gliding like a browser's (see `gestures`).
-        let page: Element<'_, Message> = match (&self.wiki.page, &self.wiki.article) {
+        // The page always second in the row, so showing or hiding the
+        // contents keeps its scrolling where it is.
+        let toc: Element<'_, Message> = match (&self.wiki.page, &self.wiki.article) {
             (Some(WikiPage::Article(_)), Some(a)) if !self.wiki.toc_hidden && !self.wiki.loading && self.wiki.error.is_none() => {
-                widget::row::with_capacity(2)
-                    .push(widget::scrollable(widget::container(self.wiki_toc(a, &pal)).padding([24, 8, 24, 20])).width(Length::Fixed(TOC_WIDTH + 28.0)).height(Length::Fill))
-                    .push(page)
-                    .into()
+                widget::scrollable(widget::container(self.wiki_toc(a, &pal)).padding([24, 8, 24, 20])).width(Length::Fixed(TOC_WIDTH + 28.0)).height(Length::Fill).into()
             }
-            _ => page.into(),
+            _ => widget::Space::new().width(Length::Fixed(0.0)).into(),
         };
-        super::gestures::gestures(page).into()
+        let page = widget::row::with_capacity(2).push(toc).push(page);
+        // Where the page is scrolled reaches the app every 400 px, and
+        // exactly once it settles (not on every frame: each report lays the
+        // page out again).
+        super::gestures::gestures(page)
+            .throttle(|m| match m {
+                Message::Wiki(WikiMsg::Scrolled(y)) => Some((*y / 400.0).floor() as i32),
+                _ => None,
+            })
+            .into()
     }
 
     /// A picture full window: zoomable, with its caption, and Left / Right
