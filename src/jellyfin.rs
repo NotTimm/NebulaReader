@@ -876,7 +876,7 @@ impl crate::remote_zip::RangeSource for HttpRange {
 /// has a folder in it, and files are named `<item id>.<ext>` (the book
 /// reader reads the item id back from the file name).
 pub fn default_download_root() -> std::path::PathBuf {
-    crate::platform::data_dir().join("jellyfin-downloads")
+    crate::platform::data_dir().join(crate::library::DOWNLOADS_DIR)
 }
 
 /// No overall time limit (a big chapter on a slow link takes a while), but

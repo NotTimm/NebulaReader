@@ -62,7 +62,9 @@ start (`src/platform/mod.rs`). winget: `NotTimm.NebulaReader` (PR #457615; #4572
   `save_progress` only. `jellyfin-reading.json` in the config dir marks an
   item left open; the next start ends that session and re-saves progress.
 - Jellyfin downloads (`src/app/downloads.rs`): files in
-  `data_dir()/jellyfin-downloads/<account>/<itemId>.<ext>` (books must keep
+  `data_dir()/downloads/<account>/<itemId>.<ext>` (was `jellyfin-downloads`
+  until 2026-11-01; `library::rename_downloads_folder` moves it and the
+  rows' paths at start; books must keep
   the item id as the file stem), rows in the `downloads` table, issues keep
   their `jellyfin://` keys. `load_issues` prefers the downloaded file. A
   server whose sync fails to connect goes in `jf.offline`: its series and
@@ -244,7 +246,7 @@ the owner's laptop). Last updated 2026-11-01.
   "Switch back"). Data: `updates::beta_data()` (decided once at start:
   beta build or beta channel, on those installs only) puts everything in
   `nebula-reader-beta` / `NebulaReader Beta`, made on first use as a copy
-  of the regular folders without `jellyfin-downloads`
+  of the regular folders without `downloads` (or `jellyfin-downloads`)
   (`platform::prepare_beta_data`, then the copy's downloads table and
   catalogs' saved books are cleared); downloads in a picked folder go in
   "Nebula Reader Beta". Linux packages and dev builds are unaffected.

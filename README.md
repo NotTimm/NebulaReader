@@ -408,7 +408,7 @@ Linux:
 | `~/.local/share/nebula-reader/library.db` | Library, reading progress, metadata |
 | `~/.config/nebula-reader/settings.json` | Preferences |
 | `~/.config/nebula-reader/themes/` | Your imported themes |
-| `~/.local/share/nebula-reader/jellyfin-downloads/` | Jellyfin chapters and books downloaded for offline reading (or a `Nebula Reader` folder in the download folder you picked) |
+| `~/.local/share/nebula-reader/downloads/` | Chapters and books downloaded from Jellyfin and OPDS for offline reading (or a `Nebula Reader` folder in the download folder you picked). Called `jellyfin-downloads` before 0.2.0; it's renamed on the first start. |
 | `~/.config/nebula-reader/jellyfin.json` | Jellyfin servers and access tokens (owner-only file, no passwords) |
 | `~/.config/nebula-reader/opds.json` | OPDS catalogs, their folders in the library, and usernames and passwords (owner-only file) |
 | `~/.cache/nebula-reader/` | Cover thumbnails, unpacked CBRs and Jellyfin chapters fetched whole (each kept under 2 GB), CBR page indexes; safe to delete |

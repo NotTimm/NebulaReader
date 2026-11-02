@@ -32,6 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
+    // Downloads were in "jellyfin-downloads" before OPDS could download.
+    library::rename_downloads_folder();
+
     // A beta's first start: its own folders, copied from the regular ones.
     if platform::prepare_beta_data() {
         library::forget_copied_downloads();

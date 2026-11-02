@@ -245,6 +245,41 @@ pub fn cache_dir() -> PathBuf {
     crate::platform::cache_dir()
 }
 
+/// The downloads folder in the data folder (Jellyfin's and OPDS's).
+pub const DOWNLOADS_DIR: &str = "downloads";
+/// Its name before OPDS could download too.
+pub const OLD_DOWNLOADS_DIR: &str = "jellyfin-downloads";
+
+/// Moves the downloads folder from its old name (`jellyfin-downloads`) to
+/// `downloads`, and the download list's paths with it. When it can't (both
+/// exist, or the rename fails) nothing changes: the list's paths still
+/// point at the files, and new downloads go to the new folder.
+pub fn rename_downloads_folder() {
+    let data = app_data_dir();
+    let (old, new) = (data.join(OLD_DOWNLOADS_DIR), data.join(DOWNLOADS_DIR));
+    if !old.is_dir() || new.exists() {
+        return;
+    }
+    let Ok(db) = Connection::open(db_path()) else { return };
+    if let Err(e) = std::fs::rename(&old, &new) {
+        log::warn!("downloads: moving {} to {}: {e}", old.display(), new.display());
+        return;
+    }
+    move_download_paths(&db, &old.to_string_lossy(), &new.to_string_lossy());
+}
+
+/// Rewrites the download list's files under `old` to be under `new`.
+fn move_download_paths(db: &Connection, old: &str, new: &str) {
+    let n = old.chars().count() as i64;
+    let result = db.execute(
+        "UPDATE downloads SET file = ?2 || substr(file, ?3 + 1) WHERE substr(file, 1, ?3) = ?1",
+        params![old, new, n],
+    );
+    if let Err(e) = result {
+        log::warn!("downloads: updating paths: {e}");
+    }
+}
+
 /// A beta's copied database: its downloads were the regular version's
 /// files, which weren't copied.
 pub fn forget_copied_downloads() {
@@ -1348,6 +1383,30 @@ mod download_tests {
         init_schema(&conn).unwrap();
         run_migrations(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn renamed_downloads_folder_moves_the_paths() {
+        let db = db();
+        let add = |key: &str, file: &str| {
+            add_download(&db, &Download { path: key.into(), series_path: "s".into(), file: file.into(), size: 1 }).unwrap()
+        };
+        add("a", "/data/nebula-reader/jellyfin-downloads/acct/a.cbz");
+        add("b", "/data/nebula-reader/jellyfin-downloads/acct/über.epub");
+        // A download in a folder the user picked stays where it is.
+        add("c", "/media/usb/Nebula Reader/acct/c.cbz");
+        move_download_paths(&db, "/data/nebula-reader/jellyfin-downloads", "/data/nebula-reader/downloads");
+        let mut files: Vec<String> =
+            db.prepare("SELECT file FROM downloads ORDER BY path").unwrap().query_map([], |r| r.get(0)).unwrap().flatten().collect();
+        files.sort();
+        assert_eq!(
+            files,
+            [
+                "/data/nebula-reader/downloads/acct/a.cbz",
+                "/data/nebula-reader/downloads/acct/über.epub",
+                "/media/usb/Nebula Reader/acct/c.cbz"
+            ]
+        );
     }
 
     #[test]

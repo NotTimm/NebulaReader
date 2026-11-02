@@ -182,7 +182,7 @@ pub fn prepare_beta_data() -> bool {
     if data.exists() || !regular_data.is_dir() {
         return false;
     }
-    let skip = ["jellyfin-downloads"];
+    let skip = [crate::library::DOWNLOADS_DIR, crate::library::OLD_DOWNLOADS_DIR];
     if let Err(e) = copy_tree(&regular_data, &data, &skip) {
         log::warn!("beta: copying {} failed: {e}", regular_data.display());
         let _ = std::fs::remove_dir_all(&data);
@@ -246,17 +246,17 @@ mod tests {
     fn copies_a_folder_without_its_downloads() {
         let root = std::env::temp_dir().join(format!("nebula-copy-{}", std::process::id()));
         let (from, to) = (root.join("regular"), root.join("beta"));
-        std::fs::create_dir_all(from.join("jellyfin-downloads/acct")).unwrap();
+        std::fs::create_dir_all(from.join("downloads/acct")).unwrap();
         std::fs::create_dir_all(from.join("covers")).unwrap();
         std::fs::write(from.join("library.db"), b"db").unwrap();
         std::fs::write(from.join("covers/a.jpg"), b"jpg").unwrap();
-        std::fs::write(from.join("jellyfin-downloads/acct/b.cbz"), b"big").unwrap();
-        copy_tree(&from, &to, &["jellyfin-downloads"]).unwrap();
+        std::fs::write(from.join("downloads/acct/b.cbz"), b"big").unwrap();
+        copy_tree(&from, &to, &["downloads"]).unwrap();
         assert_eq!(std::fs::read(to.join("library.db")).unwrap(), b"db");
         assert_eq!(std::fs::read(to.join("covers/a.jpg")).unwrap(), b"jpg");
-        assert!(!to.join("jellyfin-downloads").exists());
+        assert!(!to.join("downloads").exists());
         // The regular folder is left as it was.
-        assert!(from.join("jellyfin-downloads/acct/b.cbz").exists());
+        assert!(from.join("downloads/acct/b.cbz").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
