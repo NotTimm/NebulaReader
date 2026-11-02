@@ -201,6 +201,14 @@ impl Browse {
     }
 }
 
+fn at_catalog_start_feed(browse: &Browse, account: &opds::Account) -> bool {
+    browse.trail.len() == 1
+        && browse
+            .trail
+            .last()
+            .is_some_and(|(_, url)| *url == account.url)
+}
+
 /// One book, as the catalog describes it.
 struct BookPage {
     /// The book, and its other editions when the catalog has several files
@@ -626,7 +634,8 @@ impl App {
                 }
             }
             OpdsMsg::Loaded(generation, result) => {
-                let catalog = self.browse_account().is_some_and(|a| a.is_catalog());
+                let browse_account = self.browse_account();
+                let catalog = browse_account.as_ref().is_some_and(|a| a.is_catalog());
                 let Some(b) = self
                     .op
                     .browse
@@ -640,7 +649,11 @@ impl App {
                     Ok(feed) => {
                         // Root feed shown in Catalog: keep for Library's
                         // compact per-catalog shelf.
-                        if catalog && b.trail.len() == 1 {
+                        if catalog
+                            && browse_account
+                                .as_ref()
+                                .is_some_and(|account| at_catalog_start_feed(b, account))
+                        {
                             let quick = self.op.quick.entry(b.account_key.clone()).or_default();
                             quick.feed = Some(feed.clone());
                             quick.error = None;
@@ -1783,5 +1796,26 @@ mod tests {
         assert!(b.up() && b.up());
         assert!(!b.up());
         assert_eq!(titles(&b), ["Catalog"]);
+    }
+
+    #[test]
+    fn start_feed_detection_ignores_quick_section_and_search_urls() {
+        let account = opds::Account {
+            url: "https://www.gutenberg.org/ebooks.opds/".into(),
+            ..Default::default()
+        };
+        let mut b = browse();
+
+        b.trail = vec![("Project Gutenberg".into(), account.url.clone())];
+        assert!(at_catalog_start_feed(&b, &account));
+
+        b.trail = vec![(
+            "Popular".into(),
+            "https://www.gutenberg.org/browse/scores/top".into(),
+        )];
+        assert!(!at_catalog_start_feed(&b, &account));
+
+        b.trail = vec![("dracula".into(), "https://www.gutenberg.org/ebooks/search.opds/?query=dracula".into())];
+        assert!(!at_catalog_start_feed(&b, &account));
     }
 }
