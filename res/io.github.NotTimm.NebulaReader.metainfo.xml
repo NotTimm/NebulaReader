@@ -69,6 +69,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.0-beta.1" date="2026-11-01" type="development">
+      <description>
+        <ul>
+          <li>OPDS catalogs (Komga, Kavita and others) as a library source, not yet tried on real servers</li>
+          <li>The interface can be translated; English and Spanish are complete</li>
+          <li>Up and Down scroll a zoomed or fitted comic page while held</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.16" date="2026-10-28" type="stable">
       <description>
         <ul>
