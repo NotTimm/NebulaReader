@@ -2418,7 +2418,7 @@ impl App {
                             .width(Length::Fill)
                             .height(Length::Fill)
                             .content_fit(ContentFit::Contain)
-                            .opacity(0.35),
+                            .opacity(0.35_f32),
                         spinner,
                     ]
                     .into(),
@@ -2663,7 +2663,7 @@ impl App {
                     s.background_opacity,
                     Message::SetBackgroundOpacity,
                 )
-                .step(0.05)
+                .step(0.05_f32)
                 .width(Length::Fixed(180.0)),
             ))
             .add(widget::settings::item(

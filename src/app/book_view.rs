@@ -543,7 +543,7 @@ impl App {
                     f32::from(bs.font_size),
                     |v| Message::Book(BookMsg::SetFontSize(v)),
                 )
-                .step(1.0)
+                .step(1.0_f32)
                 .width(Length::Fill),
             )
             .push(tip(
