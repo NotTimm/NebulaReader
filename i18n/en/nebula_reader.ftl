@@ -661,3 +661,5 @@ wiki-top = (Top)
 wiki-credit = This article, “{ $title }”, is from Wikipedia and its authors, under the Creative Commons Attribution-ShareAlike 4.0 licence.
 wiki-license = CC BY-SA 4.0
 wiki-view-on = View on Wikipedia
+wiki-viewer-hint = ← → for the page's other pictures · scroll or pinch to zoom · Esc to close
+wiki-close = Close

@@ -48,6 +48,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const CACHE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
     comic::prune_rar_cache(CACHE_LIMIT);
     comic::prune_cache(&library::cache_dir().join("jellyfin"), CACHE_LIMIT);
+    // Wikipedia's pictures (only while that page is turned on).
+    comic::prune_cache(&library::cache_dir().join("wikipedia"), 400 * 1024 * 1024);
 
     // Take on the host desktop's look (Breeze on KDE, Fluent on Windows...).
     let desktop = platform::Desktop::detect();

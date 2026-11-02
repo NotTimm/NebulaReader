@@ -35,6 +35,7 @@ mod window_icon;
 mod jellyfin_view;
 mod opds_view;
 mod wiki_view;
+mod float_flow;
 mod downloads;
 mod properties;
 mod rar_index;
@@ -1811,7 +1812,7 @@ impl Application for App {
         } else {
             Subscription::none()
         };
-        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), pointer, system_colors, status])
+        Subscription::batch([events, self.jellyfin_subscription(), self.downloads_subscription(), self.wiki_subscription(), pointer, system_colors, status])
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1886,6 +1887,12 @@ impl Application for App {
 
 impl App {
     fn handle_key(&mut self, key: Key) -> Task<Message> {
+        // The Wikipedia picture viewer: Esc, Left and Right are its own.
+        if self.app_view == AppView::Wikipedia {
+            if let Some(task) = self.wiki_viewer_key(&key) {
+                return task;
+            }
+        }
         if self.app_view == AppView::Reader && self.epub_book.is_some() {
             // The "open this link?" dialog: Esc says no, Enter yes.
             if self.book_link.is_some() {

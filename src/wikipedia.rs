@@ -237,12 +237,16 @@ pub enum Block {
     List { ordered: bool, items: Vec<(usize, Line)> },
     Figure { image: Image, caption: Line },
     Table(Table),
+    /// A bar of a bar chart (Wikipedia draws them with CSS), in em.
+    Bar(f32),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Table {
     pub rows: Vec<Row>,
     pub caption: Line,
+    /// Floated right on the site (a chart or a small box beside the text).
+    pub float_right: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -278,18 +282,19 @@ pub struct Article {
 }
 
 impl Article {
-    /// Pictures the article shows, for fetching.
-    pub fn images(&self) -> Vec<String> {
-        fn walk(blocks: &[Block], out: &mut Vec<String>) {
+    /// The article's pictures with their captions, in reading order (the
+    /// infobox's first): what the picture viewer steps through.
+    pub fn gallery(&self) -> Vec<(Image, Line)> {
+        fn walk(blocks: &[Block], out: &mut Vec<(Image, Line)>) {
             for b in blocks {
                 match b {
-                    Block::Figure { image, .. } => out.push(image.url.clone()),
+                    Block::Figure { image, caption } => out.push((image.clone(), caption.clone())),
                     Block::Table(t) => table(t, out),
                     _ => {}
                 }
             }
         }
-        fn table(t: &Table, out: &mut Vec<String>) {
+        fn table(t: &Table, out: &mut Vec<(Image, Line)>) {
             for c in t.rows.iter().flat_map(|r| &r.cells) {
                 walk(&c.content, out);
             }
@@ -302,6 +307,22 @@ impl Article {
             walk(&s.blocks, &mut out);
         }
         out
+    }
+}
+
+/// The full-size file behind a thumbnail
+/// (`…/thumb/0/0f/Name.jpg/330px-Name.jpg` → `…/0/0f/Name.jpg`), for the
+/// picture viewer. Drawings (SVG) and other files the app can't decode
+/// keep their thumbnail, asked for wider instead.
+pub fn full_size(thumb: &str) -> String {
+    let url = thumb.split('?').next().unwrap_or(thumb).replace("//thumb.wikimedia.org/", "//upload.wikimedia.org/");
+    let Some((head, rest)) = url.split_once("/thumb/") else { return url };
+    let Some((file, _size)) = rest.rsplit_once('/') else { return url };
+    let lower = file.to_ascii_lowercase();
+    if [".jpg", ".jpeg", ".png", ".gif", ".webp"].iter().any(|e| lower.ends_with(e)) {
+        format!("{head}/{file}")
+    } else {
+        url
     }
 }
 
@@ -664,6 +685,16 @@ impl Builder {
         }
         match name {
             "p" | "div" | "section" | "center" | "main" | "body" | "html" | "article" | "span" | "dd" => {
+                if e.has_class("bar-chart-bar-line") {
+                    let em = e
+                        .attr("style")
+                        .and_then(|s| s.replace(' ', "").split("width:").nth(1).map(str::to_string))
+                        .and_then(|w| w.trim_end_matches(';').trim_end_matches("em").parse().ok())
+                        .unwrap_or(0.0);
+                    self.flush();
+                    self.blocks.push(Block::Bar(em));
+                    return;
+                }
                 if e.attr("role") == Some("note") || e.has_class("hatnote") {
                     self.flush();
                     let mut b = Builder::default();
@@ -768,6 +799,9 @@ fn table(t: &El) -> Table {
     }
     let mut trs = Vec::new();
     rows(t, &mut trs);
+    let class = t.attr("class").unwrap_or_default();
+    out.float_right = ["floatright", "tright", "float-right", "bar-chart-right"].iter().any(|c| class.split_whitespace().any(|x| x == *c))
+        || t.attr("style").is_some_and(|s| s.replace(' ', "").contains("float:right"));
     if let Some(c) = t.kids.iter().find_map(|k| match k {
         Node::El(e) if e.name == "caption" => Some(e),
         _ => None,
@@ -923,7 +957,7 @@ mod tests {
         let Block::List { items, .. } = &a.sections[2].blocks[0] else { panic!() };
         let items: Vec<(usize, String)> = items.iter().map(|(d, l)| (*d, l.iter().map(|r| r.text.as_str()).collect())).collect();
         assert_eq!(items, [(0, "First point".into()), (1, "Nested point".into()), (0, "Second point".into())]);
-        assert_eq!(a.images().len(), 2);
+        assert_eq!(a.gallery().len(), 2);
     }
 
     /// NEBULA_WIKI_TEST=/path/page.html prints what the parser makes of it.
@@ -939,7 +973,7 @@ mod tests {
             }).sum();
             let kinds: Vec<&str> = s.blocks.iter().map(|b| match b {
                 Block::Para(_) => "p", Block::Hatnote(_) => "hat", Block::Quote(_) => "q",
-                Block::List { .. } => "list", Block::Figure { .. } => "fig", Block::Table(_) => "table",
+                Block::List { .. } => "list", Block::Figure { .. } => "fig", Block::Table(_) => "table", Block::Bar(_) => "bar",
             }).collect();
             println!("{}{} ({} words) {:?}", "  ".repeat(s.level as usize - 1), if s.title.is_empty() { "(lead)" } else { &s.title }, words, &kinds[..kinds.len().min(12)]);
         }
@@ -966,8 +1000,8 @@ mod tests {
             println!("search: {:?}", s.iter().take(3).map(|x| (&x.title, &x.extract[..x.extract.len().min(60)])).collect::<Vec<_>>());
             println!("random: {}", random_title().await.unwrap());
             let a = article("Café").await.unwrap();
-            println!("Café: {} sections, infobox {}, {} images", a.sections.len(), a.infobox.is_some(), a.images().len());
-            let img = image(&a.images()[0]).await.unwrap();
+            println!("Café: {} sections, infobox {}, {} images", a.sections.len(), a.infobox.is_some(), a.gallery().len());
+            let img = image(&a.gallery()[0].0.url).await.unwrap();
             println!("first image: {} bytes", img.len());
         });
     }
@@ -982,6 +1016,15 @@ mod tests {
         assert_eq!(background("text-align:center;background-color:#ccc"), Some([0xcc, 0xcc, 0xcc]));
         assert_eq!(path_title("Battle of Gettysburg"), "Battle_of_Gettysburg");
         assert_eq!(path_title("AC/DC"), "AC%2FDC");
+        assert_eq!(
+            full_size("https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0f/Battle_%28cropped%29.jpg/330px-Battle_%28cropped%29.jpg?utm_source=x"),
+            "https://upload.wikimedia.org/wikipedia/commons/0/0f/Battle_%28cropped%29.jpg"
+        );
+        // A drawing stays a (rendered) thumbnail.
+        assert_eq!(
+            full_size("https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Map.svg/250px-Map.svg.png"),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Map.svg/250px-Map.svg.png"
+        );
         let today = chrono_today();
         assert_eq!(today.len(), 10);
         assert_eq!(&today[4..5], "/");
