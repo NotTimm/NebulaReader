@@ -345,6 +345,14 @@ mod tests {
         assert_eq!(picked(vec![gh("0.2.0"), gh("0.2.0-beta.2")], Channel::Beta, "0.2.0-beta.2"), Some(("0.2.0".into(), false)));
         // Betas turned off on a beta: back to the regular one, though older.
         assert_eq!(picked(vec![gh("0.1.16")], Channel::Regular, "0.2.0-beta.2"), Some(("0.1.16".into(), true)));
+        // Once the regular release is out, its betas are never offered on
+        // it, whatever order GitHub lists them in, with betas on or off.
+        let after = || vec![gh("0.2.0-beta.4"), gh("0.2.0"), gh("0.2.0-beta.3"), gh("0.1.16")];
+        assert_eq!(picked(after(), Channel::Beta, "0.2.0"), None);
+        assert_eq!(picked(vec![gh("0.2.0")], Channel::Regular, "0.2.0"), None);
+        // A beta of the next version is (betas on only).
+        assert_eq!(picked(vec![gh("0.2.1-beta.1"), gh("0.2.0")], Channel::Beta, "0.2.0"), Some(("0.2.1-beta.1".into(), false)));
+        assert_eq!(picked(vec![gh("0.2.0")], Channel::Regular, "0.2.0"), None);
         // A draft is never offered.
         let mut draft = gh("0.3.0");
         draft.draft = true;
