@@ -504,7 +504,7 @@ dl-summary-settings = { $count ->
     [one] Downloads: { $count } item · { $size }
    *[other] Downloads: { $count } items · { $size }
 }
-dl-none-yet = Nothing downloaded yet. Jellyfin series and books have a Download button on their page, and downloads can be read when the server can't be reached.
+dl-none-yet = Nothing downloaded yet. Jellyfin series and books have a Download button on their page, and so do books in an OPDS catalog; downloads can be read when the server can't be reached.
 dl-summary = { $count ->
     [one] { $count } item · { $size } in all
    *[other] { $count } items · { $size } in all
@@ -518,6 +518,7 @@ use-default-folder = Use Default Folder
 dl-change-moves = Changing the folder moves your downloads there.
 dl-moving = Moving downloads to the new folder…
 remove-all-downloads = Remove All Downloads
+remove-source-downloads = Remove All { $source } Downloads
 one-file = 1 file
 drive-not-connected = drive not connected
 dl-some-missing = { $count } on a drive not connected

@@ -489,7 +489,7 @@ dl-summary-settings = { $count ->
     [one] Descargas: { $count } elemento · { $size }
    *[other] Descargas: { $count } elementos · { $size }
 }
-dl-none-yet = Aún no hay nada descargado. Las series y los libros de Jellyfin tienen un botón Descargar en su página, y las descargas se pueden leer cuando no hay acceso al servidor.
+dl-none-yet = Aún no hay nada descargado. Las series y los libros de Jellyfin tienen un botón Descargar en su página, igual que los libros de un catálogo OPDS; las descargas se pueden leer cuando no hay acceso al servidor.
 dl-summary = { $count ->
     [one] { $count } elemento · { $size } en total
    *[other] { $count } elementos · { $size } en total
@@ -503,6 +503,7 @@ use-default-folder = Usar la carpeta predeterminada
 dl-change-moves = Al cambiar de carpeta, tus descargas se mueven a la nueva.
 dl-moving = Moviendo las descargas a la nueva carpeta…
 remove-all-downloads = Quitar todas las descargas
+remove-source-downloads = Quitar todas las descargas de { $source }
 one-file = 1 archivo
 drive-not-connected = unidad no conectada
 dl-some-missing = { $count } en una unidad no conectada

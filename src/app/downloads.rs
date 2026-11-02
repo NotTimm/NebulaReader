@@ -29,6 +29,7 @@ use cosmic::Element;
 use super::{App, Message};
 use crate::jellyfin;
 use crate::library;
+use crate::settings::LibrarySource;
 
 #[derive(Clone, Debug)]
 pub enum DlMsg {
@@ -637,8 +638,24 @@ impl App {
             col = col.push(super::error_banner(err));
         }
 
-        let (count, bytes) = self.dl.totals();
-        col = col.push(widget::text::title2(fl!("downloads"))).push(widget::text::body(if count == 0 {
+        // Like the library: everything, or only Jellyfin's or OPDS's
+        // (the library's own dropdown, which Local leaves at everything).
+        let filter = self.downloads_filter();
+        let shown_groups: Vec<&DlGroup> = self.dl.groups.iter().filter(|g| filter.includes(&g.series, "")).collect();
+        let count: usize = shown_groups.iter().map(|g| g.items.len()).sum();
+        let bytes: u64 = shown_groups.iter().map(|g| g.size).sum();
+        col = col.push(widget::text::title2(fl!("downloads")));
+        let kinds = [LibrarySource::Jellyfin, LibrarySource::Opds];
+        if kinds.iter().all(|k| self.dl.groups.iter().any(|g| k.includes(&g.series, ""))) {
+            let mut row = widget::row::with_capacity(3).spacing(8);
+            for (i, src) in LibrarySource::ALL.into_iter().enumerate().filter(|(_, s)| *s != LibrarySource::Local) {
+                let label = self.labels.library_source[i].clone();
+                let button = if src == filter { widget::button::suggested(label) } else { widget::button::standard(label) };
+                row = row.push(button.on_press(Message::LibrarySource(i)));
+            }
+            col = col.push(row);
+        }
+        col = col.push(widget::text::body(if count == 0 {
             fl!("dl-none-yet")
         } else {
             fl!("dl-summary", count = count, size = human_size(bytes))
@@ -704,24 +721,42 @@ impl App {
 
         // ── Everything downloaded ─────────────────────────────────────────
         let mut list = widget::Column::new().spacing(4);
-        for g in &self.dl.groups {
-            list = list.push(self.download_group_row(g));
+        for g in shown_groups.iter().copied() {
+            list = list.push(self.download_group_row(g, filter == LibrarySource::All));
             if self.dl.expanded.contains(&g.series) {
                 for item in &g.items {
                     list = list.push(download_item_row(item));
                 }
             }
         }
-        if !self.dl.present.is_empty() {
-            list = list.push(widget::Space::new().height(12)).push(
-                widget::button::destructive(fl!("remove-all-downloads")).on_press(Message::Dl(DlMsg::RemoveAll)),
-            );
+        // Remove all: everything, or what's shown.
+        let shown_present: Vec<String> =
+            shown_groups.iter().flat_map(|g| g.items.iter()).filter(|i| i.present).map(|i| i.key.clone()).collect();
+        if !shown_present.is_empty() {
+            let button = if filter == LibrarySource::All {
+                widget::button::destructive(fl!("remove-all-downloads")).on_press(Message::Dl(DlMsg::RemoveAll))
+            } else {
+                let i = LibrarySource::ALL.iter().position(|s| *s == filter).unwrap_or(0);
+                widget::button::destructive(fl!("remove-source-downloads", source = self.labels.library_source[i].as_str()))
+                    .on_press(Message::Dl(DlMsg::Remove(shown_present)))
+            };
+            list = list.push(widget::Space::new().height(12)).push(button);
         }
         col = col.push(widget::scrollable(list.padding([0, 12, 24, 0])).height(Length::Fill));
         widget::container(col).width(Length::Fill).height(Length::Fill).into()
     }
 
-    fn download_group_row<'a>(&self, g: &'a DlGroup) -> Element<'a, Message> {
+    /// Which downloads the Downloads page shows: the library's source, or
+    /// everything when that's All or Local (which has none).
+    fn downloads_filter(&self) -> LibrarySource {
+        match self.settings.library_source {
+            src @ (LibrarySource::Jellyfin | LibrarySource::Opds) => src,
+            _ => LibrarySource::All,
+        }
+    }
+
+    /// One series' downloads; `tagged` adds where they're from.
+    fn download_group_row<'a>(&self, g: &'a DlGroup, tagged: bool) -> Element<'a, Message> {
         let expanded = self.dl.expanded.contains(&g.series);
         let missing = g.items.iter().filter(|i| !i.present).count();
         let mut facts = vec![
@@ -739,11 +774,12 @@ impl App {
             .padding([6, 8])
             .push(icon::from_name(if expanded { "pan-down-symbolic" } else { "pan-end-symbolic" }).size(16))
             .push(
-                widget::column::with_capacity(2)
+                widget::column::with_capacity(3)
                     .spacing(2)
                     .width(Length::Fill)
                     .push(widget::text::heading(g.name.clone()))
-                    .push(widget::text::caption(facts.join("  ·  "))),
+                    .push(widget::text::caption(facts.join("  ·  ")))
+                    .push_maybe(tagged.then(|| self.download_source_tag(&g.series)).flatten()),
             )
             .push_maybe(in_library.then(|| widget::button::standard(fl!("open")).on_press(Message::OpenSeriesPage(g.series.clone()))))
             .push(widget::button::standard(fl!("remove")).on_press_maybe((!present.is_empty()).then(|| Message::Dl(DlMsg::Remove(present)))));
@@ -806,6 +842,26 @@ mod tests {
 
 /// Deletes a downloaded file, closing it first if the reader has it open
 /// (Windows can't delete an open file).
+impl App {
+    /// Where a series' downloads are from: the source's icon, kind and name.
+    fn download_source_tag<'a>(&self, series: &str) -> Option<Element<'a, Message>> {
+        let account = self.account_for(series)?;
+        let icon = if crate::opds::is_key(series) {
+            super::library_view::opds_icon()
+        } else {
+            super::library_view::jellyfin_icon()
+        };
+        Some(
+            widget::row::with_capacity(2)
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .push(widget::icon(icon).size(12))
+                .push(widget::text::caption(format!("{} · {}", account.kind(), account.server_name())))
+                .into(),
+        )
+    }
+}
+
 /// The folder downloads go in, inside one the user picked. A beta has its
 /// own, so it never touches the regular version's files.
 fn picked_subfolder() -> &'static str {
