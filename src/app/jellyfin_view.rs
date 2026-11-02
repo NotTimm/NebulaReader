@@ -546,6 +546,7 @@ impl App {
         let is_epub = self.jf.extensions.get(&first_id).is_some_and(|e| e == "epub")
             || saved.as_ref().is_some_and(|f| f.extension().is_some_and(|e| e == "epub"));
         if issues.len() == 1 && is_epub {
+            self.opening_book = true;
             self.jf.book_keys = Some((issues[0].0.clone(), key.clone()));
             if let Some(path) = saved {
                 self.jf.book_pending = Some(account);

@@ -288,6 +288,8 @@ pub struct App {
     /// The comic being loaded is a Jellyfin CBR without a page index yet,
     /// so the loading screen says one is being created.
     creating_index: bool,
+    /// What's being opened is a book (EPUB), so the loading screen says so.
+    opening_book: bool,
     error: Option<String>,
     fullscreen: bool,
     /// The header bar is revealed in full screen (pointer at the top edge).
@@ -1040,6 +1042,7 @@ impl App {
     fn open_entry(&mut self, key: String, chapter: Option<usize>) -> Task<Message> {
         self.loading = true;
         self.creating_index = false;
+        self.opening_book = epub::is_epub_name(&key);
         self.error = None;
         self.back_to_series = self.app_view == AppView::Series;
         self.app_view = AppView::Reader;
@@ -1353,6 +1356,7 @@ impl Application for App {
             nav_dir: 0,
             loading: flags.is_some(),
             creating_index: false,
+            opening_book: false,
             error: None,
             fullscreen: false,
             fullscreen_header: false,
@@ -2047,7 +2051,13 @@ impl App {
                     .spacing(12)
                     .align_x(Alignment::Center)
                     .push(widget::indeterminate_circular())
-                    .push(widget::text(if self.creating_index { fl!("creating-index") } else { fl!("loading-comic") }))
+                    .push(widget::text(if self.creating_index {
+                        fl!("creating-index")
+                    } else if self.opening_book {
+                        fl!("opening-book")
+                    } else {
+                        fl!("loading-comic")
+                    }))
                     .into()
             } else {
                 widget::Column::new()

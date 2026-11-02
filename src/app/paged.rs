@@ -117,6 +117,10 @@ struct State {
     dirty: bool,
     /// Unspent trackpad scroll, in pixels.
     wheel: f32,
+    /// A touchpad swipe already turned the page: the rest of it (fingers
+    /// still moving, or the glide after they lift) is ignored until the
+    /// stream of scroll events pauses. One swipe, one page.
+    swipe: Option<SwipeLock>,
     /// Where each image sits in the column (column coordinates).
     images: Vec<(usize, Rectangle)>,
     /// Page windows on screen, relative to the widget, with the column y
@@ -124,7 +128,43 @@ struct State {
     windows: Vec<(Rectangle, f32)>,
 }
 
+/// When the last scroll event of a swipe that turned the page came.
+#[derive(Clone, Copy, Debug)]
+struct SwipeLock {
+    last: std::time::Instant,
+}
+
+/// A pause this long ends a swipe.
+const SWIPE_GAP: std::time::Duration = std::time::Duration::from_millis(220);
+/// Pixels of touchpad scroll that turn a page.
+const SWIPE_DISTANCE: f32 = 60.0;
+
 impl State {
+    /// Takes a touchpad scroll of `y` pixels: whether it turns the page, and
+    /// which way (`true` = forward).
+    fn swipe(&mut self, y: f32, now: std::time::Instant) -> Option<bool> {
+        if let Some(lock) = self.swipe.as_mut() {
+            if now.duration_since(lock.last) < SWIPE_GAP {
+                lock.last = now;
+                return None;
+            }
+            self.swipe = None;
+            self.wheel = 0.0;
+        }
+        // A change of direction starts over.
+        if self.wheel != 0.0 && self.wheel.signum() != y.signum() {
+            self.wheel = 0.0;
+        }
+        self.wheel += y;
+        if self.wheel.abs() < SWIPE_DISTANCE {
+            return None;
+        }
+        let forward = self.wheel < 0.0;
+        self.wheel = 0.0;
+        self.swipe = Some(SwipeLock { last: now });
+        Some(forward)
+    }
+
     /// The image under a point (relative to the widget), if any.
     fn image_at(&self, p: Point) -> Option<usize> {
         let (win, start) = self.windows.iter().find(|(w, _)| w.contains(p))?;
@@ -355,22 +395,28 @@ impl<Message: Clone> Widget<Message, cosmic::Theme, cosmic::Renderer> for Paged<
         };
 
         match event {
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => match *delta {
-                ScrollDelta::Lines { y, .. } if y != 0.0 => turn(y < 0.0, shell),
-                ScrollDelta::Pixels { y, .. } => {
-                    // Trackpads send a stream of small deltas; one page
-                    // per decent swipe.
-                    state.wheel += y;
-                    if state.wheel.abs() >= 80.0 {
-                        let forward = state.wheel < 0.0;
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
+                // A mouse wheel's notch (whole lines) turns one page.
+                // Touchpads send a stream of small steps (pixels, or on
+                // Windows fractions of a line): one page per swipe.
+                let pixels = match *delta {
+                    ScrollDelta::Lines { y, .. } if y.abs() >= 1.0 => {
+                        state.swipe = None;
                         state.wheel = 0.0;
-                        turn(forward, shell);
-                    } else {
-                        shell.capture_event();
+                        turn(y < 0.0, shell);
+                        return;
                     }
+                    ScrollDelta::Lines { y, .. } => y * 40.0,
+                    ScrollDelta::Pixels { y, .. } => y,
+                };
+                if pixels == 0.0 {
+                    return;
                 }
-                _ => {}
-            },
+                match state.swipe(pixels, std::time::Instant::now()) {
+                    Some(forward) => turn(forward, shell),
+                    None => shell.capture_event(),
+                }
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(p) = cursor.position_over(bounds) {
                     let img = state.image_at(Point::new(p.x - bounds.x, p.y - bounds.y));
@@ -483,5 +529,34 @@ impl<Message: Clone> Paged<'_, Message> {
 impl<'a, Message: Clone + 'a> From<Paged<'a, Message>> for Element<'a, Message, cosmic::Theme, cosmic::Renderer> {
     fn from(p: Paged<'a, Message>) -> Self {
         Element::new(p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// A touchpad swipe: `steps` scroll events `every` apart, `dy` each.
+    fn swipe(state: &mut State, start: Instant, steps: u32, every: u64, dy: f32) -> Vec<bool> {
+        (0..steps).filter_map(|i| state.swipe(dy, start + Duration::from_millis(i as u64 * every))).collect()
+    }
+
+    #[test]
+    fn one_swipe_turns_one_page() {
+        let mut state = State::default();
+        let t = Instant::now();
+        // A long swipe with its glide: 40 events, 16 ms apart, 25 px each.
+        assert_eq!(swipe(&mut state, t, 40, 16, -25.0), [true]);
+        // The next swipe, after a pause, turns another page.
+        assert_eq!(swipe(&mut state, t + Duration::from_secs(2), 40, 16, -25.0), [true]);
+        // Swiping the other way goes back.
+        assert_eq!(swipe(&mut state, t + Duration::from_secs(4), 10, 16, 25.0), [false]);
+    }
+
+    #[test]
+    fn a_small_nudge_does_nothing() {
+        let mut state = State::default();
+        assert!(swipe(&mut state, Instant::now(), 3, 16, -10.0).is_empty());
     }
 }
