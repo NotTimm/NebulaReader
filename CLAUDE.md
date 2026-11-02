@@ -268,7 +268,11 @@ the owner's laptop). Last updated 2026-11-02.
   with no file is on the beta channel. Beta on: `check` takes the newest
   of `/releases` (betas included). Off on a beta build: it offers the
   newest regular release though older (`Release::back_to_regular`,
-  "Switch back"). Data: `updates::beta_data()` (decided once at start:
+  "Switch back"). With no `update-channel` file, an install that has run
+  a beta (its beta data folder exists, `platform::beta_data_exists`)
+  stays on the beta channel after updating to a regular version, so it
+  keeps its beta library and gets the next beta; betas save "beta" at
+  start (`updates::remember_beta_channel`). Data: `updates::beta_data()` (decided once at start:
   beta build or beta channel, on those installs only) puts everything in
   `nebula-reader-beta` / `NebulaReader Beta`, made on first use as a copy
   of the regular folders without `downloads` (or `jellyfin-downloads`)

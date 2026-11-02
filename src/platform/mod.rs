@@ -38,6 +38,12 @@ fn app_dir(root: PathBuf) -> PathBuf {
     regular_app_dir(root)
 }
 
+/// Whether a beta has made its own data folder here: this install has run
+/// a beta (see `crate::updates::channel`).
+pub fn beta_data_exists() -> bool {
+    data_root().join(BETA_DIR_NAME).is_dir()
+}
+
 /// The regular (not beta) version's folder under `root`.
 fn regular_app_dir(root: PathBuf) -> PathBuf {
     let new = root.join(DIR_NAME);

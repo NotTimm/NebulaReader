@@ -33,6 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
+    // A beta saves that it follows betas, so updating to a regular
+    // version doesn't drop it back to the regular channel and library.
+    updates::remember_beta_channel();
+
     // Downloads were in "jellyfin-downloads" before OPDS could download.
     library::rename_downloads_folder();
 

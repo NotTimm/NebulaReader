@@ -196,14 +196,33 @@ fn channel_file() -> std::path::PathBuf {
     crate::platform::regular_config_dir().join("update-channel")
 }
 
-/// The channel chosen in Settings → About; a beta nobody chose for (a beta
-/// installed by hand) follows the betas.
+/// The channel chosen in Settings → About. Without a choice, a beta
+/// (installed by hand) follows the betas, and so does the regular version
+/// it updates to: an install that has run a beta has the beta's data
+/// folder, and leaving the betas would swap its library for the older one
+/// from before them.
 pub fn channel() -> Channel {
-    match std::fs::read_to_string(channel_file()).ok().as_deref().map(str::trim) {
+    let saved = std::fs::read_to_string(channel_file()).ok();
+    let follows = can_follow_betas(Install::detect());
+    resolve_channel(saved.as_deref().map(str::trim), is_prerelease(VERSION), follows && crate::platform::beta_data_exists())
+}
+
+fn resolve_channel(saved: Option<&str>, running_beta: bool, ran_a_beta: bool) -> Channel {
+    match saved {
         Some("beta") => Channel::Beta,
         Some("regular") => Channel::Regular,
-        _ if is_prerelease(VERSION) => Channel::Beta,
+        _ if running_beta || ran_a_beta => Channel::Beta,
         _ => Channel::Regular,
+    }
+}
+
+/// A beta that starts without a choice saved saves "beta", so the choice
+/// outlasts it: updated to a regular version, it keeps following betas.
+pub fn remember_beta_channel() {
+    if is_prerelease(VERSION) && can_follow_betas(Install::detect()) && !channel_file().exists() {
+        if let Err(e) = set_channel(Channel::Beta) {
+            log::warn!("saving the update channel: {e}");
+        }
     }
 }
 
@@ -328,6 +347,19 @@ mod tests {
 
     fn gh(tag: &str) -> GhRelease {
         GhRelease { tag_name: format!("v{tag}"), html_url: String::new(), assets: Vec::new(), draft: false }
+    }
+
+    #[test]
+    fn a_beta_install_keeps_following_betas() {
+        // A choice made in Settings stands.
+        assert_eq!(resolve_channel(Some("regular"), true, true), Channel::Regular);
+        assert_eq!(resolve_channel(Some("beta"), false, false), Channel::Beta);
+        // A beta installed by hand follows betas...
+        assert_eq!(resolve_channel(None, true, false), Channel::Beta);
+        // ...and still does once it has updated itself to 0.2.0.
+        assert_eq!(resolve_channel(None, false, true), Channel::Beta);
+        // An install that never ran a beta doesn't.
+        assert_eq!(resolve_channel(None, false, false), Channel::Regular);
     }
 
     #[test]
