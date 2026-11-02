@@ -367,7 +367,7 @@ impl App {
                 if !dir.is_dir() {
                     return Err(fl!("dl-folder-unavailable", folder = dir.display().to_string()));
                 }
-                dir.join("Nebula Reader")
+                dir.join(picked_subfolder())
             }
             None => jellyfin::default_download_root(),
         };
@@ -378,7 +378,7 @@ impl App {
     /// The folder shown on the Downloads page, whether or not it's there.
     fn download_root_shown(&self) -> PathBuf {
         match &self.settings.download_dir {
-            Some(dir) => dir.join("Nebula Reader"),
+            Some(dir) => dir.join(picked_subfolder()),
             None => jellyfin::default_download_root(),
         }
     }
@@ -393,7 +393,7 @@ impl App {
             return Task::none();
         }
         let root = match &dir {
-            Some(d) => d.join("Nebula Reader"),
+            Some(d) => d.join(picked_subfolder()),
             None => jellyfin::default_download_root(),
         };
         if let Err(e) = std::fs::create_dir_all(&root)
@@ -806,6 +806,12 @@ mod tests {
 
 /// Deletes a downloaded file, closing it first if the reader has it open
 /// (Windows can't delete an open file).
+/// The folder downloads go in, inside one the user picked. A beta has its
+/// own, so it never touches the regular version's files.
+fn picked_subfolder() -> &'static str {
+    if crate::updates::beta_data() { "Nebula Reader Beta" } else { "Nebula Reader" }
+}
+
 fn delete_file(file: &Path) {
     crate::comic::forget_zip(file);
     if let Err(e) = std::fs::remove_file(file) {

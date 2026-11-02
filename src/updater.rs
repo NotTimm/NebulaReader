@@ -580,6 +580,7 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
 
     fn release(names: &[&str]) -> Release {
         Release {
+            back_to_regular: false,
             version: "0.1.7".into(),
             url: String::new(),
             assets: names.iter().map(|n| Asset { name: n.to_string(), url: format!("https://x/{n}") }).collect(),

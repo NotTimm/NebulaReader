@@ -245,6 +245,14 @@ pub fn cache_dir() -> PathBuf {
     crate::platform::cache_dir()
 }
 
+/// A beta's copied database: its downloads were the regular version's
+/// files, which weren't copied.
+pub fn forget_copied_downloads() {
+    if let Ok(db) = Connection::open(db_path()) {
+        let _ = db.execute("DELETE FROM downloads", []);
+    }
+}
+
 pub fn db_path() -> PathBuf {
     app_data_dir().join("library.db")
 }

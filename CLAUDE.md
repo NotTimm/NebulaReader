@@ -232,6 +232,24 @@ the owner's laptop). Last updated 2026-11-01.
   viewer: 0.9 screenfuls/s, 450–1400 px/s, starts at 60%, 150 ms ramp,
   0.1 s glide). The speed is the owner's to tune by feel; untried in the
   running app.
+- Beta versions (2026-11-01, unreleased; first in the next beta): the
+  self-updating installs (Windows installer and zip, Mac app:
+  `updates::can_follow_betas`) have Settings → About → Beta versions.
+  One install, switching channels (owner's choice): the channel is the
+  file `update-channel` ("beta"/"regular") in the *regular* config dir
+  (`platform::regular_config_dir`), so both builds read it; a beta build
+  with no file is on the beta channel. Beta on: `check` takes the newest
+  of `/releases` (betas included). Off on a beta build: it offers the
+  newest regular release though older (`Release::back_to_regular`,
+  "Switch back"). Data: `updates::beta_data()` (decided once at start:
+  beta build or beta channel, on those installs only) puts everything in
+  `nebula-reader-beta` / `NebulaReader Beta`, made on first use as a copy
+  of the regular folders without `jellyfin-downloads`
+  (`platform::prepare_beta_data`, then the copy's downloads table and
+  catalogs' saved books are cleared); downloads in a picked folder go in
+  "Nebula Reader Beta". Linux packages and dev builds are unaffected.
+  0.2.0-beta.1 predates this (no toggle, checks only regular releases):
+  the next beta has to be installed by hand once. Untried on Windows/Mac.
 - `tools/check-targets.sh` type-checks Windows and macOS from Linux.
 - Translations (2026-10-30, unreleased): Fluent via i18n-embed
   (`src/i18n.rs`, `i18n/<lang>/nebula_reader.ftl`, `i18n.toml`); every

@@ -32,6 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
+    // A beta's first start: its own folders, copied from the regular ones.
+    if platform::prepare_beta_data() {
+        library::forget_copied_downloads();
+        opds::forget_copied_downloads();
+        log::info!("beta: data copied from the regular version");
+    }
+
     // Extracted CBR pages and Jellyfin chapters fetched for reading are
     // cache: keep each under 2 GB, the most recently read first.
     const CACHE_LIMIT: u64 = 2 * 1024 * 1024 * 1024;

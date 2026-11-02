@@ -390,6 +390,18 @@ impl Accounts {
     }
 }
 
+/// A beta's copied catalogs: their downloaded books' files weren't copied,
+/// and a catalog keeps only books that are downloaded.
+pub fn forget_copied_downloads() {
+    let mut accounts = Accounts::load();
+    if accounts.accounts.iter().any(|a| a.is_catalog() && !a.saved.is_empty()) {
+        for a in accounts.accounts.iter_mut().filter(|a| a.is_catalog()) {
+            a.saved.clear();
+        }
+        accounts.save();
+    }
+}
+
 // ── Where each book's file, cover and pages are ─────────────────────────────
 
 /// Where to get a book, as the last sync found it.

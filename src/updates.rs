@@ -13,6 +13,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const REPO_URL: &str = "https://github.com/NotTimm/NebulaReader";
 pub const RELEASES_URL: &str = "https://github.com/NotTimm/NebulaReader/releases";
 const LATEST_API: &str = "https://api.github.com/repos/NotTimm/NebulaReader/releases/latest";
+/// The newest releases, betas (pre-releases) included.
+const RELEASES_API: &str = "https://api.github.com/repos/NotTimm/NebulaReader/releases?per_page=30";
 
 /// The commit this was built from (set by build.rs), if it was built from a
 /// git checkout.
@@ -134,6 +136,9 @@ pub struct Release {
     pub url: String,
     /// The files attached to the release.
     pub assets: Vec<Asset>,
+    /// Not newer: the regular version to go back to from a beta, after
+    /// beta versions were turned off.
+    pub back_to_regular: bool,
 }
 
 /// A file attached to a release.
@@ -150,6 +155,77 @@ struct GhRelease {
     html_url: String,
     #[serde(default)]
     assets: Vec<Asset>,
+    #[serde(default)]
+    draft: bool,
+}
+
+impl GhRelease {
+    fn version(&self) -> String {
+        self.tag_name.trim_start_matches('v').to_string()
+    }
+
+    fn into_release(self, back_to_regular: bool) -> Release {
+        Release { version: self.version(), url: self.html_url, assets: self.assets, back_to_regular }
+    }
+}
+
+// ── Beta versions ───────────────────────────────────────────────────────────
+//
+// The installs that update themselves (Windows installer and zip, Mac app)
+// can follow the betas. It's one install either way: turning betas on
+// updates it to the newest beta, turning them off puts the newest regular
+// version back over it. A beta keeps its own data (`beta_data`), made as a
+// copy of the regular data the first time, so a beta can't harm the real
+// library, and going back finds it as it was.
+
+/// Which releases an install updates to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Channel {
+    Regular,
+    Beta,
+}
+
+/// A beta (pre-release) version: `0.2.0-beta.1`.
+pub fn is_prerelease(version: &str) -> bool {
+    version.contains('-')
+}
+
+/// The choice, kept next to the regular settings so a beta and a regular
+/// version of the app read the same one.
+fn channel_file() -> std::path::PathBuf {
+    crate::platform::regular_config_dir().join("update-channel")
+}
+
+/// The channel chosen in Settings → About; a beta nobody chose for (a beta
+/// installed by hand) follows the betas.
+pub fn channel() -> Channel {
+    match std::fs::read_to_string(channel_file()).ok().as_deref().map(str::trim) {
+        Some("beta") => Channel::Beta,
+        Some("regular") => Channel::Regular,
+        _ if is_prerelease(VERSION) => Channel::Beta,
+        _ => Channel::Regular,
+    }
+}
+
+pub fn set_channel(channel: Channel) -> Result<(), String> {
+    let path = channel_file();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, if channel == Channel::Beta { "beta\n" } else { "regular\n" }).map_err(|e| e.to_string())
+}
+
+/// Whether this install can follow the betas (it updates itself).
+pub fn can_follow_betas(install: Install) -> bool {
+    matches!(install, Install::WindowsInstaller | Install::WindowsPortable | Install::MacApp)
+}
+
+/// Whether this run uses the beta's own data folder: a beta version, or
+/// betas turned on, on an install that can follow them. Decided once at
+/// start, so a folder never changes under a running app.
+pub fn beta_data() -> bool {
+    static B: OnceLock<bool> = OnceLock::new();
+    *B.get_or_init(|| can_follow_betas(Install::detect()) && (is_prerelease(VERSION) || channel() == Channel::Beta))
 }
 
 fn client() -> &'static reqwest::Client {
@@ -164,10 +240,9 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-/// The latest release, or `None` when this is already the newest.
-pub async fn check() -> Result<Option<Release>, String> {
+async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String> {
     let resp = client()
-        .get(LATEST_API)
+        .get(url)
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -175,9 +250,36 @@ pub async fn check() -> Result<Option<Release>, String> {
     if !resp.status().is_success() {
         return Err(fl!("github-http", status = resp.status().to_string()));
     }
-    let release: GhRelease = resp.json().await.map_err(|e| e.to_string())?;
-    let version = release.tag_name.trim_start_matches('v').to_string();
-    Ok(is_newer(&version, VERSION).then_some(Release { version, url: release.html_url, assets: release.assets }))
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+/// What to update to, or `None` when this is already it: the newest
+/// regular release, or with betas on the newest release of any kind. A
+/// beta with betas turned off is offered the newest regular release even
+/// though its number is lower.
+pub async fn check() -> Result<Option<Release>, String> {
+    if channel() == Channel::Beta && can_follow_betas(Install::detect()) {
+        let releases: Vec<GhRelease> = get_json(RELEASES_API).await?;
+        return Ok(pick(releases, Channel::Beta, VERSION));
+    }
+    let latest: GhRelease = get_json(LATEST_API).await?;
+    Ok(pick(vec![latest], Channel::Regular, VERSION))
+}
+
+/// The release to offer from `releases` (see [`check`]).
+fn pick(releases: Vec<GhRelease>, channel: Channel, current: &str) -> Option<Release> {
+    let mut candidates = releases.into_iter().filter(|r| !r.draft);
+    let candidates: Vec<GhRelease> = match channel {
+        Channel::Beta => candidates.collect(),
+        Channel::Regular => candidates.find(|r| !is_prerelease(&r.version())).into_iter().collect(),
+    };
+    let newest = candidates.into_iter().reduce(|a, b| if is_newer(&b.version(), &a.version()) { b } else { a })?;
+    let version = newest.version();
+    if is_newer(&version, current) {
+        return Some(newest.into_release(false));
+    }
+    // Back from a beta to the regular version.
+    (channel == Channel::Regular && is_prerelease(current) && version != current).then(|| newest.into_release(true))
 }
 
 /// Whether `candidate` is a later version than `current` (semver-style:
@@ -222,7 +324,32 @@ fn pre_newer(a: &str, b: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_newer;
+    use super::*;
+
+    fn gh(tag: &str) -> GhRelease {
+        GhRelease { tag_name: format!("v{tag}"), html_url: String::new(), assets: Vec::new(), draft: false }
+    }
+
+    #[test]
+    fn picks_what_to_update_to() {
+        let all = || vec![gh("0.2.0-beta.2"), gh("0.2.0-beta.1"), gh("0.1.16"), gh("0.1.15")];
+        let picked = |releases, channel, current| pick(releases, channel, current).map(|r| (r.version, r.back_to_regular));
+        // Regular: only regular releases, only newer ones.
+        assert_eq!(picked(vec![gh("0.1.16")], Channel::Regular, "0.1.15"), Some(("0.1.16".into(), false)));
+        assert_eq!(picked(vec![gh("0.1.16")], Channel::Regular, "0.1.16"), None);
+        // Betas: the newest of everything.
+        assert_eq!(picked(all(), Channel::Beta, "0.1.16"), Some(("0.2.0-beta.2".into(), false)));
+        assert_eq!(picked(all(), Channel::Beta, "0.2.0-beta.1"), Some(("0.2.0-beta.2".into(), false)));
+        assert_eq!(picked(all(), Channel::Beta, "0.2.0-beta.2"), None);
+        // The regular release after the betas is offered to beta users too.
+        assert_eq!(picked(vec![gh("0.2.0"), gh("0.2.0-beta.2")], Channel::Beta, "0.2.0-beta.2"), Some(("0.2.0".into(), false)));
+        // Betas turned off on a beta: back to the regular one, though older.
+        assert_eq!(picked(vec![gh("0.1.16")], Channel::Regular, "0.2.0-beta.2"), Some(("0.1.16".into(), true)));
+        // A draft is never offered.
+        let mut draft = gh("0.3.0");
+        draft.draft = true;
+        assert_eq!(picked(vec![draft, gh("0.1.16")], Channel::Beta, "0.1.16"), None);
+    }
 
     #[test]
     fn compares_versions() {

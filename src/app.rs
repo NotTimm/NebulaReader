@@ -217,6 +217,8 @@ pub enum Message {
     WindowOpened,
     SetFetchMetadata(bool),
     SetCheckForUpdates(bool),
+    /// Follow the betas (installs that update themselves).
+    SetBetaChannel(bool),
     CheckForUpdates,
     UpdateChecked(Result<Option<crate::updates::Release>, String>),
     DismissUpdateBanner,
@@ -377,6 +379,8 @@ pub struct App {
     /// until the banner is closed.
     just_updated: bool,
     update_job: UpdateJob,
+    /// Betas are turned on (the update channel, read at start).
+    beta_channel: bool,
     /// The All / Local / Jellyfin switch above the library.
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
@@ -1414,6 +1418,7 @@ impl Application for App {
             update: UpdateStatus::NotChecked,
             just_updated,
             update_job: UpdateJob::Idle,
+            beta_channel: crate::updates::channel() == crate::updates::Channel::Beta,
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -2438,9 +2443,14 @@ impl App {
             UpdateStatus::Failed(e) => widget::text::body(fl!("update-check-failed", error = e)).into(),
             UpdateStatus::Available(release) => {
                 let (msg, action) = self.update_message(release);
+                let heading = if release.back_to_regular {
+                    fl!("switch-back-heading", version = release.version.as_str())
+                } else {
+                    fl!("update-available-heading", version = release.version.as_str())
+                };
                 widget::column::with_capacity(4)
                     .spacing(6)
-                    .push(widget::text::heading(fl!("update-available-heading", version = release.version.as_str())))
+                    .push(widget::text::heading(heading))
                     .push_maybe((!matches!(self.update_job, UpdateJob::Idle)).then(|| widget::text::body(msg)))
                     .push(action)
                     .push(widget::text::caption(install.how_to_update()))
@@ -2463,6 +2473,29 @@ impl App {
                 fl!("check-on-start"),
                 widget::toggler(self.settings.check_for_updates).on_toggle(Message::SetCheckForUpdates),
             ));
+        // Betas, for the installs that update themselves.
+        if updates::can_follow_betas(install) {
+            let running_beta = updates::is_prerelease(updates::VERSION);
+            let note = match (self.beta_channel, running_beta, updates::beta_data()) {
+                (true, _, _) => fl!("beta-on-note"),
+                (false, true, _) => fl!("beta-off-on-beta-note"),
+                // A regular version that started on the beta's data.
+                (false, false, true) => fl!("beta-off-restart-note"),
+                (false, false, false) => fl!("beta-off-note"),
+            };
+            section = section.add(
+                widget::settings::item_row(vec![
+                    widget::column::with_capacity(2)
+                        .spacing(2)
+                        .width(Length::Fill)
+                        .push(widget::text::body(fl!("beta-versions")))
+                        .push(widget::text::caption(note))
+                        .into(),
+                    widget::toggler(self.beta_channel).on_toggle(Message::SetBetaChannel).into(),
+                ])
+                .align_y(Alignment::Center),
+            );
+        }
         section.into()
     }
 
@@ -2637,6 +2670,10 @@ impl App {
             widget::button::standard(fl!("release-page")).on_press(Message::OpenUrl(release.url.clone())).into()
         };
         match &self.update_job {
+            UpdateJob::Idle if in_app && release.back_to_regular => (
+                fl!("switch-back-available", version = release.version.as_str()),
+                widget::button::suggested(fl!("switch-back-now")).on_press(Message::UpdateNow).into(),
+            ),
             UpdateJob::Idle if in_app => (
                 fl!("update-available", version = release.version.as_str()),
                 widget::button::suggested(fl!("update-now")).on_press(Message::UpdateNow).into(),
@@ -3396,6 +3433,23 @@ impl App {
             Message::SetCheckForUpdates(enabled) => {
                 self.settings.check_for_updates = enabled;
                 self.settings.save();
+            }
+            Message::SetBetaChannel(on) => {
+                use crate::updates::Channel;
+                let channel = if on { Channel::Beta } else { Channel::Regular };
+                match crate::updates::set_channel(channel) {
+                    Ok(()) => {
+                        self.beta_channel = on;
+                        // Offer what the new choice points to straight away.
+                        self.settings.dismissed_update = None;
+                        self.settings.save();
+                        if matches!(self.update_job, UpdateJob::Idle | UpdateJob::Failed(_)) {
+                            self.update_job = UpdateJob::Idle;
+                            return self.check_for_updates();
+                        }
+                    }
+                    Err(e) => self.update = UpdateStatus::Failed(e),
+                }
             }
             Message::CheckForUpdates => return self.check_for_updates(),
             Message::UpdateChecked(result) => {

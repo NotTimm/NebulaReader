@@ -126,6 +126,15 @@ update-check-failed = No se pudo comprobar: { $error }
 update-available-heading = La versión { $version } está disponible
 check-now = Comprobar ahora
 check-on-start = Buscar actualizaciones al iniciar
+# Settings → About: beta versions (Windows installer and zip, Mac app).
+beta-versions = Versiones beta
+beta-off-note = Prueba funciones nuevas antes de que se publiquen. Una beta guarda su propia copia de tu biblioteca y tus ajustes, así que los normales quedan como están.
+beta-on-note = Activado: Nebula se actualiza a cada beta nueva. La beta usa su propia copia de tu biblioteca y tus ajustes. Desactívalo para volver a la versión normal.
+beta-off-on-beta-note = Desactivado: esto sigue siendo una beta. Vuelve a la versión normal arriba; encontrarás tu biblioteca y tus ajustes normales como los dejaste, y lo que hiciste en la beta se queda en la beta.
+beta-off-restart-note = Desactivado: reinicia Nebula para volver a tu biblioteca y tus ajustes normales.
+switch-back-heading = Volver a la versión normal ({ $version })
+switch-back-available = Nebula { $version } sustituye a esta beta, con tu biblioteca y tus ajustes normales.
+switch-back-now = Volver
 updated-banner = Nebula se ha actualizado a la versión { $version }.
 whats-new = Novedades
 release-page = Página de la versión
