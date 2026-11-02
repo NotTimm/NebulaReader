@@ -658,6 +658,7 @@ wiki-credit-home = From Wikipedia, under CC BY-SA 4.0.
 wiki-from = From Wikipedia, the free encyclopedia
 wiki-contents = Contents
 wiki-hide = hide
+wiki-language = Which language's Wikipedia to read
 wiki-top = (Top)
 wiki-credit = This article, “{ $title }”, is from Wikipedia and its authors, under the Creative Commons Attribution-ShareAlike 4.0 licence.
 wiki-license = CC BY-SA 4.0

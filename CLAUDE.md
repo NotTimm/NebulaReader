@@ -281,7 +281,13 @@ the owner's laptop). Last updated 2026-11-02.
   NebulaPlayer; viewer with ←/→/Esc; `FloatFlow` lays out floats like
   CSS. Owner wants the site's look, no web view, no tools/main
   menu, scrolling only (no pages). Never ship the Wikipedia logo or
-  wordmark (trademarks); User-Agent names the app. English only.
+  wordmark (trademarks); User-Agent names the app. 30 languages
+  (`wikipedia::LANGUAGES`, dropdown on the main page's bar,
+  `Settings::wikipedia_language`, default "en"; switching clears the
+  history; a wiki without the daily feed gets an empty main page). C
+  toggles an article's contents; Up/Down held scroll the page
+  (`KeyScroll` in wiki_view.rs, same feel as patch 16, driven by
+  `window::frames`). Text isn't selectable yet (iced text can't be).
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
 - Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows

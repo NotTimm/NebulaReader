@@ -1550,6 +1550,7 @@ impl Application for App {
             }
         }
         let mut settings = Settings::load();
+        crate::wikipedia::set_language(&settings.wikipedia_language);
         // Settings saved by an older version (before `last_version`
         // existed, too) mean this is the first start after an update; a
         // fresh install has none.

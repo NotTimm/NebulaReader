@@ -92,6 +92,70 @@ pub enum WikiMsg {
     ViewNext,
     ViewPrev,
     ViewClose,
+    /// The Wikipedia to read, by its place in `wikipedia::LANGUAGES`.
+    SetLanguage(usize),
+    /// Up (-1.0) or Down (1.0) pressed, not a repeat.
+    ArrowDown(f32),
+    /// Up or Down let go.
+    ArrowUp(f32),
+    /// A frame while an arrow scrolls the page.
+    ScrollFrame(std::time::Instant),
+    /// The window's height, for the arrows' speed.
+    WindowHeight(f32),
+}
+
+/// Up or Down held on a Wikipedia page: it scrolls at a speed that follows
+/// the window's height, like the comic reader's arrows (libcosmic patch 16).
+#[derive(Clone, Copy, Debug)]
+struct KeyScroll {
+    /// -1.0 for Up, 1.0 for Down.
+    dir: f32,
+    /// Pixels per second now.
+    speed: f32,
+    last: std::time::Instant,
+    /// Still held; let go, it glides to a stop.
+    held: bool,
+}
+
+impl KeyScroll {
+    const SCREENS_PER_SECOND: f32 = 0.9;
+    const MIN_SPEED: f32 = 450.0;
+    const MAX_SPEED: f32 = 1400.0;
+    /// The share of the top speed it starts at, so a tap moves too.
+    const START: f32 = 0.6;
+    /// Seconds from the start to the top speed.
+    const RAMP: f32 = 0.15;
+    /// After letting go, the speed falls to about a third every this many
+    /// seconds.
+    const GLIDE: f32 = 0.1;
+    const STOP: f32 = 20.0;
+
+    fn top_speed(height: f32) -> f32 {
+        (height * Self::SCREENS_PER_SECOND).clamp(Self::MIN_SPEED, Self::MAX_SPEED)
+    }
+
+    /// How far the page moves this frame; `None` once it has stopped.
+    fn step(&mut self, now: std::time::Instant, height: f32) -> Option<f32> {
+        let dt = now.saturating_duration_since(self.last).as_secs_f32().min(0.05);
+        self.last = now;
+        let moved = self.dir * self.speed * dt;
+        if self.held {
+            let top = Self::top_speed(height);
+            self.speed = (self.speed + top * (1.0 - Self::START) * dt / Self::RAMP).min(top);
+        } else {
+            self.speed *= (-dt / Self::GLIDE).exp();
+            if self.speed < Self::STOP {
+                return None;
+            }
+        }
+        Some(moved)
+    }
+}
+
+/// The languages' own names, for the dropdown.
+fn language_names() -> &'static [&'static str] {
+    static NAMES: OnceLock<Vec<&'static str>> = OnceLock::new();
+    NAMES.get_or_init(|| wikipedia::LANGUAGES.iter().map(|(_, name)| *name).collect())
 }
 
 #[derive(Default)]
@@ -114,6 +178,9 @@ pub struct WikiState {
     gallery: Vec<(String, Line)>,
     /// The picture shown full window, by its place in `gallery`.
     viewer: Option<usize>,
+    key_scroll: Option<KeyScroll>,
+    /// The window's height (0 until it's known).
+    window_height: f32,
 }
 
 fn scroll_id() -> widget::Id {
@@ -455,7 +522,16 @@ impl App {
     /// Esc, Left and Right while the picture viewer is open.
     pub(super) fn wiki_viewer_key(&mut self, key: &cosmic::iced::keyboard::Key) -> Option<Task<Message>> {
         use cosmic::iced::keyboard::{key::Named, Key};
-        self.wiki.viewer?;
+        // C shows or hides an article's contents.
+        if self.wiki.viewer.is_none() {
+            let article = matches!(self.wiki.page, Some(WikiPage::Article(_))) && self.wiki.article.is_some();
+            return match key {
+                Key::Character(c) if article && !self.modifiers.command() && c.eq_ignore_ascii_case("c") => {
+                    Some(self.update_wiki(WikiMsg::ToggleToc))
+                }
+                _ => None,
+            };
+        }
         Some(match key {
             Key::Named(Named::Escape) => self.update_wiki(WikiMsg::ViewClose),
             Key::Named(Named::ArrowRight) => self.update_wiki(WikiMsg::ViewNext),
@@ -466,10 +542,46 @@ impl App {
 
     pub(super) fn wiki_subscription(&self) -> Subscription<Message> {
         if self.settings.wikipedia {
-            Subscription::run(arrivals).map(|batch| Message::Wiki(WikiMsg::Pictures(batch)))
+            use cosmic::iced::{event, keyboard, window};
+            let pictures = Subscription::run(arrivals).map(|batch| Message::Wiki(WikiMsg::Pictures(batch)));
+            let height = event::listen_with(|event, _, _| match event {
+                event::Event::Window(window::Event::Opened { size, .. } | window::Event::Resized(size)) => {
+                    Some(Message::Wiki(WikiMsg::WindowHeight(size.height)))
+                }
+                _ => None,
+            });
+            if self.app_view != AppView::Wikipedia || self.wiki.viewer.is_some() {
+                return Subscription::batch([pictures, height]);
+            }
+            fn arrow(key: &keyboard::Key) -> Option<f32> {
+                match key {
+                    keyboard::Key::Named(keyboard::key::Named::ArrowUp) => Some(-1.0),
+                    keyboard::Key::Named(keyboard::key::Named::ArrowDown) => Some(1.0),
+                    _ => None,
+                }
+            }
+            // Not while the search box has the keys (it captures them).
+            let arrows = event::listen_with(|event, status, _| match event {
+                event::Event::Keyboard(keyboard::Event::KeyPressed { key, repeat: false, .. }) if status == event::Status::Ignored => {
+                    arrow(&key).map(|d| Message::Wiki(WikiMsg::ArrowDown(d)))
+                }
+                event::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => arrow(&key).map(|d| Message::Wiki(WikiMsg::ArrowUp(d))),
+                _ => None,
+            });
+            let frames = if self.wiki.key_scroll.is_some() {
+                window::frames().map(|(_, now)| Message::Wiki(WikiMsg::ScrollFrame(now)))
+            } else {
+                Subscription::none()
+            };
+            Subscription::batch([pictures, height, arrows, frames])
         } else {
             Subscription::none()
         }
+    }
+
+    /// The page's height, near enough: the window's.
+    fn wiki_height(&self) -> f32 {
+        if self.wiki.window_height > 0.0 { self.wiki.window_height } else { 800.0 }
     }
 
     fn show_picture(&mut self, i: usize) -> Task<Message> {
@@ -591,6 +703,50 @@ impl App {
                 crate::platform::open_url(&target);
             }
             WikiMsg::ToggleToc => self.wiki.toc_hidden = !self.wiki.toc_hidden,
+            WikiMsg::SetLanguage(i) => {
+                let Some((code, _)) = wikipedia::LANGUAGES.get(i) else { return Task::none() };
+                if *code == wikipedia::language() {
+                    return Task::none();
+                }
+                self.settings.wikipedia_language = code.to_string();
+                self.settings.save();
+                wikipedia::set_language(code);
+                // Titles in the history belong to the old language.
+                self.wiki.history.clear();
+                self.wiki.featured = None;
+                self.wiki.article = None;
+                self.wiki.results.clear();
+                return self.wiki_go(WikiPage::Home, false);
+            }
+            WikiMsg::ArrowDown(dir) => {
+                let now = std::time::Instant::now();
+                let start = KeyScroll::top_speed(self.wiki_height()) * KeyScroll::START;
+                // Still gliding the same way: carry on from that speed.
+                let speed = match self.wiki.key_scroll {
+                    Some(k) if k.dir == dir => k.speed.max(start),
+                    _ => start,
+                };
+                self.wiki.key_scroll = Some(KeyScroll { dir, speed, last: now, held: true });
+            }
+            WikiMsg::ArrowUp(dir) => {
+                if let Some(k) = &mut self.wiki.key_scroll {
+                    if k.dir == dir {
+                        k.held = false;
+                    }
+                }
+            }
+            WikiMsg::ScrollFrame(now) => {
+                let height = self.wiki_height();
+                let Some(k) = &mut self.wiki.key_scroll else { return Task::none() };
+                return match k.step(now, height) {
+                    Some(dy) => scroll_mod::scroll_by(scroll_id(), AbsoluteOffset { x: 0.0, y: dy }),
+                    None => {
+                        self.wiki.key_scroll = None;
+                        Task::none()
+                    }
+                };
+            }
+            WikiMsg::WindowHeight(h) => self.wiki.window_height = h,
             WikiMsg::ToggleTocSection(i) => {
                 if !self.wiki.toc_open.remove(&i) {
                     self.wiki.toc_open.insert(i);
@@ -711,6 +867,14 @@ impl App {
                     .width(Length::Fill),
             )
             .push(widget::button::standard(fl!("wiki-search-button")).on_press(Message::Wiki(WikiMsg::Search)))
+            // Which language's Wikipedia, on the main page like the site's.
+            .push_maybe(matches!(self.wiki.page, Some(WikiPage::Home) | None).then(|| {
+                let current = wikipedia::LANGUAGES.iter().position(|(c, _)| *c == wikipedia::language());
+                tip(
+                    widget::dropdown(language_names(), current, |i| Message::Wiki(WikiMsg::SetLanguage(i))),
+                    fl!("wiki-language"),
+                )
+            }))
             .into()
     }
 

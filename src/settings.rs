@@ -191,6 +191,8 @@ pub struct Settings {
     pub open_links_from: Vec<String>,
     /// The Wikipedia page is on (it's opt-in).
     pub wikipedia: bool,
+    /// Which language's Wikipedia (a code from `wikipedia::LANGUAGES`).
+    pub wikipedia_language: String,
     /// Interface language (an `i18n/` folder name); `None` follows the
     /// system.
     pub language: Option<String>,
@@ -218,6 +220,7 @@ impl Default for Settings {
             dismissed_update: None,
             open_links_from: Vec::new(),
             wikipedia: false,
+            wikipedia_language: "en".to_string(),
             language: None,
         }
     }

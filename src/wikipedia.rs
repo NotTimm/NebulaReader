@@ -23,8 +23,57 @@ use quick_xml::Reader;
 
 use crate::epub::{event_text, local_name};
 
-/// English for now; every language's Wikipedia has the same API.
-const HOST: &str = "https://en.wikipedia.org";
+/// The Wikipedias offered (code, name in its own language), biggest
+/// first after English. Every language's Wikipedia has the same API.
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("en", "English"),
+    ("de", "Deutsch"),
+    ("fr", "Français"),
+    ("es", "Español"),
+    ("ja", "日本語"),
+    ("ru", "Русский"),
+    ("it", "Italiano"),
+    ("zh", "中文"),
+    ("pt", "Português"),
+    ("pl", "Polski"),
+    ("nl", "Nederlands"),
+    ("ar", "العربية"),
+    ("fa", "فارسی"),
+    ("uk", "Українська"),
+    ("sv", "Svenska"),
+    ("vi", "Tiếng Việt"),
+    ("ko", "한국어"),
+    ("id", "Bahasa Indonesia"),
+    ("he", "עברית"),
+    ("tr", "Türkçe"),
+    ("cs", "Čeština"),
+    ("hu", "Magyar"),
+    ("fi", "Suomi"),
+    ("no", "Norsk bokmål"),
+    ("da", "Dansk"),
+    ("ro", "Română"),
+    ("el", "Ελληνικά"),
+    ("ca", "Català"),
+    ("th", "ไทย"),
+    ("hi", "हिन्दी"),
+];
+
+/// The Wikipedia everything is read from (a code from [`LANGUAGES`]).
+static LANGUAGE: std::sync::RwLock<&'static str> = std::sync::RwLock::new("en");
+
+/// Switches to another language's Wikipedia; an unknown code means English.
+pub fn set_language(code: &str) {
+    let code = LANGUAGES.iter().find(|(c, _)| *c == code).map_or("en", |(c, _)| c);
+    *LANGUAGE.write().unwrap_or_else(|e| e.into_inner()) = code;
+}
+
+pub fn language() -> &'static str {
+    *LANGUAGE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn host() -> String {
+    format!("https://{}.wikipedia.org", language())
+}
 const USER_AGENT: &str = concat!("NebulaReader/", env!("CARGO_PKG_VERSION"), " (https://github.com/NotTimm/NebulaReader)");
 
 pub const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-sa/4.0/";
@@ -50,7 +99,7 @@ async fn get(url: &str) -> Result<reqwest::Response, String> {
 
 /// An article's address on Wikipedia.
 pub fn page_url(title: &str) -> String {
-    format!("{HOST}/wiki/{}", title.replace(' ', "_"))
+    format!("{}/wiki/{}", host(), title.replace(' ', "_"))
 }
 
 /// A title as it goes in an API path: spaces as underscores, the rest
@@ -140,8 +189,17 @@ fn parse_featured(v: &serde_json::Value) -> Featured {
 /// Today's main page (in UTC, like Wikipedia's).
 pub async fn featured() -> Result<Featured, String> {
     let today = chrono_today();
-    let json: serde_json::Value =
-        get(&format!("{HOST}/api/rest_v1/feed/featured/{today}")).await?.json().await.map_err(|e| e.to_string())?;
+    let url = format!("{}/api/rest_v1/feed/featured/{today}", host());
+    let resp = client().get(&url).send().await.map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
+    // Not every language's Wikipedia has the daily feed: its main page is
+    // then just search and Random.
+    if !resp.status().is_success() && language() != "en" && resp.status().is_client_error() {
+        return Ok(Featured::default());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     Ok(parse_featured(&json))
 }
 
@@ -164,7 +222,7 @@ fn chrono_today() -> String {
 /// A random article's title.
 pub async fn random_title() -> Result<String, String> {
     let json: serde_json::Value =
-        get(&format!("{HOST}/api/rest_v1/page/random/summary")).await?.json().await.map_err(|e| e.to_string())?;
+        get(&format!("{}/api/rest_v1/page/random/summary", host())).await?.json().await.map_err(|e| e.to_string())?;
     summary(&json).map(|s| s.title).ok_or_else(|| "no article".to_string())
 }
 
@@ -172,7 +230,7 @@ pub async fn random_title() -> Result<String, String> {
 pub async fn search(query: &str) -> Result<Vec<Summary>, String> {
     let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
     let json: serde_json::Value =
-        get(&format!("{HOST}/w/rest.php/v1/search/page?q={q}&limit=20")).await?.json().await.map_err(|e| e.to_string())?;
+        get(&format!("{}/w/rest.php/v1/search/page?q={q}&limit=20", host())).await?.json().await.map_err(|e| e.to_string())?;
     Ok(json["pages"]
         .as_array()
         .into_iter()
@@ -200,7 +258,7 @@ pub async fn image(url: &str) -> Result<Vec<u8>, String> {
 
 /// An article, by title.
 pub async fn article(title: &str) -> Result<Article, String> {
-    let html = get(&format!("{HOST}/api/rest_v1/page/html/{}", path_title(title))).await?.text().await.map_err(|e| e.to_string())?;
+    let html = get(&format!("{}/api/rest_v1/page/html/{}", host(), path_title(title))).await?.text().await.map_err(|e| e.to_string())?;
     Ok(parse_article(&html, title))
 }
 
