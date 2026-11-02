@@ -3899,7 +3899,7 @@ dependencies = [
 
 [[package]]
 name = "nebula-reader"
-version = "0.2.0-beta.4"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "ashpd 0.13.13",

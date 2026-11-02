@@ -20,11 +20,13 @@
   <img src="res/screenshots/library.png" width="820" alt="The library showing a Jellyfin server: a Continue Reading shelf and a manga library, with the All, Local and Jellyfin switch at the top left">
 </p>
 
-Point Nebula at the folders your collection already lives in, or sign in
-to your Jellyfin server, and it builds a library of series with covers,
-progress and a **Continue Reading** shelf. Messy file names are cleaned up
-and matched online for proper titles and descriptions. Then it gets out of
-the way so you can read.
+Point Nebula at the folders your collection already lives in, sign in
+to your Jellyfin server, or add an OPDS server like Komga or Kavita, and
+it builds a library of series with covers, progress and a **Continue
+Reading** shelf. Messy file names are cleaned up and matched online for
+proper titles and descriptions. Browse public collections like Project
+Gutenberg, and, if you like, read Wikipedia in the same window. Then it
+gets out of the way so you can read.
 
 > Nebula Reader was called **Cosmic Comic** up to 0.1.0-beta.4. Upgrading
 > keeps your library, progress and settings: the first start moves them over.
@@ -78,7 +80,14 @@ the way so you can read.
   Sepia, Dark, Night, or follow the desktop).
 - Maps and photos fit the page; click one to open it full-window and zoom.
 - The book's own table of contents, time left in the chapter and how far
-  through the book you are.
+  through the book you are. The top bar says which chapter you're in
+  ("Chapter 3 of 27", or "Preface" before the first), counting only real
+  chapters.
+- Books that put several chapters in one file (Project Gutenberg's do)
+  are split into their real chapters: Moby Dick has its 143.
+- Links work: the book's own contents and "see chapter 5" open that
+  chapter, and web links ask before opening your browser.
+- A touchpad swipe turns one page.
 
 <p align="center">
   <img src="res/screenshots/book-settings.png" width="640" alt="The Reading panel open beside a book: text size, typeface, line spacing, justify, layout, line width and theme">
@@ -98,7 +107,8 @@ the way so you can read.
   in a corner like an e-reader; move the pointer to the top to bring the
   header bar back.
 - Zoom with the mouse wheel (hold Shift for finer steps), Ctrl + scroll
-  on a trackpad, or a pinch, and pan by dragging. With a mouse, hold
+  on a trackpad, or a pinch (Windows touchpads included), and pan by
+  dragging. With a mouse, hold
   Ctrl (Cmd on a Mac) and scroll to move down a zoomed page (add Shift
   to move sideways). On a touchscreen,
   pinch to zoom and drag with one finger to move around; a flick glides
@@ -134,16 +144,34 @@ comes from and whether it's online, and what you're reading shows on the
 server's dashboard. **Download** whole series or single chapters to read
 when the server can't be reached. [How it works](#jellyfin)
 
-### 📡 OPDS catalogs (new)
+### 📡 OPDS catalogs
 
-Add an OPDS catalog (Komga, Kavita, calibre-web, Stump and many more
-have one), pick the folders you want, and they're synced into your
-library just like a Jellyfin library, with streaming, downloads and
-offline reading. Everything else in the catalog stays browsable and
-searchable. Tried with Project Gutenberg's catalog and Komga's demo
-server, **not yet with Kavita or other servers**: please
+Add an OPDS catalog two ways:
+
+- **As a library**, for a server of your own (Komga, Kavita, calibre-web,
+  Stump and many more have one): pick the folders you want and they're
+  synced into your library just like a Jellyfin library, with streaming,
+  downloads and offline reading.
+- **As a catalog**, for big public collections like **Project
+  Gutenberg**: browse and search it, open a book's page (cover,
+  description, editions), and download what you want to read. It gets a
+  shelf in the library with its search and sections.
+
+Tried with Project Gutenberg's catalog and Komga's demo server, not yet
+with Kavita or others: please
 [report](https://github.com/NotTimm/NebulaReader/issues/new/choose) how
 it goes with yours. [How it works](#opds-catalogs)
+
+### 🌐 Wikipedia, if you want it
+
+Turn it on in Settings and Wikipedia joins the library's source menu,
+drawn by Nebula rather than a web page: the **main page as the site shows
+it today** (featured article, Did you know, In the news, On this day, the
+featured picture), and articles laid out like the site, with the
+contents beside them, the infobox, pictures beside the text and tables
+that line up. **30 languages**, text you can **select and copy**, smooth
+scrolling, and your place kept when you look at a picture or go back.
+[More](#wikipedia-optional)
 
 ### 🎨 At home on your desktop
 
@@ -227,6 +255,9 @@ also how apps reach the COSMIC Store).
   or zip) and on the Mac, **Update now** downloads it, checks it's signed
   by the Nebula release key, and restarts into the new version. On the
   Mac that needs the app in Applications, not opened from the disk image.
+  **Beta versions** (Settings → About, on those same installs) has
+  Nebula follow the betas too; a beta keeps its own copy of your library
+  and settings, and turning it off offers to switch back.
   Other installs update the usual way for them (see below). The
   `.app.tar.gz` on each release is what the Mac app downloads to update
   itself; you don't need it. Every release file also has a `.minisig`
@@ -262,6 +293,11 @@ also how apps reach the COSMIC Store).
 | Back | `Esc` leaves full screen, then Fit to Width, zoom or the chapter list, then goes back to the library | same |
 
 Every reader button also has a hover hint with its shortcut.
+
+On Wikipedia: `↓` `↑` (held) scroll, `C` shows or hides an article's
+contents, `Ctrl C` copies the selected text and `Ctrl A` selects the
+page (`Cmd` on a Mac), `Esc` goes back, and in the picture viewer `←`
+`→` step through the page's pictures.
 
 ## Jellyfin
 
@@ -397,16 +433,20 @@ How it works:
 - Books only for sale or loan, or in a format Nebula can't read (Kindle,
   PDF downloads from a catalog), show as **Open in Browser**.
 
-## Wikipedia (optional, new)
+## Wikipedia (optional)
 
 **Settings → Wikipedia → Read Wikipedia in Nebula** adds Wikipedia to
 the library's source menu (All / Local / Jellyfin / OPDS / Wikipedia, top
-left). It opens Wikipedia's main page (today's
-featured article, In the news, On this day, most read, the picture of
-the day), search and random articles. Articles are drawn by Nebula, not
-a web view, and laid out like the site: one scrolling page with a
-collapsible contents sidebar, the infobox beside the lead, pictures
-beside the text, and links that open other articles.
+left). It opens Wikipedia's main page as the site shows it that day:
+today's featured article, Did you know, In the news, On this day (with
+its births and deaths), the featured list and picture, with their
+pictures and links, plus the most-read articles. Search and Random
+article are at the top. Articles are drawn by Nebula, not a web view,
+and laid out like the site: one scrolling page with the contents in a
+sidebar (closed until you open it), the infobox beside the lead,
+pictures beside the text, tables whose rows and columns line up, and
+links that open other articles. Other languages' main pages show the
+day's feed instead.
 
 - **30 languages:** the menu on the main page's top bar switches between
   Wikipedias (English by default, remembered).

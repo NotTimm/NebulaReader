@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.0~beta.4
+Version:        0.2.0
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,14 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Mon Nov 02 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0-1
+- OPDS catalogs, as a library (Komga, Kavita...) or a catalog (Gutenberg)
+- Wikipedia, opt-in: the main page as the site shows it, articles in 30
+  languages, selectable text, smooth scrolling
+- Translations (English, Spanish); twelve colour themes
+- Book reader: real chapters, working links, one page per swipe
+- Arrow keys scroll zoomed comic pages; Windows touchpad pinch zooms
+
 * Mon Nov 02 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.0~beta.4-1
 - Wikipedia in 30 languages, text selection and copying, smooth scrolling
 - Wikipedia keeps your place; arrow keys scroll; C toggles the contents

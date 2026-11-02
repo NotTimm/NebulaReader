@@ -69,41 +69,15 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="0.2.0-beta.4" date="2026-11-02" type="development">
+    <release version="0.2.0" date="2026-11-02">
       <description>
+        <p>OPDS catalogs, Wikipedia, translations and a better book reader.</p>
         <ul>
-          <li>Wikipedia in 30 languages, chosen on its main page</li>
-          <li>Select and copy Wikipedia text across paragraphs, with right-click Copy and Select All</li>
-          <li>Smooth scrolling and arrow-key scrolling in Wikipedia, which keeps your place when you show the contents, open a picture or go Back</li>
-          <li>Touchpad pinch zooms on Windows</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.0-beta.3" date="2026-11-02" type="development">
-      <description>
-        <ul>
-          <li>Wikipedia, if you turn it on: its main page, search and articles, laid out like the site, with a picture viewer</li>
-          <li>OPDS catalogs get a shelf in the library with their search and main sections</li>
-          <li>Books downloaded from a catalog keep the catalog's description</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.0-beta.2" date="2026-11-02" type="development">
-      <description>
-        <ul>
-          <li>OPDS catalogs can be added as a catalog, for big public collections like Project Gutenberg: browse, search, read about a book and download it</li>
-          <li>Books: files holding several chapters are split into them, links in a book work, and a touchpad swipe turns one page</li>
-          <li>Beta versions can be turned on in Settings on Windows and Mac, with their own copy of the library</li>
-          <li>Twelve more colour themes, including two warm browns</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.0-beta.1" date="2026-11-01" type="development">
-      <description>
-        <ul>
-          <li>OPDS catalogs (Komga, Kavita and others) as a library source, not yet tried on real servers</li>
-          <li>The interface can be translated; English and Spanish are complete</li>
-          <li>Up and Down scroll a zoomed or fitted comic page while held</li>
+          <li>OPDS catalogs: add a server of your own (Komga, Kavita, calibre-web) as a library, or browse and download from a public collection like Project Gutenberg</li>
+          <li>Wikipedia, if you turn it on: the main page as the site shows it, articles laid out like the site in 30 languages, text you can select and copy, and smooth scrolling</li>
+          <li>The interface in your language: English and Spanish, chosen in Settings</li>
+          <li>Books split into their real chapters, links in books work, and a touchpad swipe turns one page</li>
+          <li>Twelve new colour themes, arrow-key scrolling on zoomed comic pages, and touchpad pinch on Windows</li>
         </ul>
       </description>
     </release>

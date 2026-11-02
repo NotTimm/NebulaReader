@@ -179,6 +179,13 @@ the owner's laptop). Last updated 2026-11-02.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Released 0.2.0 (2026-11-02), the regular release of everything in the
+  betas below plus the real Wikipedia main page, tables, chapter labels,
+  OPDS series links and the Windows touchpad fix. The owner chose to
+  release before trying the Windows test build: still to check on
+  Windows are the pinch fix and an unexplained flicker (where/when not
+  known yet). The metainfo dropped the beta entries (appstream ranks
+  0.2.0 below 0.2.0-beta.N).
 - Beta 0.2.0-beta.4 (2026-11-02): Wikipedia polish (30 languages,
   selection and copy, smooth/arrow scrolling, kept scroll place, C for
   the contents), the FloatFlow fix and the Windows pinch hook. Owner
