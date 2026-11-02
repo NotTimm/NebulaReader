@@ -39,10 +39,10 @@ Some things that are known and wanted but nobody's working on yet:
   once, and not reopening archives that haven't changed.
 - **Jellyfin**: fetch a server's libraries in parallel, and sync a book's
   reading position *from* the server, not just to it.
-- **OPDS on real servers**: OPDS is new and so far tried only with
-  Project Gutenberg's catalog (see the README); adding a library from
-  Komga, Kavita, calibre-web, Stump or others and reporting what happens
-  helps most.
+- **OPDS on real servers**: OPDS is new and so far tried with Project
+  Gutenberg's catalog and Komga's demo server (see the README and issue
+  #12); adding a library from Kavita, calibre-web, Stump or others and
+  reporting what happens helps most.
 - **Cleaner names**: scan-group tags such as `Jaimini's~box~` in file
   names aren't stripped yet.
 - **More languages**: see [i18n/README.md](i18n/README.md). The app's

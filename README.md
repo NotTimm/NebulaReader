@@ -140,8 +140,8 @@ Add an OPDS catalog (Komga, Kavita, calibre-web, Stump and many more
 have one), pick the folders you want, and they're synced into your
 library just like a Jellyfin library, with streaming, downloads and
 offline reading. Everything else in the catalog stays browsable and
-searchable. Tried with Project Gutenberg's catalog, **not yet with a
-Komga, Kavita or other server of your own**: please
+searchable. Tried with Project Gutenberg's catalog and Komga's demo
+server, **not yet with Kavita or other servers**: please
 [report](https://github.com/NotTimm/NebulaReader/issues/new/choose) how
 it goes with yours. [How it works](#opds-catalogs)
 
@@ -335,8 +335,9 @@ python3 tools/mock-jellyfin.py ~/Comics/Manga --port 8097
 
 > **New.** OPDS support is built from the OPDS 1.2 and 2.0 specs and the
 > Page Streaming Extension and covered by unit tests. Adding a catalog
-> such as Project Gutenberg has been tried for real; a library on a
-> Komga, Kavita, calibre-web or other server of your own hasn't yet.
+> such as Project Gutenberg, and a library on Komga (its demo server,
+> over OPDS 2.0) have been tried for real; Kavita, calibre-web and other
+> servers haven't yet.
 > Reports, good or bad, are very welcome.
 
 Nebula can add an OPDS catalog in one of two ways, and asks which when

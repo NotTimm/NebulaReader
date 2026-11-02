@@ -364,7 +364,12 @@ the owner's laptop). Last updated 2026-11-02.
   Settings → OPDS and `AppView::Catalog` (`opds_view.rs`: browse,
   search, Add to/Remove from Library). Progress stays local. No mock
   server yet (tests serve feeds in-process). Testing checklist: issue #12.
-  Next: try it on Komga/Kavita.
+  Tried by the owner on Komga's demo (demo.komga.org, OPDS 2.0,
+  demo@komga.org / komga-demo) 2026-11-02: series keyed by the
+  `belongsTo` series link when given (`l<fnv>`, `Book::series_link`),
+  server EPUB series skip metadata matching (`App::remote_books_only`).
+  Kavita demo: demo.kavitareader.com, demouser / Demouser64 (read-only,
+  OPDS URL with key from its user settings). Next: try Kavita.
 - OPDS as a library or a catalog (2026-11-01, unreleased, after
   0.2.0-beta.1): `opds::Kind` per account, asked after Connect
   (`OpdsMsg::AddAs`, catalog recommended without a username). A catalog's
