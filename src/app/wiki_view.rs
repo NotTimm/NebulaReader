@@ -108,6 +108,10 @@ pub enum WikiMsg {
     SelectEnd,
     /// A press somewhere that isn't text.
     SelectClear,
+    /// The mouse's height in the window while a selection is dragged.
+    DragAt(f32),
+    /// Where the page's scrolling area is in the window.
+    ScrollBounds(Option<Rectangle>),
     Copy,
 }
 
@@ -187,6 +191,12 @@ pub struct WikiState {
     viewer: Option<usize>,
     key_scroll: Option<KeyScroll>,
     sel: Option<TextSel>,
+    /// The mouse's height while dragging a selection, and the page's
+    /// scrolling area, to scroll when it's held near or past an edge.
+    drag_y: Option<f32>,
+    scroll_bounds: Option<Rectangle>,
+    /// The last frame scrolled by a drag.
+    drag_frame: Option<std::time::Instant>,
     /// The page's selectable texts in reading order, as the last `view`
     /// laid them out (a text's place here is its key in [`TextSel`]).
     texts: std::cell::RefCell<Vec<String>>,
@@ -306,6 +316,17 @@ mod tests {
     }
 
     #[test]
+    fn a_selection_dragged_past_an_edge_scrolls_faster_further_out() {
+        let area = Rectangle::new(cosmic::iced::Point::new(0.0, 100.0), cosmic::iced::Size::new(800.0, 600.0));
+        assert_eq!(drag_scroll_speed(400.0, area), 0.0);
+        assert!(drag_scroll_speed(120.0, area) < 0.0);
+        assert!(drag_scroll_speed(50.0, area) < drag_scroll_speed(120.0, area));
+        assert!(drag_scroll_speed(690.0, area) > 0.0);
+        assert!(drag_scroll_speed(900.0, area) > drag_scroll_speed(690.0, area));
+        assert_eq!(drag_scroll_speed(-5000.0, area), -3000.0);
+    }
+
+    #[test]
     fn double_click_takes_the_word() {
         let t = "The cat’s café, 1990.";
         assert_eq!(&t[..][word_at(t, 6).0..word_at(t, 6).1], "cat’s");
@@ -375,6 +396,50 @@ impl Operation<Option<f32>> for FindSection {
             (Some(s), Some(c)) => Some((s.y - c.y - 8.0).max(0.0)),
             _ => None,
         })
+    }
+}
+
+/// Finds where the page's scrolling area is in the window.
+struct FindScrollBounds(Option<Rectangle>);
+
+impl Operation<Option<Rectangle>> for FindScrollBounds {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Option<Rectangle>>)) {
+        operate(self);
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&widget::Id>,
+        bounds: Rectangle,
+        _content_bounds: Rectangle,
+        _translation: Vector,
+        _state: &mut dyn cosmic::iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&scroll_id()) {
+            self.0 = Some(bounds);
+        }
+    }
+
+    fn finish(&self) -> Outcome<Option<Rectangle>> {
+        Outcome::Some(self.0)
+    }
+}
+
+/// How fast a selection dragged near or past the top or bottom edge
+/// scrolls the page (pixels per second, up negative): faster the further
+/// out the mouse is, like a browser.
+fn drag_scroll_speed(y: f32, area: Rectangle) -> f32 {
+    const EDGE: f32 = 30.0;
+    const PER_PIXEL: f32 = 14.0;
+    const MAX: f32 = 3000.0;
+    let top = area.y + EDGE;
+    let bottom = area.y + area.height - EDGE;
+    if y < top {
+        -((top - y) * PER_PIXEL).min(MAX)
+    } else if y > bottom {
+        ((y - bottom) * PER_PIXEL).min(MAX)
+    } else {
+        0.0
     }
 }
 
@@ -644,15 +709,33 @@ impl App {
                 }
                 _ => None,
             });
-            let frames = if self.wiki.key_scroll.is_some() {
+            let frames = if self.wiki.key_scroll.is_some() || self.wiki_drag_speed().is_some() {
                 window::frames().map(|(_, now)| Message::Wiki(WikiMsg::ScrollFrame(now)))
             } else {
                 Subscription::none()
             };
-            Subscription::batch([pictures, height, arrows, frames])
+            // Where the mouse is while a selection is dragged.
+            let drag = if self.wiki.sel.is_some_and(|s| s.dragging) {
+                event::listen_with(|event, _, _| match event {
+                    event::Event::Mouse(mouse::Event::CursorMoved { position }) => Some(Message::Wiki(WikiMsg::DragAt(position.y))),
+                    _ => None,
+                })
+            } else {
+                Subscription::none()
+            };
+            Subscription::batch([pictures, height, arrows, frames, drag])
         } else {
             Subscription::none()
         }
+    }
+
+    /// How fast a dragged selection scrolls the page now, if it does.
+    fn wiki_drag_speed(&self) -> Option<f32> {
+        if !self.wiki.sel.is_some_and(|s| s.dragging) {
+            return None;
+        }
+        let speed = drag_scroll_speed(self.wiki.drag_y?, self.wiki.scroll_bounds?);
+        (speed != 0.0).then_some(speed)
     }
 
     /// The page's height, near enough: the window's.
@@ -813,14 +896,24 @@ impl App {
             }
             WikiMsg::ScrollFrame(now) => {
                 let height = self.wiki_height();
-                let Some(k) = &mut self.wiki.key_scroll else { return Task::none() };
-                return match k.step(now, height) {
-                    Some(dy) => scroll_mod::scroll_by(scroll_id(), AbsoluteOffset { x: 0.0, y: dy }),
-                    None => {
-                        self.wiki.key_scroll = None;
-                        Task::none()
+                let mut dy = 0.0;
+                if let Some(k) = &mut self.wiki.key_scroll {
+                    match k.step(now, height) {
+                        Some(d) => dy += d,
+                        None => self.wiki.key_scroll = None,
                     }
-                };
+                }
+                // A selection held near or past an edge.
+                if let Some(speed) = self.wiki_drag_speed() {
+                    let dt = self.wiki.drag_frame.map_or(0.0, |last| now.saturating_duration_since(last).as_secs_f32().min(0.05));
+                    self.wiki.drag_frame = Some(now);
+                    dy += speed * dt;
+                } else {
+                    self.wiki.drag_frame = None;
+                }
+                if dy != 0.0 {
+                    return scroll_mod::scroll_by(scroll_id(), AbsoluteOffset { x: 0.0, y: dy });
+                }
             }
             WikiMsg::WindowHeight(h) => self.wiki.window_height = h,
             WikiMsg::Select(k, cosmic::iced::widget::text::Select::Press { offset, clicks }) => {
@@ -831,6 +924,16 @@ impl App {
                     _ => (0, len),
                 };
                 self.wiki.sel = Some(TextSel { anchor: (k, anchor), focus: (k, focus), dragging: true });
+                self.wiki.drag_y = None;
+                self.wiki.drag_frame = None;
+                return cosmic::iced::runtime::task::widget(FindScrollBounds(None))
+                    .map(|b| cosmic::Action::App(Message::Wiki(WikiMsg::ScrollBounds(b))));
+            }
+            WikiMsg::ScrollBounds(b) => self.wiki.scroll_bounds = b,
+            WikiMsg::DragAt(y) => {
+                if self.wiki.sel.is_some_and(|s| s.dragging) {
+                    self.wiki.drag_y = Some(y);
+                }
             }
             WikiMsg::Select(k, cosmic::iced::widget::text::Select::Drag { offset }) => {
                 if let Some(sel) = &mut self.wiki.sel {
@@ -845,6 +948,8 @@ impl App {
                     return Task::none();
                 }
                 sel.dragging = false;
+                self.wiki.drag_y = None;
+                self.wiki.drag_frame = None;
                 // Linux's middle-click paste takes what's selected.
                 #[cfg(target_os = "linux")]
                 if let Some(text) = self.selected_text() {

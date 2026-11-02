@@ -291,8 +291,10 @@ the owner's laptop). Last updated 2026-11-02.
   `Rich::on_select`/`selection`; the app keeps `TextSel` over keys
   handed out in reading order as `view` lays texts out, `wiki.texts`):
   drag, double-click a word, triple-click a text, Ctrl+C copies, Linux
-  primary selection on release. No autoscroll while dragging past the
-  edge yet.
+  primary selection on release. Dragging near or past the page's top or
+  bottom edge scrolls it (`drag_scroll_speed`: 30 px band, faster further
+  out, up to 3000 px/s); the texts re-hit-test every frame while dragging
+  (patch 17's second commit), so the selection follows.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
 - Windows pinch (2026-11-02, unreleased): pinch never zoomed on Windows
@@ -398,7 +400,7 @@ the owner's laptop). Last updated 2026-11-02.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `a307967` (patches 1–17, see Cargo.toml),
+- libcosmic: fork pinned at `40f9ed5` (patches 1–17, see Cargo.toml),
   merged with upstream through `95236a94` (2026-10-27; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
