@@ -179,6 +179,10 @@ the owner's laptop). Last updated 2026-11-03.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Beta 0.2.2-beta.1 (2026-11-03): Fandom, the Library menu settings and
+  the Windows Direct3D 12 default, with libcosmic synced (fork `5a6362d`,
+  upstream through daca62bb: a cosmic-launch GPU fix and a docs example).
+  The owner is trying Fandom on real wikis with it.
 - Released 0.2.1 (2026-11-02): the two OPDS fixes below. Connect follows a
   feed's `rel="start"` link to add the catalog from its start page
   (`Feed::start`, `opds::is_other_page_of`; Gutenberg's search address
@@ -522,8 +526,8 @@ the owner's laptop). Last updated 2026-11-03.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `40f9ed5` (patches 1–17, see Cargo.toml),
-  merged with upstream through `95236a94` (2026-10-27; iced at 229186b5); 0.1.2 was built from
+- libcosmic: fork pinned at `5a6362d` (patches 1–17, see Cargo.toml),
+  merged with upstream through `daca62bb` (2026-11-03; iced at 229186b5); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
   touched chapter); a per-chapter shelf would be an option, not default.

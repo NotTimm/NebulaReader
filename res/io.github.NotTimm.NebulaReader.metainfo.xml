@@ -69,6 +69,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.2-beta.1" date="2026-11-03" type="development">
+      <description>
+        <ul>
+          <li>Fandom wikis, if you turn them on: follow the wikis you like and read their main pages, search and articles, with infoboxes, tabs and galleries</li>
+          <li>Settings → Library menu: choose which sections the menu shows and in what order</li>
+          <li>Windows: no more black flicker, drawn with Direct3D 12</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-11-02">
       <description>
         <ul>

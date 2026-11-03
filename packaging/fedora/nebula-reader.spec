@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.1
+Version:        0.2.2~beta.1
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,11 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Tue Nov 03 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2~beta.1-1
+- Fandom wikis, opt-in: follow wikis and read them like Wikipedia
+- Settings: Library menu to order and switch the menu's sections
+- Windows: draw with Direct3D 12 (no more black flicker)
+
 * Mon Nov 02 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.1-1
 - OPDS: adding a page inside a catalog adds the catalog from its start
 - OPDS shows in the library's source menu as soon as a catalog is added
