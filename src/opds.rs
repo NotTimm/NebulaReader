@@ -815,11 +815,29 @@ pub async fn connect(input: &str, user: &str, password: &str) -> Result<Account,
     for url in candidates {
         let account = Account { url: url.clone(), user: user.trim().to_string(), password: password.to_string(), ..Default::default() };
         match fetch_feed(&account, &url).await {
-            Ok(feed) => return Ok(Account { title: feed.title, ..account }),
+            Ok(feed) => {
+                // A page inside the catalog (Gutenberg's search results,
+                // "All Books"): add the catalog from its start page, which
+                // the page names, so it opens on its sections.
+                if let Some(start) = feed.start.as_deref().filter(|s| is_other_page_of(s, &url)) {
+                    let at_start = Account { url: start.to_string(), ..account.clone() };
+                    if let Ok(home) = fetch_feed(&at_start, start).await {
+                        return Ok(Account { title: home.title, ..at_start });
+                    }
+                }
+                return Ok(Account { title: feed.title, ..account });
+            }
             Err(e) => last = e,
         }
     }
     Err(last)
+}
+
+/// Whether `start` is another page on the same server as `url` (a
+/// trailing slash doesn't make it another).
+fn is_other_page_of(start: &str, url: &str) -> bool {
+    let (Ok(a), Ok(b)) = (url::Url::parse(start), url::Url::parse(url)) else { return false };
+    a.host_str() == b.host_str() && start.trim_end_matches('/') != url.trim_end_matches('/')
 }
 
 /// The addresses to try for what was typed: without a trailing slash
@@ -910,6 +928,8 @@ pub struct Feed {
     pub total: Option<usize>,
     /// Other ways to see this feed: sorted or filtered differently.
     pub facets: Vec<FacetGroup>,
+    /// The catalog's start page, when the feed links it (`rel="start"`).
+    pub start: Option<String>,
 }
 
 /// Facets of one kind ("Sort by", "Language"): links to the same feed
@@ -1198,6 +1218,7 @@ fn markup_text(s: &str, escaped: bool) -> String {
 fn feed_link(feed: &mut Feed, link: AtomLink, base: &url::Url) {
     match link.rel.as_str() {
         "next" => feed.next = join(base, &link.href),
+        "start" => feed.start = join(base, &link.href),
         FACET => {
             if let Some(url) = join(base, &link.href) {
                 let facet = Facet { title: link.title.clone(), url, count: link.count, active: link.active };
@@ -1346,6 +1367,7 @@ fn parse_json(json: &serde_json::Value, base: &url::Url) -> Option<Feed> {
         for rel in rels(l) {
             match rel {
                 "next" => feed.next = join(base, href),
+                "start" => feed.start = join(base, href),
                 "search" if l["templated"].as_bool() == Some(true) => {
                     let marked = href.replace("{?query}", "NEBULAQUERY").replace("{searchTerms}", "NEBULAQUERY");
                     feed.search = join(base, &marked).map(|u| Search::Template(u.replace("NEBULAQUERY", "{?query}")));
@@ -2023,6 +2045,7 @@ mod tests {
 <id>http://www.gutenberg.org/ebooks/search.opds/?query=dracula</id>
 <title>Books: dracula</title>
 <link rel="search" type="application/opensearchdescription+xml" href="https://www.gutenberg.org/catalog/osd-books.xml"/>
+<link rel="start" title="Start Page" type="application/atom+xml;profile=opds-catalog" href="/ebooks.opds/"/>
 <opensearch:totalResults>7</opensearch:totalResults>
 <opensearch:itemsPerPage>25</opensearch:itemsPerPage>
 <entry>
@@ -2074,6 +2097,10 @@ Summary:
     fn reads_gutenberg_search_results_as_folders() {
         let base = url::Url::parse("https://www.gutenberg.org/ebooks/search.opds/?query=dracula").unwrap();
         let feed = parse_feed(GUTENBERG_SEARCH, &base).unwrap();
+        assert_eq!(feed.start.as_deref(), Some("https://www.gutenberg.org/ebooks.opds/"));
+        assert!(is_other_page_of(feed.start.as_deref().unwrap(), "https://www.gutenberg.org/ebooks/search.opds/"));
+        assert!(!is_other_page_of("https://www.gutenberg.org/ebooks.opds/", "https://www.gutenberg.org/ebooks.opds"));
+        assert!(!is_other_page_of("https://elsewhere.example/opds", "https://www.gutenberg.org/ebooks/search.opds/"));
         assert_eq!(feed.total, Some(7));
         assert!(feed.books.is_empty());
         let f = &feed.folders[0];
