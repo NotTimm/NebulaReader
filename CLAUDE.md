@@ -179,7 +179,7 @@ the owner's laptop). Last updated 2026-11-02.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- After 0.2.0 (on master, for the next release): Connect follows a
+- Released 0.2.1 (2026-11-02): the two OPDS fixes below. Connect follows a
   feed's `rel="start"` link to add the catalog from its start page
   (`Feed::start`, `opds::is_other_page_of`; Gutenberg's search address
   gave a sectionless "All Books" catalog), and the library's source menu
