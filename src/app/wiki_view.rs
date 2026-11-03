@@ -28,7 +28,8 @@ use cosmic::{app::Task, Application, ApplicationExt, Element};
 
 use super::float_flow::FloatFlow;
 use super::{tip, App, AppView, Message};
-use crate::wikipedia::{self, Article, Block, Cell, Featured, Line, Run, Summary, Table};
+use crate::fandom::{self, Wiki};
+use crate::wikipedia::{self, Article, Block, Cell, Featured, GalleryItem, Line, Run, Summary, Table};
 
 /// Body text, as on the site (16 px at its default size, a little less here).
 const TEXT: f32 = 15.0;
@@ -46,9 +47,20 @@ const FULL: u32 = 2560;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WikiPage {
+    /// Wikipedia's main page, a Fandom wiki's main page, or (with no wiki)
+    /// the list of wikis followed.
     Home,
     Article(String),
     Search(String),
+}
+
+/// Where pages come from: Wikipedia, or a Fandom wiki (`None`: the list
+/// of wikis followed, before one is picked).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Site {
+    #[default]
+    Wikipedia,
+    Fandom(Option<Wiki>),
 }
 
 /// A picture ready to draw, or why not yet.
@@ -64,8 +76,9 @@ pub type Arrival = (String, Result<widget::image::Handle, String>);
 
 #[derive(Clone, Debug)]
 pub enum WikiMsg {
-    /// From the library: the main page (or where it was).
-    Open,
+    /// From the library: Wikipedia's main page, or the Fandom page (`true`),
+    /// or where it was.
+    Open(bool),
     Go(WikiPage),
     Back,
     Random,
@@ -118,6 +131,20 @@ pub enum WikiMsg {
     /// Where the page's scrolling area is in the window.
     ScrollBounds(Option<Rectangle>),
     Copy,
+    /// A tab picked in a set of tabs (its id), by its place.
+    Tab(usize, usize),
+    /// Fandom: the box for adding a wiki.
+    AddInput(String),
+    AddWiki,
+    /// A wiki found, to follow (`None`) or to open at a page (from a link).
+    WikiFound(Result<Wiki, String>, Option<String>),
+    /// Opens a followed wiki's main page (by its id).
+    OpenWiki(String),
+    /// Follows the wiki being read, or stops following one (by its id).
+    Follow,
+    Unfollow(String),
+    /// The list of wikis followed.
+    Following,
 }
 
 /// Up or Down held on a Wikipedia page: it scrolls at a speed that follows
@@ -215,6 +242,12 @@ fn column_weights(t: &Table) -> Vec<f32> {
                 }
                 Block::Figure { image, .. } => out.push_str(&"m".repeat((image.width / 8.0) as usize)),
                 Block::Table(_) | Block::Bar(_) => out.push_str("mmmmmmmmmm"),
+                Block::Gallery(items) => out.push_str(&"m".repeat(items.len().min(4) * 20)),
+                Block::Tabs { tabs, .. } => {
+                    if let Some((_, first)) = tabs.first() {
+                        text(first, out);
+                    }
+                }
             }
         }
     }
@@ -264,9 +297,13 @@ fn language_names() -> &'static [&'static str] {
 
 #[derive(Default)]
 pub struct WikiState {
+    /// Wikipedia or Fandom: each has a state of its own (see
+    /// `App::wiki_parked`).
+    site: Site,
     page: Option<WikiPage>,
-    /// Pages to go Back to, each with how far down it was scrolled.
-    history: Vec<(WikiPage, f32)>,
+    /// Pages to go Back to, each with where it was and how far down it
+    /// was scrolled.
+    history: Vec<(Site, WikiPage, f32)>,
     /// How far down the page is scrolled now (from the scrollable's
     /// reports, throttled: exact once scrolling settles).
     offset: f32,
@@ -302,6 +339,38 @@ pub struct WikiState {
     texts: std::cell::RefCell<Vec<String>>,
     /// The window's height (0 until it's known).
     window_height: f32,
+    /// The tab picked in each set of tabs on the page (by its id).
+    tabs: HashMap<usize, usize>,
+    /// Fandom: the box for adding a wiki, a search for one going on, and
+    /// why the last one found nothing.
+    add_input: String,
+    adding: bool,
+    add_error: Option<String>,
+}
+
+impl WikiState {
+    /// The Fandom page's state, before it's opened.
+    pub fn fandom() -> Self {
+        WikiState { site: Site::Fandom(None), ..Default::default() }
+    }
+
+    /// The Fandom wiki being read, if any.
+    fn wiki(&self) -> Option<&Wiki> {
+        match &self.site {
+            Site::Fandom(w) => w.as_ref(),
+            Site::Wikipedia => None,
+        }
+    }
+
+    /// An article is shown (a Fandom wiki's main page is one too).
+    fn on_article(&self) -> bool {
+        self.article.is_some()
+            && match &self.page {
+                Some(WikiPage::Article(_)) => true,
+                Some(WikiPage::Home) => self.wiki().is_some(),
+                _ => false,
+            }
+    }
 }
 
 fn scroll_id() -> widget::Id {
@@ -456,6 +525,7 @@ mod tests {
             ],
             caption: Vec::new(),
             float_right: false,
+            infobox: false,
         };
         let w = column_weights(&t);
         assert_eq!(w.len(), 3);
@@ -804,13 +874,21 @@ fn muted<'a>(text: String, size: f32, pal: &Palette) -> Element<'a, Message> {
 
 impl App {
     fn wiki_go(&mut self, page: WikiPage, remember: bool) -> Task<Message> {
+        let site = self.wiki.site.clone();
+        self.wiki_visit(site, page, remember)
+    }
+
+    /// Shows a page of a site (Wikipedia, a Fandom wiki, or the wikis
+    /// followed), remembering the one shown now for Back.
+    fn wiki_visit(&mut self, site: Site, page: WikiPage, remember: bool) -> Task<Message> {
         if remember {
             if let Some(current) = self.wiki.page.take() {
-                if current != page {
-                    self.wiki.history.push((current, self.wiki.offset));
+                if current != page || self.wiki.site != site {
+                    self.wiki.history.push((self.wiki.site.clone(), current, self.wiki.offset));
                 }
             }
         }
+        self.wiki.site = site;
         self.wiki.offset = 0.0;
         self.wiki.page = Some(page.clone());
         self.wiki.generation += 1;
@@ -818,12 +896,27 @@ impl App {
         self.wiki.loading = true;
         self.wiki.viewer = None;
         self.wiki.sel = None;
+        self.wiki.tabs.clear();
         self.app_view = AppView::Wikipedia;
         self.set_show_context(false);
         let generation = self.wiki.generation;
         let top = scroll_mod::snap_to(scroll_id(), RelativeOffset { x: None, y: Some(0.0) });
-        let load = match page {
-            WikiPage::Home => {
+        let wiki = match &self.wiki.site {
+            Site::Wikipedia => None,
+            Site::Fandom(None) => {
+                // The wikis followed: nothing to load but their logos.
+                self.set_header_title(fl!("fandom-following"));
+                self.wiki.loading = false;
+                self.wiki.article = None;
+                let logos = self.settings.fandom_wikis.iter().filter_map(|w| w.logo.clone()).map(|l| (l, THUMB)).collect();
+                let pictures = self.page_pictures(Vec::new(), logos);
+                let restore = self.wiki_restore();
+                return Task::batch([pictures, if self.wiki.offset > 0.0 { restore } else { top }]);
+            }
+            Site::Fandom(Some(w)) => Some(w.clone()),
+        };
+        let load = match (page, wiki) {
+            (WikiPage::Home, None) => {
                 self.set_header_title(fl!("wiki-main-page"));
                 if let Some(f) = self.wiki.featured.clone().filter(|h| h.day == wikipedia::chrono_today()) {
                     // Going Back to it: `HomeLoaded` scrolls to where it was.
@@ -836,18 +929,51 @@ impl App {
                     Message::Wiki(WikiMsg::HomeLoaded(generation, home))
                 })
             }
-            WikiPage::Article(title) => {
+            (WikiPage::Home, Some(w)) => {
+                self.set_header_title(w.name.clone());
+                self.wiki.article = None;
+                self.wiki.toc_open.clear();
+                cosmic::task::future(async move { Message::Wiki(WikiMsg::ArticleLoaded(generation, fandom::article(&w, &w.main_page).await)) })
+            }
+            (WikiPage::Article(title), wiki) => {
                 self.set_header_title(title.clone());
                 self.wiki.article = None;
                 self.wiki.toc_open.clear();
-                cosmic::task::future(async move { Message::Wiki(WikiMsg::ArticleLoaded(generation, wikipedia::article(&title).await)) })
+                cosmic::task::future(async move {
+                    let a = match wiki {
+                        Some(w) => fandom::article(&w, &title).await,
+                        None => wikipedia::article(&title).await,
+                    };
+                    Message::Wiki(WikiMsg::ArticleLoaded(generation, a))
+                })
             }
-            WikiPage::Search(query) => {
+            (WikiPage::Search(query), wiki) => {
                 self.set_header_title(fl!("wiki-search-results", query = query.as_str()));
-                cosmic::task::future(async move { Message::Wiki(WikiMsg::SearchLoaded(generation, wikipedia::search(&query).await)) })
+                cosmic::task::future(async move {
+                    let r = match wiki {
+                        Some(w) => fandom::search(&w, &query).await,
+                        None => wikipedia::search(&query).await,
+                    };
+                    Message::Wiki(WikiMsg::SearchLoaded(generation, r))
+                })
             }
         };
         Task::batch([load, top])
+    }
+
+    /// Wikipedia and Fandom each keep their own place: switching to the
+    /// other brings its state out and puts this one away.
+    fn wiki_enter(&mut self, fandom: bool) {
+        if matches!(self.wiki.site, Site::Fandom(_)) != fandom {
+            std::mem::swap(&mut self.wiki, &mut self.wiki_parked);
+            self.wiki.sel = None;
+            self.wiki.key_scroll = None;
+        }
+    }
+
+    /// Whether the Fandom page is the one shown (or last shown).
+    pub(super) fn wiki_is_fandom(&self) -> bool {
+        matches!(self.wiki.site, Site::Fandom(_))
     }
 
     /// Starts loading pictures not loaded yet, at `max` pixels.
@@ -888,7 +1014,7 @@ impl App {
         use cosmic::iced::keyboard::{key::Named, Key};
         // C shows or hides an article's contents.
         if self.wiki.viewer.is_none() {
-            let article = matches!(self.wiki.page, Some(WikiPage::Article(_))) && self.wiki.article.is_some();
+            let article = self.wiki.on_article();
             return match key {
                 Key::Character(c) if c.eq_ignore_ascii_case("c") && self.modifiers.command() && self.wiki.sel.is_some() => {
                     Some(self.update_wiki(WikiMsg::Copy))
@@ -909,7 +1035,7 @@ impl App {
     }
 
     pub(super) fn wiki_subscription(&self) -> Subscription<Message> {
-        if self.settings.wikipedia {
+        if self.settings.wikipedia || self.settings.fandom {
             use cosmic::iced::{event, keyboard, mouse, window};
             let pictures = Subscription::run(arrivals).map(|batch| Message::Wiki(WikiMsg::Pictures(batch)));
             let height = event::listen_with(|event, _, _| match event {
@@ -999,7 +1125,8 @@ impl App {
 
     pub(super) fn update_wiki(&mut self, msg: WikiMsg) -> Task<Message> {
         match msg {
-            WikiMsg::Open => {
+            WikiMsg::Open(fandom) => {
+                self.wiki_enter(fandom);
                 if self.wiki.page.is_some() && !self.wiki.loading && self.wiki.error.is_none() {
                     // Back where it was, scrolled as it was.
                     self.app_view = AppView::Wikipedia;
@@ -1011,15 +1138,22 @@ impl App {
             }
             WikiMsg::Go(page) => return self.wiki_go(page, true),
             WikiMsg::Back => {
-                if let Some((page, offset)) = self.wiki.history.pop() {
+                if let Some((site, page, offset)) = self.wiki.history.pop() {
                     self.wiki.restore = Some(offset);
-                    return self.wiki_go(page, false);
+                    return self.wiki_visit(site, page, false);
                 }
                 return self.update(Message::GoToLibrary);
             }
             WikiMsg::Random => {
                 self.wiki.loading = true;
-                return cosmic::task::future(async { Message::Wiki(WikiMsg::RandomFound(wikipedia::random_title().await)) });
+                let wiki = self.wiki.wiki().cloned();
+                return cosmic::task::future(async move {
+                    let t = match wiki {
+                        Some(w) => fandom::random_title(&w).await,
+                        None => wikipedia::random_title().await,
+                    };
+                    Message::Wiki(WikiMsg::RandomFound(t))
+                });
             }
             WikiMsg::RandomFound(result) => match result {
                 Ok(title) => return self.wiki_go(WikiPage::Article(title), true),
@@ -1101,7 +1235,14 @@ impl App {
             }
             WikiMsg::Pictures(batch) => {
                 for (key, result) in batch {
-                    // Only pictures this page still wants.
+                    // Only pictures a page still wants (the one put away
+                    // too: Wikipedia's or Fandom's, whichever isn't shown).
+                    if let Some(slot) = self.wiki_parked.pics.get_mut(&key).filter(|s| matches!(s, Pic::Loading)) {
+                        *slot = match &result {
+                            Ok(h) => Pic::Ready(h.clone()),
+                            Err(_) => Pic::Failed,
+                        };
+                    }
                     if let Some(slot) = self.wiki.pics.get_mut(&key) {
                         *slot = match result {
                             Ok(h) => Pic::Ready(h),
@@ -1124,12 +1265,22 @@ impl App {
                 if let Some(title) = target.strip_prefix("wiki:") {
                     return self.wiki_go(WikiPage::Article(title.to_string()), true);
                 }
+                // A page on a Fandom wiki, from a Fandom wiki: opened here.
+                if let (Some(_), Some((base, title))) = (self.wiki.wiki(), fandom::page_link(&target)) {
+                    if let Some(w) = self.settings.fandom_wikis.iter().find(|w| w.id() == base).cloned() {
+                        return self.wiki_visit(Site::Fandom(Some(w)), WikiPage::Article(title), true);
+                    }
+                    self.wiki.loading = true;
+                    return cosmic::task::future(async move {
+                        Message::Wiki(WikiMsg::WikiFound(fandom::find(&base).await.map_err(|_| target), Some(title)))
+                    });
+                }
                 crate::platform::open_url(&target);
             }
             WikiMsg::ToggleToc => {
                 // The article gets wider or narrower and its text wraps
                 // anew: find the place being read first, to stay on it.
-                let Some(a) = self.wiki.article.as_ref().filter(|_| matches!(self.wiki.page, Some(WikiPage::Article(_)))) else {
+                let Some(a) = self.wiki.article.as_ref().filter(|_| self.wiki.on_article()) else {
                     self.wiki.toc_shown = !self.wiki.toc_shown;
                     return Task::none();
                 };
@@ -1278,17 +1429,87 @@ impl App {
             }
             WikiMsg::ScrollTo(None) => {}
             WikiMsg::OpenOnWikipedia => {
-                if let Some(WikiPage::Article(title)) = &self.wiki.page {
-                    crate::platform::open_url(&wikipedia::page_url(title));
+                let title = match &self.wiki.page {
+                    Some(WikiPage::Article(t)) => Some(t.clone()),
+                    _ => self.wiki.article.as_ref().map(|a| a.title.clone()),
+                };
+                match (self.wiki.wiki(), title) {
+                    (Some(w), Some(t)) => crate::platform::open_url(&w.page_url(&t)),
+                    (Some(w), None) => crate::platform::open_url(&w.page_url(&w.main_page)),
+                    (None, Some(t)) => crate::platform::open_url(&wikipedia::page_url(&t)),
+                    (None, None) => {}
                 }
             }
             WikiMsg::SetEnabled(on) => {
                 self.settings.wikipedia = on;
                 self.settings.save();
-                if !on && self.app_view == AppView::Wikipedia {
+                if !on && self.app_view == AppView::Wikipedia && !self.wiki_is_fandom() {
                     self.app_view = AppView::Library;
                 }
             }
+            WikiMsg::Tab(id, i) => {
+                self.wiki.tabs.insert(id, i);
+                self.wiki.sel = None;
+            }
+            WikiMsg::AddInput(s) => {
+                self.wiki.add_input = s;
+                self.wiki.add_error = None;
+            }
+            WikiMsg::AddWiki => {
+                let input = self.wiki.add_input.trim().to_string();
+                if input.is_empty() || self.wiki.adding {
+                    return Task::none();
+                }
+                self.wiki.adding = true;
+                self.wiki.add_error = None;
+                return cosmic::task::future(async move { Message::Wiki(WikiMsg::WikiFound(fandom::find(&input).await, None)) });
+            }
+            WikiMsg::WikiFound(result, page) => match (result, page) {
+                // Added from the box: followed, and shown in the list.
+                (Ok(w), None) => {
+                    self.wiki.adding = false;
+                    self.wiki.add_input.clear();
+                    let logo = w.logo.clone();
+                    match self.settings.fandom_wikis.iter_mut().find(|f| **f == w) {
+                        Some(f) => *f = w,
+                        None => self.settings.fandom_wikis.push(w),
+                    }
+                    self.settings.save();
+                    return self.want(logo, THUMB);
+                }
+                (Err(e), None) => {
+                    self.wiki.adding = false;
+                    self.wiki.add_error = Some(e);
+                }
+                // A link to another wiki: opened here, or on the site if
+                // it can't be.
+                (Ok(w), Some(title)) => {
+                    self.wiki.loading = false;
+                    return self.wiki_visit(Site::Fandom(Some(w)), WikiPage::Article(title), true);
+                }
+                (Err(url), Some(_)) => {
+                    self.wiki.loading = false;
+                    crate::platform::open_url(&url);
+                }
+            },
+            WikiMsg::OpenWiki(id) => {
+                if let Some(w) = self.settings.fandom_wikis.iter().find(|w| w.id() == id).cloned() {
+                    return self.wiki_visit(Site::Fandom(Some(w)), WikiPage::Home, true);
+                }
+            }
+            WikiMsg::Follow => {
+                if let Some(w) = self.wiki.wiki().cloned() {
+                    if !self.settings.fandom_wikis.contains(&w) {
+                        self.settings.fandom_wikis.push(w);
+                        self.settings.save();
+                    }
+                }
+            }
+            WikiMsg::Unfollow(id) => {
+                self.settings.fandom_wikis.retain(|w| w.id() != id);
+                self.settings.save();
+            }
+            WikiMsg::Following => return self.wiki_visit(Site::Fandom(None), WikiPage::Home, true),
             WikiMsg::View(url) => {
                 let i = match self.wiki.gallery.iter().position(|(u, _)| *u == url) {
                     Some(i) => i,
@@ -1392,6 +1613,23 @@ impl App {
     }
 
     fn wiki_pic<'a>(&self, url: &str, max: u32, width: Length, height: Length, pal: &Palette) -> Option<Element<'a, Message>> {
+        let view = Message::Wiki(WikiMsg::View(url.to_string()));
+        self.wiki_pic_on(url, max, width, height, pal, view, cosmic::iced::mouse::Interaction::ZoomIn)
+    }
+
+    /// [`App::wiki_pic`] doing something else when clicked (a picture
+    /// that's a link).
+    #[allow(clippy::too_many_arguments)]
+    fn wiki_pic_on<'a>(
+        &self,
+        url: &str,
+        max: u32,
+        width: Length,
+        height: Length,
+        pal: &Palette,
+        on_press: Message,
+        interaction: cosmic::iced::mouse::Interaction,
+    ) -> Option<Element<'a, Message>> {
         let el: Element<'a, Message> = match self.wiki.pics.get(&pic_key(url, max)) {
             Some(Pic::Ready(h)) => widget::image(h.clone()).width(width).height(height).content_fit(ContentFit::Contain).into(),
             Some(Pic::Failed) => return None,
@@ -1404,25 +1642,31 @@ impl App {
                     .into()
             }
         };
-        Some(
-            widget::mouse_area(el)
-                .on_press(Message::Wiki(WikiMsg::View(url.to_string())))
-                .interaction(cosmic::iced::mouse::Interaction::ZoomIn)
-                .into(),
-        )
+        Some(widget::mouse_area(el).on_press(on_press).interaction(interaction).into())
     }
 
     /// The bar above every Wikipedia page: Back, contents, Main page,
-    /// Random, search.
+    /// Random, search. On a Fandom wiki the same for that wiki, plus the
+    /// way to the wikis followed and Follow; on the list of wikis, just Back.
     fn wiki_bar(&self) -> Element<'_, Message> {
-        let article = matches!(self.wiki.page, Some(WikiPage::Article(_))) && self.wiki.article.is_some();
-        widget::row::with_capacity(6)
+        let article = self.wiki.on_article();
+        let back = tip(widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::Wiki(WikiMsg::Back)), fl!("opds-back"));
+        let wiki = match &self.wiki.site {
+            Site::Fandom(None) => return widget::row::with_capacity(1).push(back).into(),
+            Site::Fandom(Some(w)) => Some(w),
+            Site::Wikipedia => None,
+        };
+        let following = wiki.is_some_and(|w| self.settings.fandom_wikis.contains(w));
+        widget::row::with_capacity(8)
             .spacing(8)
             .align_y(Alignment::Center)
-            .push(tip(
-                widget::button::icon(icon::from_name("go-previous-symbolic")).on_press(Message::Wiki(WikiMsg::Back)),
-                fl!("opds-back"),
-            ))
+            .push(back)
+            .push_maybe(wiki.map(|_| {
+                tip(
+                    widget::button::icon(icon::from_name("view-grid-symbolic")).on_press(Message::Wiki(WikiMsg::Following)),
+                    fl!("fandom-following"),
+                )
+            }))
             .push_maybe((article && !self.wiki.toc_shown).then(|| {
                 tip(
                     widget::button::icon(icon::from_name("view-list-symbolic")).on_press(Message::Wiki(WikiMsg::ToggleToc)),
@@ -1432,14 +1676,22 @@ impl App {
             .push(widget::button::text(fl!("wiki-main-page")).on_press(Message::Wiki(WikiMsg::Go(WikiPage::Home))))
             .push(widget::button::text(fl!("wiki-random")).on_press(Message::Wiki(WikiMsg::Random)))
             .push(
-                widget::search_input(fl!("wiki-search"), &self.wiki.search_input)
-                    .on_input(|s| Message::Wiki(WikiMsg::SearchInput(s)))
-                    .on_submit(|_| Message::Wiki(WikiMsg::Search))
-                    .width(Length::Fill),
+                widget::search_input(
+                    match wiki {
+                        Some(w) => fl!("fandom-search", wiki = w.name.as_str()),
+                        None => fl!("wiki-search"),
+                    },
+                    &self.wiki.search_input,
+                )
+                .on_input(|s| Message::Wiki(WikiMsg::SearchInput(s)))
+                .on_submit(|_| Message::Wiki(WikiMsg::Search))
+                .width(Length::Fill),
             )
             .push(widget::button::standard(fl!("wiki-search-button")).on_press(Message::Wiki(WikiMsg::Search)))
+            // A wiki opened from a link can be followed from here.
+            .push_maybe((wiki.is_some() && !following).then(|| widget::button::suggested(fl!("fandom-follow")).on_press(Message::Wiki(WikiMsg::Follow))))
             // Which language's Wikipedia, on the main page like the site's.
-            .push_maybe(matches!(self.wiki.page, Some(WikiPage::Home) | None).then(|| {
+            .push_maybe((wiki.is_none() && matches!(self.wiki.page, Some(WikiPage::Home) | None)).then(|| {
                 let current = wikipedia::LANGUAGES.iter().position(|(c, _)| *c == wikipedia::language());
                 tip(
                     widget::dropdown(language_names(), current, |i| Message::Wiki(WikiMsg::SetLanguage(i))),
@@ -1462,7 +1714,9 @@ impl App {
             widget::container(widget::indeterminate_circular()).width(Length::Fill).center_x(Length::Fill).padding(40).into()
         } else {
             match (&self.wiki.page, &self.wiki.article, &self.wiki.featured) {
+                (_, _, _) if self.wiki.site == Site::Fandom(None) => self.view_fandom_following(&pal),
                 (Some(WikiPage::Article(_)), Some(a), _) => self.view_wiki_article(a, &pal),
+                (Some(WikiPage::Home), Some(a), _) if self.wiki.wiki().is_some() => self.view_wiki_article(a, &pal),
                 (Some(WikiPage::Search(q)), _, _) => self.view_wiki_results(q, &pal),
                 (Some(WikiPage::Home) | None, _, Some(h)) => match (&h.main, &h.feed) {
                     (Some(m), feed) => self.view_wiki_main_page(m, feed.as_ref(), &pal),
@@ -1494,7 +1748,7 @@ impl App {
         // The page always second in the row, so showing or hiding the
         // contents keeps its scrolling where it is.
         let toc: Element<'_, Message> = match (&self.wiki.page, &self.wiki.article) {
-            (Some(WikiPage::Article(_)), Some(a)) if self.wiki.toc_shown && !self.wiki.loading && self.wiki.error.is_none() => {
+            (_, Some(a)) if self.wiki.on_article() && self.wiki.toc_shown && !self.wiki.loading && self.wiki.error.is_none() => {
                 widget::scrollable(widget::container(self.wiki_toc(a, &pal)).padding([24, 8, 24, 20])).width(Length::Fixed(TOC_WIDTH + 28.0)).height(Length::Fill).into()
             }
             _ => widget::Space::new().width(Length::Fixed(0.0)).into(),
@@ -1747,13 +2001,25 @@ impl App {
     /// infobox and pictures floated right with the text beside them.
     fn view_wiki_article<'a>(&'a self, a: &'a Article, pal: &Palette) -> Element<'a, Message> {
         let mut flow = FloatFlow::new().spacing(14.0).gap(24.0);
+        let wiki = self.wiki.wiki();
+        // A wiki's main page is headed with the wiki's name.
+        let title = match (wiki, &self.wiki.page) {
+            (Some(w), Some(WikiPage::Home)) => w.name.as_str(),
+            _ => a.title.as_str(),
+        };
+        let from = match wiki {
+            Some(w) => fl!("fandom-from", wiki = w.name.as_str()),
+            None => fl!("wiki-from"),
+        };
+        // A wiki's colour under its title, as its pages have it.
+        let accent = wiki.and_then(|w| w.accent).map(|c| Color::from_rgb8(c[0], c[1], c[2])).unwrap_or(pal.border);
         flow = flow.push(
             widget::container(
                 widget::column::with_capacity(3)
                     .spacing(8)
-                    .push(self.heading(&a.title, 32.0, serif(), pal))
-                    .push(rule(pal.border))
-                    .push(muted(fl!("wiki-from"), TEXT - 1.0, pal)),
+                    .push(self.heading(title, 32.0, serif(), pal))
+                    .push(rule(accent))
+                    .push(muted(from, TEXT - 1.0, pal)),
             )
             .id(section_id(0)),
         );
@@ -1794,12 +2060,24 @@ impl App {
                         None if !caption.is_empty() => flow.push(self.line_text(caption, pal, TEXT - 2.0)),
                         None => flow,
                     },
+                    Block::Table(t) if t.infobox => flow.float(self.wiki_table(t, pal, true)),
                     Block::Table(t) if t.float_right => flow.float(widget::container(self.wiki_table(t, pal, false)).width(Length::Fixed(360.0))),
                     other => flow.push(self.wiki_block(other, pal)),
                 };
             }
         }
         // Credit and licence.
+        let (credit, license, view_on) = match wiki {
+            Some(w) => {
+                let (name, url) = w.license();
+                (
+                    fl!("fandom-credit", title = a.title.as_str(), wiki = w.name.as_str(), license = name.as_str()),
+                    (name, url),
+                    if w.on_fandom() { fl!("fandom-view-on") } else { fl!("fandom-view-on-site") },
+                )
+            }
+            None => (fl!("wiki-credit", title = a.title.as_str()), (fl!("wiki-license"), wikipedia::LICENSE_URL.to_string()), fl!("wiki-view-on")),
+        };
         flow = flow.push(
             widget::column::with_capacity(2)
                 .spacing(10)
@@ -1809,9 +2087,9 @@ impl App {
                     widget::row::with_capacity(3)
                         .spacing(12)
                         .align_y(Alignment::Center)
-                        .push(widget::container(muted(fl!("wiki-credit", title = a.title.as_str()), TEXT - 2.0, pal)).width(Length::Fill))
-                        .push(widget::button::link(fl!("wiki-license")).on_press(Message::OpenUrl(wikipedia::LICENSE_URL.into())))
-                        .push(widget::button::standard(fl!("wiki-view-on")).on_press(Message::Wiki(WikiMsg::OpenOnWikipedia))),
+                        .push(widget::container(muted(credit, TEXT - 2.0, pal)).width(Length::Fill))
+                        .push(widget::button::link(license.0).on_press(Message::OpenUrl(license.1)))
+                        .push(widget::button::standard(view_on).on_press(Message::Wiki(WikiMsg::OpenOnWikipedia))),
                 ),
         );
         flow.into()
@@ -1914,7 +2192,9 @@ impl App {
                 Some(fig) => widget::container(fig).width(Length::Fill).align_x(Alignment::End).into(),
                 None => self.line_text(caption, pal, TEXT - 2.0),
             },
-            Block::Table(t) => self.wiki_table(t, pal, false),
+            Block::Table(t) => self.wiki_table(t, pal, t.infobox),
+            Block::Gallery(items) => self.wiki_gallery(items, pal),
+            Block::Tabs { id, tabs } => self.wiki_tabs(*id, tabs, pal, None),
             Block::Bar(em) => {
                 let color = pal.link;
                 widget::container(widget::Space::new().width(Length::Fixed((em * TEXT).max(1.0))).height(Length::Fixed(TEXT * 0.9)))
@@ -1961,11 +2241,25 @@ impl App {
     }
 
     fn wiki_cell<'a>(&'a self, c: &'a Cell, pal: &Palette, size: f32, infobox: bool) -> widget::Container<'a, Message, cosmic::Theme> {
-        let mut col = widget::column::with_capacity(c.content.len()).spacing(4).width(Length::Fill);
-        if c.center {
+        let col = self.cell_blocks(&c.content, pal, size, infobox, c.center);
+        // A heading cell gets the site's grey band unless it has a colour.
+        let bg = c.background.map(|b| pal.page_color(b)).or((c.header && !infobox).then_some(pal.panel));
+        let border = if infobox { Color::TRANSPARENT } else { pal.border };
+        widget::container(col).padding(if infobox { [3, 4] } else { [4, 8] }).style(move |_: &cosmic::Theme| widget::container::Style {
+            background: bg.map(Background::Color),
+            border: Border { color: border, width: if infobox { 0.0 } else { 1.0 }, radius: 0.0.into() },
+            ..Default::default()
+        })
+    }
+
+    /// What's in a table cell (or in a tab inside one), smaller than the
+    /// page's text.
+    fn cell_blocks<'a>(&'a self, content: &'a [Block], pal: &Palette, size: f32, infobox: bool, center: bool) -> widget::Column<'a, Message, cosmic::Theme> {
+        let mut col = widget::column::with_capacity(content.len()).spacing(4).width(Length::Fill);
+        if center {
             col = col.align_x(Alignment::Center);
         }
-        let mut blocks = c.content.iter().peekable();
+        let mut blocks = content.iter().peekable();
         while let Some(b) = blocks.next() {
             col = col.push(match b {
                 // A chart's bar with its number beside it.
@@ -1979,7 +2273,7 @@ impl App {
                 Block::Para(l) => {
                     let spans: Vec<Span<'a, String, Font>> = l.iter().map(|r| run_span(r, r.text.as_str().into(), pal, size)).collect();
                     let t = self.sel_rich(spans, pal).size(size).line_height(LineHeight::Relative(1.45));
-                    if c.center {
+                    if center {
                         t.align_x(cosmic::iced::widget::text::Alignment::Center).width(Length::Fill).into()
                     } else {
                         t.width(Length::Fill).into()
@@ -1996,16 +2290,137 @@ impl App {
                         .push_maybe((!caption.is_empty()).then(|| self.line_text(caption, pal, size)))
                         .into()
                 }
+                Block::Tabs { id, tabs } => self.wiki_tabs(*id, tabs, pal, Some((size, infobox))),
                 other => self.wiki_block(other, pal),
             });
         }
-        // A heading cell gets the site's grey band unless it has a colour.
-        let bg = c.background.map(|b| pal.page_color(b)).or((c.header && !infobox).then_some(pal.panel));
-        let border = if infobox { Color::TRANSPARENT } else { pal.border };
-        widget::container(col).padding(if infobox { [3, 4] } else { [4, 8] }).style(move |_: &cosmic::Theme| widget::container::Style {
-            background: bg.map(Background::Color),
-            border: Border { color: border, width: if infobox { 0.0 } else { 1.0 }, radius: 0.0.into() },
-            ..Default::default()
-        })
+        col
+    }
+
+    /// Pictures side by side, wrapping: a gallery's (each opens in the
+    /// viewer), or pictures that are links (a wiki's main page).
+    fn wiki_gallery<'a>(&'a self, items: &'a [GalleryItem], pal: &Palette) -> Element<'a, Message> {
+        let cards: Vec<Element<'a, Message>> = items
+            .iter()
+            .filter_map(|it| {
+                // As the site sizes it, up to 200 px either way.
+                let mut w = it.image.width.min(200.0);
+                let mut h = it.image.height * w / it.image.width.max(1.0);
+                if h > 200.0 {
+                    w *= 200.0 / h;
+                    h = 200.0;
+                }
+                let (press, pointer) = match &it.link {
+                    Some(l) => (Message::Wiki(WikiMsg::Link(l.clone())), cosmic::iced::mouse::Interaction::Pointer),
+                    None => (Message::Wiki(WikiMsg::View(it.image.url.clone())), cosmic::iced::mouse::Interaction::ZoomIn),
+                };
+                let pic = self.wiki_pic_on(&it.image.url, THUMB, Length::Fixed(w), Length::Fixed(h), pal, press, pointer)?;
+                let width = if it.caption.is_empty() { w } else { w.max(140.0) };
+                Some(
+                    widget::column::with_capacity(2)
+                        .spacing(4)
+                        .width(Length::Fixed(width))
+                        .align_x(Alignment::Center)
+                        .push(pic)
+                        .push_maybe((!it.caption.is_empty()).then(|| self.line_text(&it.caption, pal, TEXT - 3.0)))
+                        .into(),
+                )
+            })
+            .collect();
+        widget::flex_row(cards).column_spacing(12).row_spacing(12).into()
+    }
+
+    /// Tabs: a button for each, then the one picked. `cell` is the text
+    /// size and whether it's in an infobox, for tabs inside a table.
+    fn wiki_tabs<'a>(&'a self, id: usize, tabs: &'a [(String, Vec<Block>)], pal: &Palette, cell: Option<(f32, bool)>) -> Element<'a, Message> {
+        let Some(last) = tabs.len().checked_sub(1) else { return widget::Space::new().into() };
+        let current = self.wiki.tabs.get(&id).copied().unwrap_or(0).min(last);
+        let buttons: Vec<Element<'a, Message>> = tabs
+            .iter()
+            .enumerate()
+            .map(|(i, (label, _))| {
+                let b = widget::button::text(label.clone()).on_press(Message::Wiki(WikiMsg::Tab(id, i)));
+                if i == current { b.class(cosmic::theme::Button::Suggested).into() } else { b.into() }
+            })
+            .collect();
+        let pane: Element<'a, Message> = match cell {
+            Some((size, infobox)) => self.cell_blocks(&tabs[current].1, pal, size, infobox, infobox).into(),
+            None => widget::column::with_children(tabs[current].1.iter().map(|b| self.wiki_block(b, pal))).spacing(14).width(Length::Fill).into(),
+        };
+        widget::column::with_capacity(3)
+            .spacing(8)
+            .width(Length::Fill)
+            .push(widget::flex_row(buttons).column_spacing(4).row_spacing(4))
+            .push(rule(pal.border))
+            .push(pane)
+            .into()
+    }
+
+    // ── Fandom ────────────────────────────────────────────────────────────
+
+    /// The Fandom page: the wikis followed, each opening its main page, and
+    /// a box to add one by name or address.
+    fn view_fandom_following<'a>(&'a self, pal: &Palette) -> Element<'a, Message> {
+        let mut col = widget::column::with_capacity(6).spacing(16);
+        col = col.push(
+            widget::column::with_capacity(2)
+                .spacing(4)
+                .push(widget::text(fl!("fandom-following")).size(30.0).font(serif()))
+                .push(muted(fl!("fandom-following-sub"), TEXT, pal)),
+        );
+        let add = widget::row::with_capacity(3)
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(
+                widget::text_input(fl!("fandom-add-placeholder"), &self.wiki.add_input)
+                    .on_input(|s| Message::Wiki(WikiMsg::AddInput(s)))
+                    .on_submit(|_| Message::Wiki(WikiMsg::AddWiki))
+                    .width(Length::Fill),
+            )
+            .push_maybe(self.wiki.adding.then(|| widget::indeterminate_circular().size(20.0).bar_height(2.0)))
+            .push(widget::button::suggested(fl!("fandom-add")).on_press_maybe((!self.wiki.adding).then_some(Message::Wiki(WikiMsg::AddWiki))));
+        col = col.push(widget::container(add).max_width(720));
+        if let Some(e) = &self.wiki.add_error {
+            col = col.push(widget::text::body(e.clone()).class(cosmic::theme::Text::Accent));
+        }
+        if self.settings.fandom_wikis.is_empty() {
+            col = col.push(muted(fl!("fandom-none-yet"), TEXT, pal));
+        }
+        let cards: Vec<Element<'a, Message>> = self.settings.fandom_wikis.iter().map(|w| self.fandom_card(w, pal)).collect();
+        col = col.push(widget::flex_row(cards).column_spacing(16).row_spacing(16));
+        col = col.push(widget::text::caption(fl!("fandom-note")));
+        col.into()
+    }
+
+    /// A wiki followed: its colour, logo (or name), address, and a way to
+    /// stop following it.
+    fn fandom_card<'a>(&'a self, w: &'a Wiki, pal: &Palette) -> Element<'a, Message> {
+        let accent = w.accent.map(|c| Color::from_rgb8(c[0], c[1], c[2])).unwrap_or(pal.link);
+        let band = widget::container(widget::Space::new().height(4.0).width(Length::Fill))
+            .style(move |_: &cosmic::Theme| widget::container::Style { background: Some(Background::Color(accent)), ..Default::default() });
+        let logo: Option<Element<'a, Message>> = w.logo.as_deref().and_then(|l| match self.wiki.pics.get(&pic_key(l, THUMB)) {
+            Some(Pic::Ready(h)) => Some(widget::image(h.clone()).height(Length::Fixed(48.0)).content_fit(ContentFit::Contain).into()),
+            _ => None,
+        });
+        let body = widget::column::with_capacity(3)
+            .spacing(6)
+            .padding([10, 12])
+            .width(Length::Fill)
+            .push(widget::container(logo.unwrap_or_else(|| widget::Space::new().height(Length::Fixed(48.0)).into())).height(Length::Fixed(48.0)).center_y(Length::Fixed(48.0)))
+            .push(widget::text(w.name.clone()).size(TEXT + 1.0).font(bold()))
+            .push(
+                widget::row::with_capacity(2)
+                    .align_y(Alignment::Center)
+                    .push(widget::container(muted(w.address(), TEXT - 3.0, pal)).width(Length::Fill))
+                    .push(tip(
+                        widget::button::icon(icon::from_name("user-trash-symbolic")).extra_small().on_press(Message::Wiki(WikiMsg::Unfollow(w.id()))),
+                        fl!("fandom-unfollow"),
+                    )),
+            );
+        let card = boxed(widget::column::with_capacity(2).push(band).push(body), pal.panel, pal.border).width(Length::Fixed(260.0));
+        widget::mouse_area(card)
+            .on_press(Message::Wiki(WikiMsg::OpenWiki(w.id())))
+            .interaction(cosmic::iced::mouse::Interaction::Pointer)
+            .into()
     }
 }

@@ -200,6 +200,10 @@ pub struct Settings {
     pub wikipedia: bool,
     /// Which language's Wikipedia (a code from `wikipedia::LANGUAGES`).
     pub wikipedia_language: String,
+    /// The Fandom page is on (it's opt-in, like Wikipedia).
+    pub fandom: bool,
+    /// The Fandom wikis followed, in the order they were added.
+    pub fandom_wikis: Vec<crate::fandom::Wiki>,
     /// Interface language (an `i18n/` folder name); `None` follows the
     /// system.
     pub language: Option<String>,
@@ -228,6 +232,8 @@ impl Default for Settings {
             open_links_from: Vec::new(),
             wikipedia: false,
             wikipedia_language: "en".to_string(),
+            fandom: false,
+            fandom_wikis: Vec::new(),
             language: None,
         }
     }

@@ -24,6 +24,7 @@ mod themes;
 mod updater;
 mod updates;
 mod wikipedia;
+mod fandom;
 
 use cosmic::app::Settings;
 use cosmic::iced::Size;

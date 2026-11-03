@@ -487,7 +487,10 @@ pub struct App {
     /// OPDS catalogs added.
     opds: crate::opds::Accounts,
     op: OpdsState,
+    /// The Wikipedia or Fandom page being shown (or last shown).
     wiki: WikiState,
+    /// The other one of the two, kept as it was while it's not shown.
+    wiki_parked: WikiState,
     dl: Downloads,
     /// The Jellyfin series being read, if any.
     remote: Option<RemoteReading>,
@@ -1704,6 +1707,7 @@ impl Application for App {
             opds: crate::opds::Accounts::load(),
             op: OpdsState::default(),
             wiki: WikiState::default(),
+            wiki_parked: WikiState::fandom(),
             dl,
             remote: None,
             context_page: ContextPage::Settings,
@@ -4307,7 +4311,7 @@ impl App {
             Message::LibrarySource(i) => {
                 self.library_menu = false;
                 if LibrarySource::ALL.get(i) == Some(&LibrarySource::Wikipedia) {
-                    return self.update(Message::Wiki(WikiMsg::Open));
+                    return self.update(Message::Wiki(WikiMsg::Open(false)));
                 }
                 if self.app_view == AppView::Wikipedia {
                     self.app_view = AppView::Library;

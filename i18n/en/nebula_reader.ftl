@@ -670,6 +670,25 @@ wiki-license = CC BY-SA 4.0
 wiki-view-on = View on Wikipedia
 wiki-viewer-hint = ← → for the page's other pictures · scroll or pinch to zoom · Esc to close
 wiki-close = Close
+
+# Fandom wikis (opt-in, like Wikipedia).
+fandom-enable = Read Fandom wikis in Nebula
+fandom-enable-note = Adds the Fandom wikis you follow: their main pages, search and articles, laid out like Wikipedia's. Pages come from each wiki under its licence (most are CC BY-SA) and are credited on every page. Nebula isn't made by or connected to Fandom.
+fandom-following = Your wikis
+fandom-following-sub = The Fandom wikis you follow. Add one by its name or address.
+fandom-add-placeholder = A wiki's name or address: residentevil, Attack on Titan, starwars.fandom.com…
+fandom-add = Follow
+fandom-follow = Follow
+fandom-unfollow = Stop following
+fandom-none-yet = No wikis yet. Type the name of one you like above (the part before .fandom.com works best).
+fandom-note = Wikis come from Fandom (and other MediaWiki sites added by their address). Nebula isn't made by or connected to Fandom.
+fandom-search = Search { $wiki }
+fandom-from = From { $wiki }
+fandom-credit = This page, “{ $title }”, is from { $wiki } and its contributors, under { $license } unless the wiki says otherwise.
+fandom-view-on = View on Fandom
+fandom-view-on-site = View on the wiki
+fandom-no-page = There's no page by that name on this wiki.
+fandom-not-found = Couldn't find a wiki called “{ $name }”. Try its address, like residentevil.fandom.com.
 opds-reads-ranges = Reading: pages stream straight from the files
 opds-reads-pages = Reading: the server sends pages one at a time
 opds-reads-whole = Reading: books are downloaded whole first (this server doesn't send parts of files)

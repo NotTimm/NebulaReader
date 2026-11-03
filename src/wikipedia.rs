@@ -78,7 +78,7 @@ const USER_AGENT: &str = concat!("NebulaReader/", env!("CARGO_PKG_VERSION"), " (
 
 pub const LICENSE_URL: &str = "https://creativecommons.org/licenses/by-sa/4.0/";
 
-fn client() -> &'static reqwest::Client {
+pub(crate) fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
         reqwest::Client::builder()
@@ -89,7 +89,7 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-async fn get(url: &str) -> Result<reqwest::Response, String> {
+pub(crate) async fn get(url: &str) -> Result<reqwest::Response, String> {
     let resp = client().get(url).send().await.map_err(|e| fl!("jf-unreachable", error = e.to_string()))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
@@ -246,7 +246,7 @@ pub async fn search(query: &str) -> Result<Vec<Summary>, String> {
         .collect())
 }
 
-fn strip_tags(html: &str) -> String {
+pub(crate) fn strip_tags(html: &str) -> String {
     let root = parse_html(&format!("<div>{html}</div>"));
     root.text().split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -297,6 +297,20 @@ pub enum Block {
     Table(Table),
     /// A bar of a bar chart (Wikipedia draws them with CSS), in em.
     Bar(f32),
+    /// Pictures side by side (a gallery, or a row of picture links).
+    Gallery(Vec<GalleryItem>),
+    /// Tabs, one shown at a time (Fandom's tabbers): `id` is unique in
+    /// the article, for which tab is picked.
+    Tabs { id: usize, tabs: Vec<(String, Vec<Block>)> },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GalleryItem {
+    pub image: Image,
+    pub caption: Line,
+    /// Where a picture used as a link goes (`wiki:<Title>`); without one
+    /// it opens in the picture viewer.
+    pub link: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -305,6 +319,9 @@ pub struct Table {
     pub caption: Line,
     /// Floated right on the site (a chart or a small box beside the text).
     pub float_right: bool,
+    /// Drawn like an infobox (a Fandom infobox that isn't the article's
+    /// first).
+    pub infobox: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -359,6 +376,18 @@ impl Article {
 /// picture viewer. Drawings (SVG) and other files the app can't decode
 /// keep their thumbnail, asked for wider instead.
 pub fn full_size(thumb: &str) -> String {
+    // Fandom (and other wikis on its picture server): `…/File.png/revision/latest/scale-to-width-down/180?cb=…`.
+    if let Some(i) = thumb.find("/revision/latest") {
+        let head = &thumb[..i + "/revision/latest".len()];
+        let file = thumb[..i].rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
+        if file.ends_with(".svg") {
+            return thumb.to_string();
+        }
+        return match thumb[i..].split_once('?') {
+            Some((_, query)) => format!("{head}?{query}"),
+            None => head.to_string(),
+        };
+    }
     let url = thumb.split('?').next().unwrap_or(thumb).replace("//thumb.wikimedia.org/", "//upload.wikimedia.org/");
     let Some((head, rest)) = url.split_once("/thumb/") else { return url };
     let Some((file, _size)) = rest.rsplit_once('/') else { return url };
@@ -367,6 +396,42 @@ pub fn full_size(thumb: &str) -> String {
         format!("{head}/{file}")
     } else {
         url
+    }
+}
+
+/// The wiki whose page is being read: how its links to its own articles
+/// look, and its colour. Wikipedia's (Parsoid) links are `./Title`;
+/// other MediaWiki sites' are `/wiki/Title` or the full address.
+#[derive(Clone, Debug, Default)]
+pub struct ParseSite {
+    /// `https://residentevil.fandom.com`, or empty.
+    pub server: String,
+    /// `/wiki/`, or `/es/wiki/` for a wiki in another language.
+    pub article_prefix: String,
+    /// The wiki's own colour, for infobox headings.
+    pub accent: Option<[u8; 3]>,
+}
+
+thread_local! {
+    static SITE: std::cell::RefCell<ParseSite> = std::cell::RefCell::new(ParseSite { article_prefix: "/wiki/".into(), ..Default::default() });
+    /// The next [`Block::Tabs`] id.
+    static NEXT_TABS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// [`parse_article`] for a page of another MediaWiki site (a Fandom wiki).
+pub fn parse_article_on(html: &str, title: &str, site: ParseSite) -> Article {
+    let old = SITE.with(|s| s.replace(site));
+    let a = parse_article(html, title);
+    SITE.with(|s| s.replace(old));
+    a
+}
+
+/// The colour for an infobox's headings: the wiki's own, lightened so
+/// dark text reads on it, or a quiet blue-grey.
+fn heading_band() -> [u8; 3] {
+    match SITE.with(|s| s.borrow().accent) {
+        Some(c) => c.map(|v| (v as f32 * 0.35 + 255.0 * 0.65) as u8),
+        None => [0xd5, 0xde, 0xea],
     }
 }
 
@@ -519,6 +584,10 @@ fn hidden(e: &El) -> bool {
         "printfooter",
         "catlinks",
         "mw-authority-control",
+        // Other MediaWiki sites (Fandom): the old-style contents box
+        // (the app has its own) and print-only bits.
+        "toc",
+        "printonly",
     ];
     CLASSES.iter().any(|c| e.has_class(c))
 }
@@ -541,19 +610,43 @@ struct Builder {
     /// Tables used for layout (the main page's) are read as their cells'
     /// contents, not drawn as tables.
     layout_tables: bool,
+    /// The block that's a row of pictures used as links, which the next
+    /// such picture joins.
+    picture_row: Option<usize>,
 }
 
 /// Where a link goes: `wiki:<Title>` for an article, a web address, or
 /// nowhere (files, this page's own footnotes).
 fn link_target(a: &El) -> Option<String> {
     let href = a.attr("href")?;
+    // A page that doesn't exist yet.
+    if a.has_class("new") || href.contains("redlink=1") {
+        return None;
+    }
     let rel = a.attr("rel").unwrap_or_default();
-    if rel.contains("mw:WikiLink") || href.starts_with("./") {
-        let page = href.trim_start_matches("./");
+    let local = if rel.contains("mw:WikiLink") || href.starts_with("./") {
+        Some(href.trim_start_matches("./").to_string())
+    } else {
+        SITE.with(|s| {
+            let s = s.borrow();
+            let bare = s.server.split_once("//").map(|(_, h)| format!("//{h}"));
+            let path = [Some(s.server.as_str()), bare.as_deref()]
+                .into_iter()
+                .flatten()
+                .filter(|p| !p.is_empty())
+                .find_map(|p| href.strip_prefix(p))
+                .unwrap_or(href);
+            path.strip_prefix(s.article_prefix.as_str()).filter(|_| !s.article_prefix.is_empty()).map(str::to_string)
+        })
+    };
+    if let Some(page) = local {
+        let page = page.split('?').next().unwrap_or_default();
         let (title, _fragment) = page.split_once('#').unwrap_or((page, ""));
         if title.is_empty() || title.contains(':') && !title.starts_with("Special:") && is_namespace(title) {
             return None;
         }
+        // A `+` in a page address is a plus, not a space.
+        let title = title.replace('+', "%2B");
         let title = url::form_urlencoded::parse(format!("t={title}").as_bytes()).next().map(|(_, v)| v.into_owned())?;
         return Some(format!("wiki:{}", title.replace('_', " ")));
     }
@@ -565,17 +658,23 @@ fn link_target(a: &El) -> Option<String> {
 
 /// `File:`, `Category:`, `Help:` and the like aren't articles.
 fn is_namespace(title: &str) -> bool {
-    const NS: &[&str] = &["File", "Category", "Help", "Wikipedia", "Template", "Portal", "Talk", "Special", "Module", "Draft", "User", "Image", "Media"];
+    const NS: &[&str] = &[
+        "File", "Category", "Help", "Wikipedia", "Template", "Portal", "Talk", "Special", "Module", "Draft", "User", "Image", "Media",
+        // Fandom's.
+        "User_blog", "User blog", "Message_Wall", "Message Wall", "Board", "Thread", "Forum", "Blog", "MediaWiki",
+    ];
     title.split_once(':').is_some_and(|(ns, _)| NS.iter().any(|n| n.eq_ignore_ascii_case(ns.trim_end_matches("_talk"))))
 }
 
-fn fix_url(src: &str) -> String {
+pub(crate) fn fix_url(src: &str) -> String {
     if src.starts_with("//") { format!("https:{src}") } else { src.to_string() }
 }
 
 /// An image element as a picture, unless it's an icon (flags, symbols).
 fn image_of(img: &El) -> Option<Image> {
-    let url = fix_url(img.attr("src")?);
+    // Fandom loads pictures lazily: the real address is in `data-src`.
+    let src = img.attr("src").filter(|s| !s.starts_with("data:")).or_else(|| img.attr("data-src"))?;
+    let url = fix_url(src);
     let width: f32 = img.attr("width").and_then(|w| w.parse().ok()).unwrap_or(220.0);
     let height: f32 = img.attr("height").and_then(|h| h.parse().ok()).unwrap_or(width);
     (width > 40.0 && height > 40.0).then_some(Image { url, width, height })
@@ -718,6 +817,67 @@ impl Builder {
             return;
         }
         let name = e.name.as_str();
+        // A Fandom infobox: the article's (floated right like Wikipedia's),
+        // or another one further down.
+        if e.has_class("portable-infobox") {
+            self.flush();
+            let mut t = portable_infobox(e);
+            if t.rows.is_empty() {
+                return;
+            }
+            t.infobox = true;
+            t.float_right = true;
+            if self.take_infobox && self.infobox.is_none() {
+                self.infobox = Some(t);
+            } else {
+                self.blocks.push(Block::Table(t));
+            }
+            return;
+        }
+        if is_gallery(e) {
+            self.flush();
+            let items = gallery_items(e);
+            if !items.is_empty() {
+                self.blocks.push(Block::Gallery(items));
+            }
+            return;
+        }
+        if let Some(panes) = tabber(e) {
+            self.flush();
+            let id = NEXT_TABS.with(|n| n.replace(n.get() + 1));
+            let tabs: Vec<(String, Vec<Block>)> = panes
+                .into_iter()
+                .map(|(label, pane)| {
+                    let mut b = Builder { layout_tables: self.layout_tables, ..Default::default() };
+                    b.blocks(pane, ctx);
+                    b.flush();
+                    (label, b.blocks)
+                })
+                .filter(|(_, blocks)| !blocks.is_empty())
+                .collect();
+            match tabs.len() {
+                0 => {}
+                // One tab: just its content.
+                1 => self.blocks.extend(tabs.into_iter().next().unwrap().1),
+                _ => self.blocks.push(Block::Tabs { id, tabs }),
+            }
+            return;
+        }
+        // A picture used as a link, or on its own outside any text (a
+        // wiki's main page is often rows of them): side by side.
+        if let Some(item) = picture_link(e) {
+            self.flush();
+            // Next to the last one (not added to a real gallery before it).
+            let joins = self.picture_row.is_some_and(|i| i + 1 == self.blocks.len());
+            match self.blocks.last_mut() {
+                Some(Block::Gallery(items)) if joins => items.push(item),
+                _ => {
+                    self.blocks.push(Block::Gallery(vec![item]));
+                    self.picture_row = Some(self.blocks.len() - 1);
+                }
+            }
+            return;
+        }
         // An older-style thumbnail: the picture, then its caption beside it
         // (the main page's).
         if name == "div" && e.has_class("thumbinner") {
@@ -871,6 +1031,272 @@ impl Builder {
     }
 }
 
+/// A gallery: Wikipedia's (`ul.gallery`), Fandom's (`div.wikia-gallery`)
+/// or a slideshow.
+fn is_gallery(e: &El) -> bool {
+    e.attr("class").is_some_and(|c| {
+        c.split_whitespace()
+            .any(|w| w == "gallery" || w == "wikia-gallery" || w.starts_with("mw-gallery") || w.contains("slideshow"))
+    })
+}
+
+/// A gallery's pictures with their captions (any picture in it, if its
+/// items aren't marked).
+fn gallery_items(e: &El) -> Vec<GalleryItem> {
+    fn item_els<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+        for k in &e.kids {
+            if let Node::El(c) = k {
+                if hidden(c) {
+                    continue;
+                }
+                if c.has_class("gallerybox") || c.has_class("wikia-gallery-item") || c.has_class("gallery-item") {
+                    out.push(c);
+                } else {
+                    item_els(c, out);
+                }
+            }
+        }
+    }
+    let mut els = Vec::new();
+    item_els(e, &mut els);
+    let caption_of = |el: &El| -> Line {
+        let Some(c) = el.find(&|x| x.has_class("gallerytext") || x.has_class("lightbox-caption") || x.name == "figcaption") else {
+            return Line::new();
+        };
+        let mut b = Builder::default();
+        b.inlines(c, Ctx::default());
+        trim_line(b.line)
+    };
+    let link_of = |el: &El| el.find(&|x| x.name == "a" && x.find(&|i| i.name == "img").is_some()).and_then(link_target).filter(|l| l.starts_with("wiki:"));
+    if els.is_empty() {
+        let mut imgs = Vec::new();
+        fn all_imgs<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+            for k in &e.kids {
+                if let Node::El(c) = k {
+                    if hidden(c) {
+                        continue;
+                    }
+                    if c.name == "img" { out.push(c) } else { all_imgs(c, out) }
+                }
+            }
+        }
+        all_imgs(e, &mut imgs);
+        return imgs.into_iter().filter_map(image_of).map(|image| GalleryItem { image, caption: Line::new(), link: None }).collect();
+    }
+    els.into_iter()
+        .filter_map(|el| {
+            let image = el.find(&|x| x.name == "img").and_then(image_of)?;
+            Some(GalleryItem { image, caption: caption_of(el), link: link_of(el) })
+        })
+        .collect()
+}
+
+/// A link that's only a picture (`<a href="/wiki/Characters"><img></a>`),
+/// or a picture element linking to an article: a gallery item.
+fn picture_link(e: &El) -> Option<GalleryItem> {
+    let link_el = match e.name.as_str() {
+        "a" => e,
+        "span" if e.attr("typeof").is_some_and(|t| t.starts_with("mw:File")) => e.find(&|x| x.name == "a")?,
+        _ => return None,
+    };
+    let img = link_el.find(&|x| x.name == "img")?;
+    if !e.text().trim().is_empty() {
+        return None;
+    }
+    let link = link_target(link_el).filter(|l| l.starts_with("wiki:"));
+    // A picture element that isn't a link is a figure, as before.
+    if e.name == "span" && link.is_none() {
+        return None;
+    }
+    Some(GalleryItem { image: image_of(img)?, caption: Line::new(), link })
+}
+
+/// Tabs: Fandom's (`wds-tabber`), the older Tabber's (`tabbertab`) and
+/// TabberNeue's (`tabber__panel`, on wiki.gg): each tab's label and content.
+fn tabber(e: &El) -> Option<Vec<(String, &El)>> {
+    if !(e.has_class("tabber") || e.has_class("wds-tabber")) {
+        return None;
+    }
+    fn is_panel(e: &El) -> bool {
+        e.has_class("wds-tab__content") || e.has_class("tabbertab") || e.has_class("tabber__panel")
+    }
+    fn panels<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+        for k in &e.kids {
+            if let Node::El(c) = k {
+                if is_panel(c) {
+                    out.push(c);
+                } else if !(c.has_class("tabber") || c.has_class("wds-tabber")) {
+                    panels(c, out);
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    panels(e, &mut found);
+    if found.is_empty() {
+        return None;
+    }
+    // Fandom's labels are a list above the panels.
+    let mut labels: Vec<String> = Vec::new();
+    fn tab_labels(e: &El, out: &mut Vec<String>) {
+        for k in &e.kids {
+            if let Node::El(c) = k {
+                if c.has_class("wds-tabs__tab") || c.has_class("tabber__tab") {
+                    out.push(clean(&c.text()));
+                } else if !(c.has_class("wds-tab__content") || c.has_class("tabber__panel")) {
+                    tab_labels(c, out);
+                }
+            }
+        }
+    }
+    tab_labels(e, &mut labels);
+    Some(
+        found
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let label = ["data-mw-tabber-title", "data-title", "title", "data-hash"]
+                    .iter()
+                    .find_map(|a| p.attr(a))
+                    .map(clean)
+                    .filter(|l| !l.is_empty())
+                    .or_else(|| labels.get(i).cloned().filter(|l| !l.is_empty()))
+                    .unwrap_or_else(|| (i + 1).to_string());
+                (label, p)
+            })
+            .collect(),
+    )
+}
+
+/// A Fandom (portable) infobox as a table like Wikipedia's: the title and
+/// group headings as coloured rows across, pictures across, and a row of
+/// label and value for each item.
+fn portable_infobox(aside: &El) -> Table {
+    let band = heading_band();
+    let blocks_of = |el: &El, bold: bool| -> Vec<Block> {
+        let mut b = Builder::default();
+        b.blocks(el, &Ctx { bold, ..Ctx::default() });
+        b.flush();
+        b.blocks
+    };
+    let across = |content: Vec<Block>, header: bool, background: Option<[u8; 3]>| Row {
+        cells: vec![Cell { header, colspan: 2, background, center: true, content }],
+    };
+    fn walk(el: &El, out: &mut Table, band: [u8; 3], blocks_of: &dyn Fn(&El, bool) -> Vec<Block>, across: &dyn Fn(Vec<Block>, bool, Option<[u8; 3]>) -> Row) {
+        for k in &el.kids {
+            let Node::El(e) = k else { continue };
+            if hidden(e) {
+                continue;
+            }
+            if e.has_class("pi-title") || e.has_class("pi-header") {
+                out.rows.push(across(blocks_of(e, true), true, Some(band)));
+            } else if e.has_class("pi-image-collection") || e.has_class("pi-panel") {
+                // Pictures (or sections) in tabs: as tabs.
+                let tabs = tabber(e).unwrap_or_default();
+                let tabs: Vec<(String, Vec<Block>)> = tabs
+                    .into_iter()
+                    .map(|(label, pane)| {
+                        let mut inner = Table::default();
+                        walk(pane, &mut inner, band, blocks_of, across);
+                        // A pane of pictures is just its pictures.
+                        let blocks: Vec<Block> = if inner.rows.iter().all(|r| r.cells.len() == 1) {
+                            inner.rows.into_iter().flat_map(|r| r.cells).flat_map(|c| c.content).collect()
+                        } else {
+                            inner.infobox = true;
+                            vec![Block::Table(inner)]
+                        };
+                        (label, blocks)
+                    })
+                    .filter(|(_, b)| !b.is_empty())
+                    .collect();
+                if tabs.len() > 1 {
+                    let id = NEXT_TABS.with(|n| n.replace(n.get() + 1));
+                    out.rows.push(across(vec![Block::Tabs { id, tabs }], false, None));
+                } else if let Some((_, blocks)) = tabs.into_iter().next() {
+                    out.rows.push(across(blocks, false, None));
+                }
+            } else if e.has_class("pi-image") {
+                if let Some(image) = e.find(&|x| x.name == "img").and_then(image_of) {
+                    let mut cap = Builder::default();
+                    if let Some(c) = e.find(&|x| x.has_class("pi-caption")) {
+                        cap.inlines(c, Ctx::default());
+                    }
+                    out.rows.push(across(vec![Block::Figure { image, caption: trim_line(cap.line) }], false, None));
+                }
+            } else if e.has_class("pi-data") {
+                let label = e.find(&|x| x.has_class("pi-data-label"));
+                let value = e.find(&|x| x.has_class("pi-data-value"));
+                let value = value.map(|v| blocks_of(v, false)).unwrap_or_default();
+                if value.is_empty() {
+                    continue;
+                }
+                match label.map(|l| blocks_of(l, true)).filter(|l| !l.is_empty()) {
+                    Some(label) => out.rows.push(Row {
+                        cells: vec![
+                            Cell { header: true, colspan: 1, content: label, ..Default::default() },
+                            Cell { colspan: 1, content: value, ..Default::default() },
+                        ],
+                    }),
+                    None => out.rows.push(across(value, false, None)),
+                }
+            } else if e.name == "table" && e.has_class("pi-horizontal-group") {
+                let t = table(e);
+                if let Some(c) = (!t.caption.is_empty()).then(|| vec![Block::Para(t.caption.clone())]) {
+                    out.rows.push(across(c, true, Some(band)));
+                }
+                for mut r in t.rows {
+                    for c in &mut r.cells {
+                        c.center = true;
+                    }
+                    out.rows.push(r);
+                }
+            } else if e.has_class("pi-smart-group") {
+                // Labels side by side, then their values.
+                let mut labels = Row::default();
+                let mut values = Row::default();
+                for k in &e.kids {
+                    let Node::El(c) = k else { continue };
+                    let span = c.attr("data-item-span").and_then(|s| s.parse().ok()).unwrap_or(1);
+                    let cell = |header, content| Cell { header, colspan: span, center: true, content, ..Default::default() };
+                    if c.has_class("pi-smart-group-head") || c.has_class("pi-smart-data-label") {
+                        labels.cells.push(cell(true, blocks_of(c, true)));
+                    } else if c.has_class("pi-smart-group-body") || c.has_class("pi-smart-data-value") {
+                        values.cells.push(cell(false, blocks_of(c, false)));
+                    } else {
+                        // The head and body are wrappers in newer markup.
+                        for kk in &c.kids {
+                            let Node::El(cc) = kk else { continue };
+                            let span = cc.attr("data-item-span").and_then(|s| s.parse().ok()).unwrap_or(1);
+                            let cell = |header, content| Cell { header, colspan: span, center: true, content, ..Default::default() };
+                            if cc.has_class("pi-smart-data-label") {
+                                labels.cells.push(cell(true, blocks_of(cc, true)));
+                            } else if cc.has_class("pi-smart-data-value") {
+                                values.cells.push(cell(false, blocks_of(cc, false)));
+                            }
+                        }
+                    }
+                }
+                for r in [labels, values] {
+                    if r.cells.iter().any(|c| !c.content.is_empty()) {
+                        out.rows.push(r);
+                    }
+                }
+            } else if e.has_class("pi-navigation") || e.has_class("pi-caption") {
+                let blocks = blocks_of(e, false);
+                if !blocks.is_empty() {
+                    out.rows.push(across(blocks, false, None));
+                }
+            } else {
+                // Groups and wrappers.
+                walk(e, out, band, blocks_of, across);
+            }
+        }
+    }
+    let mut t = Table::default();
+    walk(aside, &mut t, band, &blocks_of, &across);
+    t
+}
+
 /// A list's items, with nested lists one level deeper.
 fn list_items(list: &El, depth: usize, out: &mut Vec<(usize, Line)>) {
     for k in &list.kids {
@@ -961,6 +1387,12 @@ fn block_pictures(blocks: &[Block], out: &mut Vec<(Image, Line)>) {
         match b {
             Block::Figure { image, caption } => out.push((image.clone(), caption.clone())),
             Block::Table(t) => table_pictures(t, out),
+            Block::Gallery(items) => out.extend(items.iter().filter(|i| i.link.is_none()).map(|i| (i.image.clone(), i.caption.clone()))),
+            Block::Tabs { tabs, .. } => {
+                for (_, blocks) in tabs {
+                    block_pictures(blocks, out);
+                }
+            }
             _ => {}
         }
     }
@@ -1075,6 +1507,7 @@ pub async fn home() -> Result<(Option<MainPage>, Option<Featured>), String> {
 }
 
 pub fn parse_article(html: &str, title: &str) -> Article {
+    NEXT_TABS.with(|n| n.set(0));
     let root = parse_html(html);
     let body = root.find(&|e| e.name == "body").cloned().unwrap_or(root);
     let mut article = Article { title: title.replace('_', " "), ..Default::default() };
@@ -1099,6 +1532,8 @@ pub fn parse_article(html: &str, title: &str) -> Article {
                     *current = Section { level, title, blocks: Vec::new() };
                 }
                 Node::El(e) if e.name == "div" && e.has_class("mw-heading") => walk(e, article, current, b),
+                // The action=parse API's wrapper (other MediaWiki sites).
+                Node::El(e) if e.name == "div" && e.has_class("mw-parser-output") => walk(e, article, current, b),
                 Node::El(e) => b.block(e, &Ctx::default()),
                 Node::Text(t) => b.push_text(t, &Ctx::default(), false),
             }
@@ -1206,7 +1641,7 @@ mod tests {
             }).sum();
             let kinds: Vec<&str> = s.blocks.iter().map(|b| match b {
                 Block::Para(_) => "p", Block::Hatnote(_) => "hat", Block::Quote(_) => "q",
-                Block::List { .. } => "list", Block::Figure { .. } => "fig", Block::Table(_) => "table", Block::Bar(_) => "bar",
+                Block::List { .. } => "list", Block::Figure { .. } => "fig", Block::Table(_) => "table", Block::Bar(_) => "bar", Block::Gallery(_) => "gallery", Block::Tabs { .. } => "tabs",
             }).collect();
             println!("{}{} ({} words) {:?}", "  ".repeat(s.level as usize - 1), if s.title.is_empty() { "(lead)" } else { &s.title }, words, &kinds[..kinds.len().min(12)]);
         }
