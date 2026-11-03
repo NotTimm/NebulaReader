@@ -179,6 +179,13 @@ the owner's laptop). Last updated 2026-11-02.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- After 0.2.0 (on master, for the next release): Connect follows a
+  feed's `rel="start"` link to add the catalog from its start page
+  (`Feed::start`, `opds::is_other_page_of`; Gutenberg's search address
+  gave a sectionless "All Books" catalog), and the library's source menu
+  lists OPDS whenever an OPDS account exists, its shelf showing even with
+  nothing downloaded (`sources_present`, `shelf_only` in library_view.rs).
+  Both seen working by the owner.
 - Released 0.2.0 (2026-11-02), the regular release of everything in the
   betas below plus the real Wikipedia main page, tables, chapter labels,
   OPDS series links and the Windows touchpad fix. The owner chose to
