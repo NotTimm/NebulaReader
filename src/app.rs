@@ -747,6 +747,9 @@ static DECODE_GEN: AtomicU64 = AtomicU64::new(0);
 /// Whether the full-screen header bar is showing (`App::fullscreen_header`),
 /// for the pointer subscription.
 static HEADER_SHOWN: AtomicBool = AtomicBool::new(false);
+/// The modifier keys last passed on, so a report that changes nothing
+/// (some systems send one with every wheel step) doesn't rebuild the page.
+static MODIFIERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static DECODE_PAGE: AtomicUsize = AtomicUsize::new(0);
 
 /// A decoded page's size in pixels.
@@ -2059,7 +2062,7 @@ impl Application for App {
                 event::Status::Captured => None,
             },
             event::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                Some(Message::ModifiersChanged(m))
+                (MODIFIERS.swap(m.bits(), Ordering::Relaxed) != m.bits()).then_some(Message::ModifiersChanged(m))
             }
             // Mouse wheel, Ctrl+scroll and trackpad pinch: while zoom mode
             // is already active, `widget::image::viewer` owns and captures

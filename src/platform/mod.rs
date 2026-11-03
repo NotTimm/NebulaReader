@@ -225,6 +225,28 @@ fn copy_tree(from: &std::path::Path, to: &std::path::Path, skip: &[&str]) -> std
 }
 
 /// Opens a web URL in the default browser.
+/// Windows: how the app draws, unless set otherwise in the environment.
+///
+/// The graphics layer asks for the most powerful GPU by default. On a
+/// laptop with two (Intel or AMD built in, plus NVIDIA or AMD), that's the
+/// separate one, whose frames are copied to the built-in one driving the
+/// screen: the window can flash black (worst with Vulkan) and the big GPU
+/// stays awake, warming the laptop and slowing everything else. A reader
+/// needs neither: the power-saving GPU, through Direct3D 12 (Windows' own,
+/// presented by the system's compositor).
+///
+/// `WGPU_POWER_PREF` (low / high) and `WGPU_BACKEND` (dx12 / vulkan / gl)
+/// still choose, for trying another combination.
+#[cfg(windows)]
+pub fn gpu_defaults() {
+    for (var, value) in [("WGPU_POWER_PREF", "low"), ("WGPU_BACKEND", "dx12")] {
+        if std::env::var_os(var).is_none() {
+            // Before any thread starts.
+            std::env::set_var(var, value);
+        }
+    }
+}
+
 pub fn open_url(url: &str) {
     #[cfg(windows)]
     let result = {

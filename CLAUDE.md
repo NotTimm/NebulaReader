@@ -401,6 +401,21 @@ the owner's laptop). Last updated 2026-11-03.
   hooks the WNDPROC (on `WindowOpened`) and marks Ctrl down for that one
   message, delta kept off a whole notch so it reads as touchpad. Type-
   checked only: the owner is to try it on Windows.
+- Windows flicker/lag (2026-11-03, unreleased, unconfirmed): the owner
+  sees the window flash black (often while wheel-scrolling Wikipedia
+  articles) and the PC slow down when it's left open. iced asks wgpu for
+  the HighPerformance adapter; on a two-GPU laptop that's the discrete
+  GPU copying frames to the built-in one (black flashes, mostly Vulkan;
+  the dGPU never sleeps). `platform::gpu_defaults` (Windows, start of
+  `main`) sets `WGPU_POWER_PREF=low` and `WGPU_BACKEND=dx12` unless
+  already set. `NEBULA_LOG=<file>` writes the log to a file (the Windows
+  build has no console); iced logs the adapter as "Selected:". Also:
+  ModifiersChanged reports that change nothing are dropped
+  (`MODIFIERS` in app.rs; X11 sent 4 per wheel click, each rebuilding
+  the page). Measured in Xvfb: memory flat over 400 wheel clicks on a
+  60-section article (`Long article` in `tools/mock-mediawiki.py`),
+  article layout ~5 ms in a debug build. If it still flickers, try
+  `WGPU_BACKEND=vulkan` / `gl` and `ICED_PRESENT_MODE=fifo` to narrow it.
 - Wikipedia floats: `FloatFlow::place` narrows a paragraph for every float
   over its whole height (re-measured until stable), not only at its first
   line (Tropical Storm Linda's table ran over text). Wikipedia can't be

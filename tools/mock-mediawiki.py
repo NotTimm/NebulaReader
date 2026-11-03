@@ -41,7 +41,7 @@ MAIN = f"""<div class="mw-parser-output"><p><b>Welcome to the Mock Wiki</b>, the
 <a href="/wiki/Eren_Yeager"><img src="http://localhost:{PORT}/img/eren.png/revision/latest/scale-to-width-down/150?cb=1" width="150" height="150" /></a>
 <a href="/wiki/Episodes"><img src="http://localhost:{PORT}/img/episodes.png/revision/latest/scale-to-width-down/150?cb=1" width="150" height="150" /></a></p>
 <h2><span class="mw-headline" id="Featured">Featured article</span></h2>
-<p><a href="/wiki/Eren_Yeager" title="Eren Yeager">Eren Yeager</a> is the main character of the series.</p></div>"""
+<p><a href="/wiki/Eren_Yeager" title="Eren Yeager">Eren Yeager</a> is the main character of the series. See also the <a href="/wiki/Long_article">long article</a>.</p></div>"""
 
 EREN = f"""<div class="mw-parser-output"><aside role="region" class="portable-infobox pi-background pi-theme-character">
 <h2 class="pi-item pi-title" data-source="name">Eren Yeager</h2>
@@ -68,7 +68,16 @@ EREN = f"""<div class="mw-parser-output"><aside role="region" class="portable-in
 <h2><span class="mw-headline" id="References">References</span></h2><ol class="references"><li id="cite_note-1">Chapter 1.</li></ol>
 <table class="navbox"><tr><td>Lots of links</td></tr></table></div>"""
 
-PAGES = {"Mock Wiki": MAIN, "Eren Yeager": EREN}
+# A long page, as big as a long Wikipedia article: for checking that
+# scrolling stays smooth and memory steady.
+LONG = '<div class="mw-parser-output"><p>A long page.</p>' + "".join(
+    f'<h2><span class="mw-headline" id="S{i}">Section {i}</span></h2>'
+    + (f'<figure class="thumb tright">{img(f"long{i}.png", 220, 160)}<figcaption>Picture {i}</figcaption></figure>' if i % 3 == 0 else "")
+    + "".join(f'<p>Paragraph {j} of section {i}, with <a href="/wiki/Eren_Yeager">a link</a>. ' + "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 10 + "</p>" for j in range(4))
+    + ('<table class="wikitable"><tr><th>Year</th><th>Event</th><th>Place</th></tr>' + "".join(f"<tr><td>{1900 + k}</td><td>Something happened in row {k}</td><td>Somewhere</td></tr>" for k in range(8)) + "</table>" if i % 4 == 0 else "")
+    for i in range(1, 61)) + "</div>"
+
+PAGES = {"Mock Wiki": MAIN, "Eren Yeager": EREN, "Long article": LONG}
 
 
 class Handler(BaseHTTPRequestHandler):

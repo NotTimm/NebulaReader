@@ -30,7 +30,18 @@ use cosmic::app::Settings;
 use cosmic::iced::Size;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    #[cfg(windows)]
+    platform::gpu_defaults();
+
+    // NEBULA_LOG=<file>: the log in a file, for a Windows build, which has no
+    // console. Which GPU and graphics API are used is logged at the start.
+    let mut log = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
+        if std::env::var_os("NEBULA_LOG").is_some() { "warn,nebula_reader=info,iced_wgpu=info,wgpu_hal=warn" } else { "error" },
+    ));
+    if let Some(file) = std::env::var_os("NEBULA_LOG").and_then(|p| std::fs::File::create(p).ok()) {
+        log.target(env_logger::Target::Pipe(Box::new(file)));
+    }
+    log.init();
 
     let path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
