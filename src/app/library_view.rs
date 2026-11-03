@@ -240,8 +240,8 @@ impl App {
         for (i, src) in order.iter().copied().enumerate() {
             let label = LibrarySource::ALL.iter().position(|s| *s == src).map_or(String::new(), |k| self.labels.library_source[k].clone());
             let note = match src {
-                LibrarySource::Wikipedia => Some(fl!("wiki-enable-note")),
-                LibrarySource::Fandom => Some(fl!("fandom-enable-note")),
+                LibrarySource::Wikipedia => Some(fl!("menu-wikipedia-note")),
+                LibrarySource::Fandom => Some(fl!("menu-fandom-note")),
                 _ => None,
             };
             let arrow = |name: &'static str, by: i32, enabled: bool| {

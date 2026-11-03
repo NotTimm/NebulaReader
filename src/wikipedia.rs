@@ -369,6 +369,26 @@ impl Article {
         }
         out
     }
+
+    /// Pictures that are links (they open a page, not the viewer), to load
+    /// along with the gallery's.
+    pub fn link_pictures(&self) -> Vec<String> {
+        fn walk(blocks: &[Block], out: &mut Vec<String>) {
+            for b in blocks {
+                match b {
+                    Block::Gallery(items) => out.extend(items.iter().filter(|i| i.link.is_some()).map(|i| i.image.url.clone())),
+                    Block::Tabs { tabs, .. } => tabs.iter().for_each(|(_, t)| walk(t, out)),
+                    Block::Table(t) => t.rows.iter().flat_map(|r| &r.cells).for_each(|c| walk(&c.content, out)),
+                    _ => {}
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for s in &self.sections {
+            walk(&s.blocks, &mut out);
+        }
+        out
+    }
 }
 
 /// The full-size file behind a thumbnail

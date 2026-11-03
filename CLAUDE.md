@@ -109,7 +109,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-11-02.
+the owner's laptop). Last updated 2026-11-03.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -341,6 +341,43 @@ the owner's laptop). Last updated 2026-11-02.
   a saved main page's parse.
   `NEBULA_WIKI_LIVE=1 cargo test live_api -- --nocapture` hits the API;
   `NEBULA_WIKI_TEST=page.html` parses a saved article.
+- Fandom (2026-11-03, unreleased; owner's call that reading pages one at
+  a time through the API is fine under Fandom's terms): `src/fandom.rs`
+  (any MediaWiki site with an `api.php`: `find` turns a name, subdomain
+  or address into `candidates`, reads siteinfo + rightsinfo and the
+  theme colour from `wikia.php?controller=ThemeApi&method=themeVariables`
+  (`--theme-accent-color`; unverified that this endpoint answers);
+  `action=parse` pages, list=search + generator pageimages, list=random).
+  Followed wikis are `Settings::fandom_wikis` (`fandom::Wiki`, id =
+  server + script path). Parsing is `wikipedia::parse_article_on` with a
+  thread-local `ParseSite` (article path, server, accent): the parser
+  now also handles `mw-parser-output`, `/wiki/` and full-address links,
+  red links, `data-src` lazy pictures, portable infoboxes
+  (`portable_infobox` → `Table`, `Table::infobox`), galleries and rows of
+  picture links (`Block::Gallery`, `GalleryItem::link`), and tabbers
+  (`Block::Tabs`, wds / Tabber / TabberNeue; picked tab in
+  `WikiState::tabs`). `full_size` knows `/revision/latest/…`. The page
+  is `wiki_view.rs` with a `Site` (Wikipedia | Fandom(None = "Your
+  wikis" list | Some(wiki))); history entries carry their site.
+  Wikipedia and Fandom keep separate `WikiState`s: `App::wiki_parked`
+  holds the one not shown (`wiki_enter` swaps; picture arrivals go to
+  both). Links to other `*.fandom.com` wikis open in the app (Follow
+  button in the bar for unfollowed wikis). **Never tried on real
+  Fandom** (cloud sessions can't reach it): parser tests use hand-written
+  markup from memory of Fandom's; `tools/mock-mediawiki.py` (port 8099,
+  follow `http://localhost:8099`; http only for localhost) was seen
+  working in Xvfb (infobox tabs, tabber, gallery, picture links).
+  `NEBULA_FANDOM_LIVE=<wiki> cargo test live_api -- --nocapture` and
+  `NEBULA_FANDOM_TEST=page.json` (a saved action=parse answer) for the
+  owner to check real wikis.
+- Library menu (2026-11-03, unreleased): Settings → Library menu replaces
+  the Wikipedia section: every source after All with up/down arrows and
+  a switch (`Settings::menu()` = `menu_order` normalised, new sources
+  placed after their default neighbour; `menu_hidden` for
+  Local/Jellyfin/OPDS; Wikipedia/Fandom switches are `settings.wikipedia`
+  / `settings.fandom`). Hiding a source only takes it out of the menu
+  (All still shows everything). `LibrarySource::Fandom` (own icon
+  `res/icons/ui/fandom.svg`, not Fandom's logo).
 - Wikipedia tables (2026-11-02): rows are `app/table_row.rs` (`TableRow`:
   lays cells out at their own height, then all at the tallest, since an
   iced row can't fill height on a scrolling page); columns weighted by

@@ -1210,8 +1210,9 @@ impl App {
                 match result {
                     Ok(a) => {
                         let gallery = a.gallery().into_iter().map(|(i, c)| (i.url, c)).collect();
+                        let links = a.link_pictures().into_iter().map(|u| (u, THUMB)).collect();
                         self.wiki.article = Some(Arc::new(a));
-                        let pictures = self.page_pictures(gallery, Vec::new());
+                        let pictures = self.page_pictures(gallery, links);
                         return Task::batch([pictures, self.wiki_restore()]);
                     }
                     Err(e) => self.wiki.error = Some(e),

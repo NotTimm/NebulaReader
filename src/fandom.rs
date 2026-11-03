@@ -131,7 +131,11 @@ pub fn candidates(input: &str) -> Vec<String> {
         let with_scheme = if input.contains("://") { input.to_string() } else { format!("https://{input}") };
         let Ok(url) = url::Url::parse(&with_scheme) else { return Vec::new() };
         let Some(host) = url.host_str() else { return Vec::new() };
-        let origin = format!("https://{}", host.to_ascii_lowercase());
+        // Plain http only for a wiki on this computer (tools/mock-mediawiki.py).
+        let local = matches!(host, "localhost" | "127.0.0.1");
+        let scheme = if local && url.scheme() == "http" { "http" } else { "https" };
+        let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+        let origin = format!("{scheme}://{}{port}", host.to_ascii_lowercase());
         // A language's wiki: `/es/wiki/…`, `/pt-br/…`.
         let lang = url
             .path_segments()
@@ -170,7 +174,14 @@ fn wiki_from_siteinfo(json: &serde_json::Value) -> Option<Wiki> {
     let g = &json["query"]["general"];
     let name = g["sitename"].as_str()?.to_string();
     let server = g["server"].as_str()?;
-    let server = if server.starts_with("//") { format!("https:{server}") } else { server.replacen("http://", "https://", 1) };
+    let local = server.starts_with("http://localhost") || server.starts_with("http://127.0.0.1");
+    let server = if server.starts_with("//") {
+        format!("https:{server}")
+    } else if local {
+        server.to_string()
+    } else {
+        server.replacen("http://", "https://", 1)
+    };
     let logo = g["logo"].as_str().filter(|l| !l.is_empty()).map(wikipedia::fix_url);
     let r = &json["query"]["rightsinfo"];
     Some(Wiki {
@@ -501,6 +512,7 @@ mod tests {
 
         // The viewer steps through the pictures that aren't links.
         assert_eq!(a.gallery().len(), 2 + 1 + 2);
+        assert_eq!(a.link_pictures().len(), 2);
     }
 
     #[test]

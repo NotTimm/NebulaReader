@@ -48,6 +48,9 @@ Some things that are known and wanted but nobody's working on yet:
 - **More languages**: see [i18n/README.md](i18n/README.md). The app's
   launcher entry and store description (`res/*.desktop`,
   `res/*.metainfo.xml`) aren't translated yet either.
+- **Fandom on real wikis**: the Fandom page was built against Fandom's
+  page markup and a stand-in wiki, not yet tried on many real wikis.
+  Reports of pages that look wrong (with the wiki and page) help most.
 - **Packaging** for distros that aren't covered (Arch/AUR, NixOS,
   openSUSE…).
 
@@ -90,7 +93,10 @@ serves a folder of your own comics as a small fake Jellyfin server:
   `src/app/opds_view.rs`); `src/remote_zip.rs`, `src/remote_rar.rs`:
   streaming pages over the network.
 - `src/wikipedia.rs`, `src/app/wiki_view.rs`: Wikipedia (its API and
-  article parsing, and the pages drawn from it); `src/app/float_flow.rs`
+  article parsing, and the pages drawn from it); `src/fandom.rs`: Fandom
+  wikis (any MediaWiki site), parsed by the same code and drawn by the
+  same page (`tools/mock-mediawiki.py` is a stand-in wiki to try it
+  offline); `src/app/float_flow.rs`
   lays text out beside floating pictures and `src/app/gestures.rs` gives
   the page its smooth scrolling.
 - `src/platform/`: anything specific to Linux, Windows or macOS, and

@@ -25,7 +25,8 @@ to your Jellyfin server, or add an OPDS server like Komga or Kavita, and
 it builds a library of series with covers, progress and a **Continue
 Reading** shelf. Messy file names are cleaned up and matched online for
 proper titles and descriptions. Browse public collections like Project
-Gutenberg, and, if you like, read Wikipedia in the same window. Then it
+Gutenberg, and, if you like, read Wikipedia and your favourite Fandom
+wikis in the same window. Then it
 gets out of the way so you can read.
 
 > Nebula Reader was called **Cosmic Comic** up to 0.1.0-beta.4. Upgrading
@@ -173,6 +174,21 @@ that line up. **30 languages**, text you can **select and copy**, smooth
 scrolling, and your place kept when you look at a picture or go back.
 [More](#wikipedia-optional)
 
+### 📚 Fandom wikis you follow
+
+Follow the Fandom wikis you like (Resident Evil, Attack on Titan, Star
+Wars…) by name and read them the same way: each wiki's main page,
+search, random pages and articles with their infoboxes, tabs and
+galleries, in the wiki's own colour. It has its own place in the menu,
+under Wikipedia. [More](#fandom-wikis-optional)
+
+### 🧭 Your menu, your order
+
+Settings → **Library menu** decides which sections the menu at the top
+left shows and in what order: Local, Jellyfin, OPDS, Wikipedia, Fandom,
+or any mix of them. Wikipedia and Fandom stay off until you turn them on
+there.
+
 ### 🎨 At home on your desktop
 
 <p align="center">
@@ -294,7 +310,7 @@ also how apps reach the COSMIC Store).
 
 Every reader button also has a hover hint with its shortcut.
 
-On Wikipedia: `↓` `↑` (held) scroll, `C` shows or hides an article's
+On Wikipedia and Fandom wikis: `↓` `↑` (held) scroll, `C` shows or hides an article's
 contents, `Ctrl C` copies the selected text and `Ctrl A` selects the
 page (`Cmd` on a Mac), `Esc` goes back, and in the picture viewer `←`
 `→` step through the page's pictures.
@@ -435,9 +451,8 @@ How it works:
 
 ## Wikipedia (optional)
 
-**Settings → Wikipedia → Read Wikipedia in Nebula** adds Wikipedia to
-the library's source menu (All / Local / Jellyfin / OPDS / Wikipedia, top
-left). It opens Wikipedia's main page as the site shows it that day:
+Turning on **Wikipedia** in **Settings → Library menu** adds it to
+the library's source menu (top left). It opens Wikipedia's main page as the site shows it that day:
 today's featured article, Did you know, In the news, On this day (with
 its births and deaths), the featured list and picture, with their
 pictures and links, plus the most-read articles. Search and Random
@@ -465,6 +480,34 @@ Articles come from Wikipedia's public API under
 credited on every page, with a link to read them on Wikipedia. Nebula
 isn't made by or connected to Wikipedia or the Wikimedia Foundation.
 It's off unless you turn it on.
+
+## Fandom wikis (optional)
+
+Turning on **Fandom** in **Settings → Library menu** adds a Fandom page
+to the menu, under Wikipedia (move it anywhere you like there). It
+starts with **Your wikis**: type a wiki's name (`Resident Evil`), its
+subdomain (`residentevil`) or its address
+(`attackontitan.fandom.com/es` for another language) and press
+**Follow**. Each wiki you follow is a card with its logo and colour;
+click one to open its main page.
+
+A wiki reads like Wikipedia does in Nebula: its main page, **search**
+and **Random article** at the top, and articles drawn by Nebula on one
+scrolling page with the contents beside them. Fandom's character
+infoboxes (with their picture tabs), tabbed sections (Anime / Manga…),
+galleries and rows of picture links all come through, headed in the
+wiki's own colour. A link to another Fandom wiki opens it here, with a
+**Follow** button if you don't follow it yet. Selecting and copying,
+scrolling, `C` for the contents and the picture viewer work as on
+Wikipedia, and Wikipedia and Fandom each keep their own place and Back
+history.
+
+Pages are fetched from each wiki's public API only when you open them,
+and every page is credited to its wiki under the wiki's licence (most
+Fandom wikis' text is CC BY-SA), with a **View on Fandom** button.
+Other MediaWiki sites (wiki.gg, say) can be followed by their address
+too. Nebula isn't made by or connected to Fandom. It's off unless you
+turn it on.
 
 ## ComicVine metadata (optional)
 

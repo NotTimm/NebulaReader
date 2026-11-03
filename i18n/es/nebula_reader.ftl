@@ -624,7 +624,6 @@ chapter-with-subtitle = { $chapter } · { $subtitle }
 theme-bad-name = no es un nombre de archivo de tema
 theme-no-colors = no se encontraron colores en este esquema de color de KDE
 # Wikipedia (opt-in: Settings → Library menu).
-wiki-enable-note = Añade la portada de Wikipedia, la búsqueda y los artículos, con el aspecto del sitio. Los artículos vienen de Wikipedia bajo CC BY-SA 4.0 y se acreditan en cada página. Nebula no está hecho por Wikipedia ni la Fundación Wikimedia, ni tiene relación con ellas.
 wiki-main-page = Portada
 wiki-random = Artículo aleatorio
 wiki-search = Buscar en Wikipedia
@@ -652,6 +651,31 @@ wiki-license = CC BY-SA 4.0
 wiki-view-on = Ver en Wikipedia
 wiki-viewer-hint = ← → para las otras imágenes de la página · desplaza o pellizca para ampliar · Esc para cerrar
 wiki-close = Cerrar
+
+# Ajustes → Menú de la biblioteca: el menú arriba a la izquierda de la biblioteca.
+menu-title = Menú de la biblioteca
+menu-note = Las secciones del menú de arriba a la izquierda, en este orden (Todo siempre va primero). Local, Jellyfin y OPDS aparecen cuando la biblioteca tiene libros de ellos; Wikipedia y Fandom son páginas propias, apagadas hasta que las enciendas aquí.
+menu-wikipedia-note = Los artículos de Wikipedia, leídos aquí con el diseño del sitio.
+menu-fandom-note = Los wikis de Fandom que sigues, leídos aquí como Wikipedia.
+menu-up = Subir
+menu-down = Bajar
+
+# Wikis de Fandom (opcional, como Wikipedia).
+fandom-following = Tus wikis
+fandom-following-sub = Los wikis de Fandom que sigues. Añade uno por su nombre o dirección.
+fandom-add-placeholder = El nombre o la dirección de un wiki: residentevil, Attack on Titan, starwars.fandom.com…
+fandom-add = Seguir
+fandom-follow = Seguir
+fandom-unfollow = Dejar de seguir
+fandom-none-yet = Aún no hay wikis. Escribe arriba el nombre de uno que te guste (la parte antes de .fandom.com funciona mejor).
+fandom-note = Los wikis vienen de Fandom (y de otros sitios MediaWiki añadidos por su dirección). Nebula no está hecho por Fandom ni vinculado a él.
+fandom-search = Buscar en { $wiki }
+fandom-from = De { $wiki }
+fandom-credit = Esta página, «{ $title }», es de { $wiki } y sus colaboradores, bajo { $license } salvo que el wiki indique otra cosa.
+fandom-view-on = Ver en Fandom
+fandom-view-on-site = Ver en el wiki
+fandom-no-page = No hay ninguna página con ese nombre en este wiki.
+fandom-not-found = No se encontró ningún wiki llamado «{ $name }». Prueba con su dirección, como residentevil.fandom.com.
 opds-reads-ranges = Lectura: las páginas llegan directamente de los archivos
 opds-reads-pages = Lectura: el servidor envía las páginas de una en una
 opds-reads-whole = Lectura: los libros se descargan enteros primero (este servidor no envía partes de archivos)

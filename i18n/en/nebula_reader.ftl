@@ -641,7 +641,6 @@ chapter-with-subtitle = { $chapter } · { $subtitle }
 theme-bad-name = not a theme file name
 theme-no-colors = no colours found in this KDE colour scheme
 # Wikipedia (opt-in: Settings → Library menu).
-wiki-enable-note = Adds Wikipedia's main page, search and articles, laid out like the site. Articles come from Wikipedia under CC BY-SA 4.0 and are credited on every page. Nebula isn't made by or connected to Wikipedia or the Wikimedia Foundation.
 wiki-main-page = Main page
 wiki-random = Random article
 wiki-search = Search Wikipedia
@@ -673,11 +672,12 @@ wiki-close = Close
 # Settings → Library menu: the menu at the top left of the library.
 menu-title = Library menu
 menu-note = The sections in the menu at the top left, in this order (All is always first). Local, Jellyfin and OPDS show once the library has books from them; Wikipedia and Fandom are pages of their own, off until you turn them on here.
+menu-wikipedia-note = Wikipedia's articles, read here and laid out like the site.
+menu-fandom-note = The Fandom wikis you follow, read here like Wikipedia.
 menu-up = Move up
 menu-down = Move down
 
 # Fandom wikis (opt-in, like Wikipedia).
-fandom-enable-note = Adds the Fandom wikis you follow: their main pages, search and articles, laid out like Wikipedia's. Pages come from each wiki under its licence (most are CC BY-SA) and are credited on every page. Nebula isn't made by or connected to Fandom.
 fandom-following = Your wikis
 fandom-following-sub = The Fandom wikis you follow. Add one by its name or address.
 fandom-add-placeholder = A wiki's name or address: residentevil, Attack on Titan, starwars.fandom.com…
