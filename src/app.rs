@@ -99,6 +99,7 @@ impl Labels {
                 "Jellyfin".into(),
                 "OPDS".into(),
                 "Wikipedia".into(),
+                "Fandom".into(),
             ],
             book_line_spacing: vec![
                 fl!("spacing-tight"),
@@ -247,6 +248,10 @@ pub enum Message {
     // Library
     LibrarySearchChanged(String),
     LibrarySource(usize),
+    /// Settings → Library menu: a section moved up (-1) or down (1).
+    MenuMove(LibrarySource, i32),
+    /// Settings → Library menu: a section turned on or off.
+    MenuShow(LibrarySource, bool),
     ToggleLibraryMenu,
     CloseLibraryMenu,
     RootDiscovered(PathBuf, Option<Vec<scan::Discovered>>),
@@ -1853,7 +1858,7 @@ impl Application for App {
             )],
             // All / Local / Jellyfin, once the library has some of each.
             // With Wikipedia on, always: it's how to get there.
-            AppView::Library if self.has_local_and_remote() || self.settings.wikipedia => {
+            AppView::Library if self.has_local_and_remote() || self.settings.wikipedia || self.settings.fandom => {
                 vec![self.library_source_picker()]
             }
             AppView::Library => vec![],
@@ -2818,7 +2823,7 @@ impl App {
             add_folder_row.into(),
             self.build_jellyfin_section(),
             self.build_opds_section(),
-            self.build_wiki_section(),
+            self.build_menu_section(),
             self.build_about_section(),
         ])
         .into()
@@ -4306,12 +4311,28 @@ impl App {
                 self.library_search = q;
                 return self.reload_library();
             }
+            Message::MenuMove(src, by) => {
+                self.settings.move_in_menu(src, by);
+                self.settings.save();
+            }
+            Message::MenuShow(src, on) => {
+                self.settings.show_in_menu(src, on);
+                self.settings.save();
+                // Turned off while it's shown: back to the library.
+                if !on && src.is_page() && self.app_view == AppView::Wikipedia && self.wiki_is_fandom() == (src == LibrarySource::Fandom) {
+                    self.app_view = AppView::Library;
+                    self.set_header_title("Nebula".into());
+                }
+                return self.reload_library();
+            }
             Message::ToggleLibraryMenu => self.library_menu = !self.library_menu,
             Message::CloseLibraryMenu => self.library_menu = false,
             Message::LibrarySource(i) => {
                 self.library_menu = false;
-                if LibrarySource::ALL.get(i) == Some(&LibrarySource::Wikipedia) {
-                    return self.update(Message::Wiki(WikiMsg::Open(false)));
+                match LibrarySource::ALL.get(i) {
+                    Some(LibrarySource::Wikipedia) => return self.update(Message::Wiki(WikiMsg::Open(false))),
+                    Some(LibrarySource::Fandom) => return self.update(Message::Wiki(WikiMsg::Open(true))),
+                    _ => {}
                 }
                 if self.app_view == AppView::Wikipedia {
                     self.app_view = AppView::Library;

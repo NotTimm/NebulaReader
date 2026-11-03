@@ -623,8 +623,7 @@ section-number = Sección { $number }
 chapter-with-subtitle = { $chapter } · { $subtitle }
 theme-bad-name = no es un nombre de archivo de tema
 theme-no-colors = no se encontraron colores en este esquema de color de KDE
-# Wikipedia (opt-in: Settings → Wikipedia).
-wiki-enable = Leer Wikipedia en Nebula
+# Wikipedia (opt-in: Settings → Library menu).
 wiki-enable-note = Añade la portada de Wikipedia, la búsqueda y los artículos, con el aspecto del sitio. Los artículos vienen de Wikipedia bajo CC BY-SA 4.0 y se acreditan en cada página. Nebula no está hecho por Wikipedia ni la Fundación Wikimedia, ni tiene relación con ellas.
 wiki-main-page = Portada
 wiki-random = Artículo aleatorio

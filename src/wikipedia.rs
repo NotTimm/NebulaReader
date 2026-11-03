@@ -1,4 +1,4 @@
-//! Wikipedia, read in the app (opt-in, Settings → Wikipedia): the main
+//! Wikipedia, read in the app (opt-in, Settings → Library menu): the main
 //! page's daily feed, search, random articles and articles themselves,
 //! from Wikimedia's public REST API.
 //!

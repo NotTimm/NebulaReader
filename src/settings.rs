@@ -59,11 +59,24 @@ pub enum LibrarySource {
     /// Not in the library: picking it opens the Wikipedia page (when that's
     /// turned on). Never saved as the library's choice.
     Wikipedia,
+    /// Like Wikipedia: the Fandom wikis followed.
+    Fandom,
 }
 
 impl LibrarySource {
-    pub const ALL: [LibrarySource; 5] =
-        [LibrarySource::All, LibrarySource::Local, LibrarySource::Jellyfin, LibrarySource::Opds, LibrarySource::Wikipedia];
+    pub const ALL: [LibrarySource; 6] = [
+        LibrarySource::All,
+        LibrarySource::Local,
+        LibrarySource::Jellyfin,
+        LibrarySource::Opds,
+        LibrarySource::Wikipedia,
+        LibrarySource::Fandom,
+    ];
+
+    /// Pages of their own (not books in the library).
+    pub fn is_page(self) -> bool {
+        matches!(self, LibrarySource::Wikipedia | LibrarySource::Fandom)
+    }
 
     /// Whether a library entry (by its key and library root) is from here.
     pub fn includes(self, path: &str, root: &str) -> bool {
@@ -73,7 +86,7 @@ impl LibrarySource {
             LibrarySource::Local => !from(crate::remote::is_key),
             LibrarySource::Jellyfin => from(crate::jellyfin::is_key),
             LibrarySource::Opds => from(crate::opds::is_key),
-            LibrarySource::Wikipedia => false,
+            LibrarySource::Wikipedia | LibrarySource::Fandom => false,
         }
     }
 }
@@ -207,6 +220,12 @@ pub struct Settings {
     /// Interface language (an `i18n/` folder name); `None` follows the
     /// system.
     pub language: Option<String>,
+    /// The library menu's sections in the order chosen (All, always
+    /// first, isn't in it); see [`Settings::menu`].
+    pub menu_order: Vec<LibrarySource>,
+    /// Library sections left out of the menu (Wikipedia and Fandom are
+    /// shown by their own switches).
+    pub menu_hidden: Vec<LibrarySource>,
 }
 
 impl Default for Settings {
@@ -235,6 +254,8 @@ impl Default for Settings {
             fandom: false,
             fandom_wikis: Vec::new(),
             language: None,
+            menu_order: Vec::new(),
+            menu_hidden: Vec::new(),
         }
     }
 }
@@ -244,6 +265,67 @@ fn config_path() -> std::path::PathBuf {
 }
 
 impl Settings {
+    /// The library menu's sections after All, in the order chosen: any not
+    /// placed yet (new ones, or all of them before it was changed) where
+    /// they are by default.
+    pub fn menu(&self) -> Vec<LibrarySource> {
+        let mut out: Vec<LibrarySource> = Vec::new();
+        for src in self.menu_order.iter().copied().filter(|s| *s != LibrarySource::All) {
+            if !out.contains(&src) {
+                out.push(src);
+            }
+        }
+        for (i, src) in LibrarySource::ALL[1..].iter().copied().enumerate() {
+            if !out.contains(&src) {
+                // After the one before it by default, so Fandom lands under Wikipedia.
+                let at = if i == 0 { 0 } else { out.iter().position(|s| *s == LibrarySource::ALL[i]).map_or(out.len(), |p| p + 1) };
+                out.insert(at, src);
+            }
+        }
+        out
+    }
+
+    /// Whether a section is turned on for the menu (it still only shows
+    /// when the library has books from there).
+    pub fn shown(&self, src: LibrarySource) -> bool {
+        match src {
+            LibrarySource::All => true,
+            LibrarySource::Wikipedia => self.wikipedia,
+            LibrarySource::Fandom => self.fandom,
+            _ => !self.menu_hidden.contains(&src),
+        }
+    }
+
+    /// Moves a section up (`-1`) or down (`1`) in the menu.
+    pub fn move_in_menu(&mut self, src: LibrarySource, by: i32) {
+        let mut order = self.menu();
+        let Some(i) = order.iter().position(|s| *s == src) else { return };
+        let j = i as i32 + by;
+        if j >= 0 && (j as usize) < order.len() {
+            order.swap(i, j as usize);
+            self.menu_order = order;
+        }
+    }
+
+    /// Turns a section on or off in the menu.
+    pub fn show_in_menu(&mut self, src: LibrarySource, on: bool) {
+        match src {
+            LibrarySource::All => {}
+            LibrarySource::Wikipedia => self.wikipedia = on,
+            LibrarySource::Fandom => self.fandom = on,
+            _ => {
+                self.menu_hidden.retain(|s| *s != src);
+                if !on {
+                    self.menu_hidden.push(src);
+                }
+            }
+        }
+        // The library shouldn't stay filtered to a section that's gone.
+        if !on && self.library_source == src {
+            self.library_source = LibrarySource::All;
+        }
+    }
+
     pub fn load() -> Self {
         std::fs::read(config_path())
             .ok()
@@ -272,6 +354,28 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_menu_keeps_its_order_and_places_new_sections() {
+        let mut s = Settings::default();
+        use LibrarySource::*;
+        assert_eq!(s.menu(), [Local, Jellyfin, Opds, Wikipedia, Fandom]);
+        // Saved before Fandom existed: it goes under Wikipedia.
+        s.menu_order = vec![Wikipedia, Local, Opds, Jellyfin];
+        assert_eq!(s.menu(), [Wikipedia, Fandom, Local, Opds, Jellyfin]);
+        s.move_in_menu(Fandom, -1);
+        assert_eq!(s.menu(), [Fandom, Wikipedia, Local, Opds, Jellyfin]);
+        s.move_in_menu(Fandom, -1);
+        assert_eq!(s.menu()[0], Fandom);
+        assert!(!s.shown(Fandom) && s.shown(Jellyfin));
+        s.library_source = Jellyfin;
+        s.show_in_menu(Jellyfin, false);
+        s.show_in_menu(Fandom, true);
+        assert!(!s.shown(Jellyfin) && s.shown(Fandom));
+        assert_eq!(s.library_source, All);
+        s.show_in_menu(Jellyfin, true);
+        assert!(s.shown(Jellyfin));
+    }
 
     #[test]
     fn book_frosted_glass_is_on_unless_turned_off() {

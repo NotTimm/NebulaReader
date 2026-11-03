@@ -134,7 +134,7 @@ impl App {
     /// with the current choice's icon, opening a menu of all three.
     pub(super) fn library_source_picker(&self) -> Element<'_, Message> {
         let current = if self.app_view == super::AppView::Wikipedia {
-            LibrarySource::Wikipedia
+            if self.wiki_is_fandom() { LibrarySource::Fandom } else { LibrarySource::Wikipedia }
         } else {
             self.settings.library_source
         };
@@ -163,10 +163,13 @@ impl App {
         if self.library_menu {
             let present = self.sources_present();
             let mut menu = widget::column::with_capacity(LibrarySource::ALL.len()).spacing(2);
-            for (i, src) in LibrarySource::ALL.into_iter().enumerate() {
+            // All first, then the sections in the order chosen in Settings.
+            let order = std::iter::once(LibrarySource::All).chain(self.settings.menu());
+            for src in order {
                 if src != LibrarySource::All && src != current && !present.contains(&src) {
                     continue;
                 }
+                let i = LibrarySource::ALL.iter().position(|s| *s == src).unwrap_or(0);
                 let mut row = widget::row::with_capacity(3)
                     .spacing(10)
                     .align_y(Alignment::Center)
@@ -206,32 +209,64 @@ impl App {
             .iter()
             .filter(|e| self.is_visible(e))
             .collect();
-        let mut present: Vec<LibrarySource> = LibrarySource::ALL[1..]
-            .iter()
-            .copied()
-            .filter(|src| {
-                entries
-                    .iter()
-                    .any(|e| src.includes(&e.path, &e.library_root))
+        self.settings
+            .menu()
+            .into_iter()
+            .filter(|src| self.settings.shown(*src))
+            .filter(|src| match src {
+                // Pages of their own: there whenever they're on.
+                LibrarySource::Wikipedia | LibrarySource::Fandom => true,
+                // A catalog has its shelf (search and sections) under OPDS
+                // even before anything is downloaded from it.
+                LibrarySource::Opds if !self.opds.accounts.is_empty() => true,
+                src => entries.iter().any(|e| src.includes(&e.path, &e.library_root)),
             })
-            .collect();
-        // A catalog has its shelf (search and sections) under OPDS even
-        // before anything is downloaded from it.
-        if !self.opds.accounts.is_empty() && !present.contains(&LibrarySource::Opds) {
-            let at = present.iter().position(|p| *p == LibrarySource::Wikipedia).unwrap_or(present.len());
-            present.insert(at, LibrarySource::Opds);
-        }
-        // Wikipedia isn't in the library, but it's a place to go when it's on.
-        if self.settings.wikipedia {
-            present.push(LibrarySource::Wikipedia);
-        }
-        present
+            .collect()
     }
 
     /// Whether the library has series from more than one place, so the
     /// All / Local / Jellyfin / OPDS dropdown is worth having.
     pub(super) fn has_local_and_remote(&self) -> bool {
         self.sources_present().len() > 1
+    }
+
+    /// Settings → Library menu: each section of the menu at the top left,
+    /// in its order, with arrows to move it and a switch for it. Wikipedia
+    /// and Fandom are turned on here; the others show when the library
+    /// has books from them, unless they're switched off.
+    pub(super) fn build_menu_section(&self) -> Element<'_, Message> {
+        let order = self.settings.menu();
+        let mut section = widget::settings::section().title(fl!("menu-title")).add(widget::text::caption(fl!("menu-note")));
+        for (i, src) in order.iter().copied().enumerate() {
+            let label = LibrarySource::ALL.iter().position(|s| *s == src).map_or(String::new(), |k| self.labels.library_source[k].clone());
+            let note = match src {
+                LibrarySource::Wikipedia => Some(fl!("wiki-enable-note")),
+                LibrarySource::Fandom => Some(fl!("fandom-enable-note")),
+                _ => None,
+            };
+            let arrow = |name: &'static str, by: i32, enabled: bool| {
+                widget::button::icon(widget::icon::from_name(name))
+                    .extra_small()
+                    .on_press_maybe(enabled.then_some(Message::MenuMove(src, by)))
+            };
+            section = section.add(
+                widget::settings::item_row(vec![
+                    widget::icon(source_icon(src)).size(16).into(),
+                    widget::column::with_capacity(2)
+                        .spacing(2)
+                        .width(Length::Fill)
+                        .push(widget::text::body(label))
+                        .push_maybe(note.map(widget::text::caption))
+                        .into(),
+                    super::tip(arrow("go-up-symbolic", -1, i > 0), fl!("menu-up")),
+                    super::tip(arrow("go-down-symbolic", 1, i + 1 < order.len()), fl!("menu-down")),
+                    widget::toggler(self.settings.shown(src)).on_toggle(move |on| Message::MenuShow(src, on)).into(),
+                ])
+                .spacing(10)
+                .align_y(Alignment::Center),
+            );
+        }
+        section.into()
     }
 
     /// Whether a server series belongs to an account that's still signed
@@ -1060,6 +1095,7 @@ const LOCAL_ICON: &[u8] = include_bytes!("../../res/icons/ui/local.svg");
 const JELLYFIN_ICON: &[u8] = include_bytes!("../../res/icons/ui/jellyfin.svg");
 const OPDS_ICON: &[u8] = include_bytes!("../../res/icons/ui/opds.svg");
 const WIKIPEDIA_ICON: &[u8] = include_bytes!("../../res/icons/ui/wikipedia.svg");
+const FANDOM_ICON: &[u8] = include_bytes!("../../res/icons/ui/fandom.svg");
 const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg");
 const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
 const BOLT: &[u8] = include_bytes!("../../res/icons/ui/bolt.svg");
@@ -1106,5 +1142,6 @@ fn source_icon(src: LibrarySource) -> widget::icon::Handle {
         LibrarySource::Jellyfin => jellyfin_icon(),
         LibrarySource::Opds => opds_icon(),
         LibrarySource::Wikipedia => wikipedia_icon(),
+        LibrarySource::Fandom => ui_icon(FANDOM_ICON),
     }
 }

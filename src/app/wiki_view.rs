@@ -1,4 +1,4 @@
-//! The Wikipedia page (opt-in: Settings → Wikipedia): Wikipedia's main
+//! The Wikipedia page (opt-in: Settings → Library menu): Wikipedia's main
 //! page and its articles, drawn natively and laid out like the site. An
 //! article is one long scrolling page, as on Wikipedia: the contents in a
 //! sidebar that stays put (and can be hidden), the title in serif with
@@ -101,7 +101,6 @@ pub enum WikiMsg {
     JumpTo(Option<usize>),
     ScrollTo(Option<f32>),
     OpenOnWikipedia,
-    SetEnabled(bool),
     /// Opens the picture viewer on a picture (its thumbnail's address).
     View(String),
     ViewNext,
@@ -1440,13 +1439,6 @@ impl App {
                     (None, None) => {}
                 }
             }
-            WikiMsg::SetEnabled(on) => {
-                self.settings.wikipedia = on;
-                self.settings.save();
-                if !on && self.app_view == AppView::Wikipedia && !self.wiki_is_fandom() {
-                    self.app_view = AppView::Library;
-                }
-            }
             WikiMsg::Tab(id, i) => {
                 self.wiki.tabs.insert(id, i);
                 self.wiki.sel = None;
@@ -1534,31 +1526,6 @@ impl App {
             }
         }
         Task::none()
-    }
-
-    /// Settings: turning the Wikipedia page on.
-    pub(super) fn build_wiki_section(&self) -> Element<'_, Message> {
-        widget::settings::section()
-            .header(
-                widget::row::with_capacity(2)
-                    .spacing(8)
-                    .align_y(Alignment::Center)
-                    .push(widget::icon(super::library_view::wikipedia_icon()).size(16))
-                    .push(widget::text::heading("Wikipedia")),
-            )
-            .add(
-                widget::settings::item_row(vec![
-                    widget::column::with_capacity(2)
-                        .spacing(2)
-                        .width(Length::Fill)
-                        .push(widget::text::body(fl!("wiki-enable")))
-                        .push(widget::text::caption(fl!("wiki-enable-note")))
-                        .into(),
-                    widget::toggler(self.settings.wikipedia).on_toggle(|on| Message::Wiki(WikiMsg::SetEnabled(on))).into(),
-                ])
-                .align_y(Alignment::Center),
-            )
-            .into()
     }
 
     /// A picture at a given size: clickable to view it full window. While
