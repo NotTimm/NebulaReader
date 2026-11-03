@@ -401,7 +401,9 @@ the owner's laptop). Last updated 2026-11-03.
   hooks the WNDPROC (on `WindowOpened`) and marks Ctrl down for that one
   message, delta kept off a whole notch so it reads as touchpad. Type-
   checked only: the owner is to try it on Windows.
-- Windows flicker/lag (2026-11-03, unreleased, unconfirmed): the owner
+- Windows flicker/lag (2026-11-03, unreleased; the flicker is **confirmed
+  fixed by DX12**: the owner ran 0.2.1 with `WGPU_BACKEND=dx12` on their
+  Intel-only laptop and it was smooth; the lag is still unconfirmed): the owner
   sees the window flash black (often while wheel-scrolling Wikipedia
   articles) and the PC slow down when it's left open. iced asks wgpu for
   the HighPerformance adapter; on a two-GPU laptop that's the discrete
@@ -416,11 +418,9 @@ the owner's laptop). Last updated 2026-11-03.
   60-section article (`Long article` in `tools/mock-mediawiki.py`),
   article layout ~5 ms in a debug build. If it still flickers, try
   `WGPU_BACKEND=vulkan` / `gl` and `ICED_PRESENT_MODE=fifo` to narrow it.
-  The owner's laptop has Intel graphics only (2026-11-03), so the
-  two-GPU reason doesn't apply there; DX12 over Intel's Vulkan driver is
-  what's left of the theory. Untried: whether their Style setting is
-  COSMIC or Adwaita (a transparent window on Windows) rather than the
-  default Fluent.
+  The owner's laptop has Intel graphics only, so the cause there was
+  wgpu picking Vulkan over DX12 (Intel's Windows Vulkan driver presents
+  badly); `gpu_defaults` covers it.
 - Wikipedia floats: `FloatFlow::place` narrows a paragraph for every float
   over its whole height (re-measured until stable), not only at its first
   line (Tropical Storm Linda's table ran over text). Wikipedia can't be
