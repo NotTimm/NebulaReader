@@ -215,6 +215,12 @@ impl App {
                     .any(|e| src.includes(&e.path, &e.library_root))
             })
             .collect();
+        // A catalog has its shelf (search and sections) under OPDS even
+        // before anything is downloaded from it.
+        if !self.opds.accounts.is_empty() && !present.contains(&LibrarySource::Opds) {
+            let at = present.iter().position(|p| *p == LibrarySource::Wikipedia).unwrap_or(present.len());
+            present.insert(at, LibrarySource::Opds);
+        }
         // Wikipedia isn't in the library, but it's a place to go when it's on.
         if self.settings.wikipedia {
             present.push(LibrarySource::Wikipedia);
@@ -345,7 +351,13 @@ impl App {
             visible
         };
 
-        if visible.is_empty() {
+        // OPDS catalog shelves (compact, side-by-side) on the OPDS shelf;
+        // with catalogs, that's the page even before anything's downloaded.
+        let opds_shelf = self.settings.library_source == LibrarySource::Opds
+            || (!self.has_local_and_remote() && self.has_catalogs());
+        let shelf_only = opds_shelf && self.library_search.is_empty() && self.has_catalogs();
+
+        if visible.is_empty() && !shelf_only {
             let msg = if self.library_search.is_empty() {
                 fl!("library-empty-hint")
             } else {
@@ -406,9 +418,6 @@ impl App {
 
         let mut body = widget::Column::new().spacing(24);
 
-        // OPDS catalog shelves (compact, side-by-side) on the OPDS shelf.
-        let opds_shelf = self.settings.library_source == LibrarySource::Opds
-            || (!self.has_local_and_remote() && self.has_catalogs());
         if self.library_search.is_empty() && opds_shelf {
             if let Some(section) = self.view_catalog_quick_sections() {
                 body = body.push(section);
