@@ -104,7 +104,7 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 [target.'cfg(target_os = "linux")'.dependencies]
 libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "5a6362df585b974a7d38c172e1c5c7ebd18199fa", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
-ashpd = { version = "0.13", default-features = false, features = ["tokio", "settings"] }
+ashpd = { version = "0.14", default-features = false, features = ["tokio", "settings"] }
 
 [target.'cfg(unix)'.dependencies]
 # Free space on the download folder's drive (src/platform/disk.rs).
