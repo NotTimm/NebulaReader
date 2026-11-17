@@ -214,6 +214,8 @@ pub enum Message {
     ToggleFitWidth,
     /// Fit to Width has finished easing back to the whole page.
     FitWidthEased,
+    /// Fit to Width was turned off this far down the page (-1 top, 1 bottom).
+    FitLeft(f32),
     /// Hides the note saying Fit to Width went on or off (its number).
     HideFitNote(u64),
     ToggleInfo,
@@ -393,6 +395,10 @@ pub struct App {
     fit_width: bool,
     /// Still easing back to the whole page after Fit to Width.
     fit_width_leaving: bool,
+    /// Where Fit to Width was turned off on the page shown (page, -1 top to
+    /// 1 bottom), so turning it back on returns there; any page change
+    /// forgets it.
+    fit_resume: Option<(usize, f32)>,
     /// The brief note saying Fit to Width went on or off, and its number
     /// (so an older note's timer doesn't hide a newer one).
     fit_note: Option<(String, u64)>,
@@ -1262,6 +1268,7 @@ impl App {
         self.app_view = AppView::Reader;
         self.start_chapter = chapter;
         self.current_page = 0;
+        self.fit_resume = None;
         self.show_chapter_select = false;
 
         if crate::remote::is_key(&key) {
@@ -1653,6 +1660,7 @@ impl Application for App {
             zoom_active: false,
             fit_width: false,
             fit_width_leaving: false,
+            fit_resume: None,
             fit_note: None,
             fit_note_counter: 0,
             wheel: Default::default(),
@@ -2350,6 +2358,7 @@ impl App {
                             && !self.is_spread(self.current_page - 1)
                         {
                             self.current_page = self.current_page.saturating_sub(1);
+                            self.fit_resume = None;
                         }
                         return self.refresh_window();
                     }
@@ -2386,6 +2395,12 @@ impl App {
                         let h = self.handle(self.current_page).unwrap();
                         widget::image::viewer(h.clone())
                             .fit_width(self.fit_width)
+                            .resume_at(
+                                self.fit_resume
+                                    .filter(|(page, _)| *page == self.current_page)
+                                    .map(|(_, place)| place),
+                            )
+                            .on_fit_left(Message::FitLeft)
                             .content_fit(ContentFit::Contain)
                             .min_scale(MIN_ZOOM)
                             .max_scale(MAX_ZOOM)
@@ -2501,34 +2516,37 @@ impl App {
             };
 
         // ── Backdrop (never tints the page itself) ────────────────────────────
-        let viewer_bg: Element<'_, Message> = match &self.fit_note {
-            Some((note, _)) if !self.sources.is_empty() => {
-                cosmic::iced::widget::stack![self.backdrop(viewer), fit_note(note)].into()
-            }
-            _ => self.backdrop(viewer),
+        // The layout keeps the same shape whatever is shown around the page
+        // (the Fit to Width note, the chapter list, banners): iced matches
+        // widgets to their state by position, so a page that moved in the
+        // tree would get a fresh viewer, which forgot where it was scrolled
+        // to and eased back to the top of a fitted page.
+        let note: Element<'_, Message> = match &self.fit_note {
+            Some((note, _)) if !self.sources.is_empty() => fit_note(note),
+            _ => widget::Space::new().width(Length::Shrink).height(Length::Shrink).into(),
         };
+        let viewer_bg: Element<'_, Message> =
+            cosmic::iced::widget::stack![self.backdrop(viewer), note].into();
 
         // ── Right panel (chapter select; Info lives in the context drawer) ────
-        let main_row: Element<'_, Message> = if self.show_chapter_select {
-            widget::Row::new()
-                .push(
-                    widget::container(viewer_bg)
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                )
-                .push(self.build_chapter_select())
-                .into()
-        } else {
-            viewer_bg
-        };
+        let main_row: Element<'_, Message> = widget::Row::new()
+            .push(
+                widget::container(viewer_bg)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .push_maybe(self.show_chapter_select.then(|| self.build_chapter_select()))
+            .into();
 
-        let mut col = widget::Column::new().spacing(8);
+        let mut banners = widget::Column::new().spacing(8);
         if let Some(err) = self.error.as_deref() {
-            col = col.push(error_banner(err));
+            banners = banners.push(error_banner(err));
         }
         if let Some(banner) = self.big_fetch_prompt(false) {
-            col = col.push(banner);
+            banners = banners.push(banner);
         }
+        let gap = if self.error.is_some() || self.big_fetch_prompt(false).is_some() { 8 } else { 0 };
+        let col = widget::Column::new().spacing(gap).push(banners);
         // In theater mode libcosmic's content frame is off (see `update`),
         // so nothing else paints behind the reader; without this, anything
         // not on the backdrop (the error banner, the gap below it) would
@@ -3430,6 +3448,8 @@ impl App {
                     start_chapter,
                     total,
                 );
+
+                self.fit_resume = None;
                 self.nav_dir = 1;
 
                 self.title = self
@@ -4139,6 +4159,7 @@ impl App {
                 let new = (self.current_page + step).min(self.sources.len().saturating_sub(1));
                 if new != self.current_page {
                     self.current_page = new;
+                    self.fit_resume = None;
                     self.nav_dir = 1;
                     self.persist_progress();
                     return self.refresh_window();
@@ -4151,6 +4172,7 @@ impl App {
                 let new = self.prev_view_start();
                 if new != self.current_page {
                     self.current_page = new;
+                    self.fit_resume = None;
                     self.nav_dir = -1;
                     self.persist_progress();
                     return self.refresh_window();
@@ -4225,6 +4247,7 @@ impl App {
                     && !self.is_spread(self.current_page - 1)
                 {
                     self.current_page = self.current_page.saturating_sub(1);
+                    self.fit_resume = None;
                 }
                 return self.refresh_window();
             }
@@ -4264,6 +4287,7 @@ impl App {
                 return Task::batch(tasks);
             }
             Message::FitWidthEased => self.fit_width_leaving = false,
+            Message::FitLeft(place) => self.fit_resume = Some((self.current_page, place)),
             Message::HideFitNote(note) => {
                 if self.fit_note.as_ref().is_some_and(|(_, n)| *n == note) {
                     self.fit_note = None;
@@ -4291,6 +4315,7 @@ impl App {
                     return self.update_book(BookMsg::GoToChapter(ch_idx));
                 } else if let Some(ch) = self.chapters.get(ch_idx) {
                     self.current_page = ch.start;
+                    self.fit_resume = None;
                     self.nav_dir = 1;
                     self.show_chapter_select = false;
                     self.persist_progress();
