@@ -109,7 +109,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-11-03.
+the owner's laptop). Last updated 2026-11-17.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -179,6 +179,21 @@ the owner's laptop). Last updated 2026-11-03.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Beta 0.2.2-beta.2 (2026-11-17): the Fit to Width fixes below and
+  libcosmic synced (fork `80dae52`, upstream through 12ae9ef: zbus 6,
+  iced 115018bf with a large-window crash fix, theme/cosmic-launch
+  fixes; `widget::scrollable` is now the function).
+- Fit to Width (2026-11-17): it snapped back to the top a second after
+  Space while scrolling. Cause: the fit note (gone after 1.1 s), the
+  chapter list and banners changed the reader's widget tree, so iced
+  gave the page a fresh `image::Viewer` State, which eased to the top.
+  `view_reader` now always builds stack[backdrop, note-or-Space], a Row
+  with the chapter list optional at the end, and a banners column: keep
+  that shape (anything that moves the viewer in the tree resets it).
+  Space, Space returns to the same place on the page: fork patch 18
+  (`resume_at`, `on_fit_left`), `App::fit_resume` (page, -1..1), cleared
+  wherever `current_page` is set. Seen working in Xvfb. Owner had worked
+  on this in a local Claude session on 2026-11-16 that was never pushed.
 - Beta 0.2.2-beta.1 (2026-11-03): Fandom, the Library menu settings and
   the Windows Direct3D 12 default, with libcosmic synced (fork `5a6362d`,
   upstream through daca62bb: a cosmic-launch GPU fix and a docs example).
@@ -526,8 +541,8 @@ the owner's laptop). Last updated 2026-11-03.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `5a6362d` (patches 1–17, see Cargo.toml),
-  merged with upstream through `daca62bb` (2026-11-03; iced at 229186b5); 0.1.2 was built from
+- libcosmic: fork pinned at `80dae52` (patches 1–18, see Cargo.toml),
+  merged with upstream through `12ae9ef` (2026-11-17; iced at 115018bf); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
   touched chapter); a per-chapter shelf would be an option, not default.

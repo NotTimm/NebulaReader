@@ -69,6 +69,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.2-beta.2" date="2026-11-17" type="development">
+      <description>
+        <ul>
+          <li>Fit to Width no longer jumps back to the top of the page while you scroll</li>
+          <li>Turning Fit to Width off and on again brings you back to the same place on the page</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2-beta.1" date="2026-11-03" type="development">
       <description>
         <ul>
