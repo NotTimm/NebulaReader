@@ -182,7 +182,8 @@ the owner's laptop). Last updated 2026-11-17.
 - Beta 0.2.2-beta.2 (2026-11-17): the Fit to Width fixes below and
   libcosmic synced (fork `80dae52`, upstream through 12ae9ef: zbus 6,
   iced 115018bf with a large-window crash fix, theme/cosmic-launch
-  fixes; `widget::scrollable` is now the function).
+  fixes; `widget::scrollable` is now the function). Published; the Mac
+  job now runs on `macos-15` (GitHub retired the macos-14 image).
 - Fit to Width (2026-11-17): it snapped back to the top a second after
   Space while scrolling. Cause: the fit note (gone after 1.1 s), the
   chapter list and banners changed the reader's widget tree, so iced
