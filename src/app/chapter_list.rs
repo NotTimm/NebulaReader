@@ -259,7 +259,7 @@ impl App {
             };
             list = list.push(el);
         }
-        col = col.push(widget::scrollable::scrollable(list).id(list_id()).height(Length::Fill));
+        col = col.push(widget::scrollable(list).id(list_id()).height(Length::Fill));
 
         // Its own background: in theater mode libcosmic's content frame is
         // off, and without this the window shows through the panel.
