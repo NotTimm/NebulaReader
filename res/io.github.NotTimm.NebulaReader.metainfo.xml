@@ -69,35 +69,14 @@
     </screenshot>
   </screenshots>
   <releases>
-    <release version="0.2.2-beta.4" date="2026-11-19" type="development">
+    <release version="0.2.2" date="2026-11-19">
       <description>
+        <p>Fandom wikis, your own menu order, and Fit to Width that stays put.</p>
         <ul>
-          <li>Windows 11: the window can show Mica or Acrylic behind it, like Windows' own apps</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.2-beta.3" date="2026-11-19" type="development">
-      <description>
-        <ul>
-          <li>Fandom: a wiki's main page now reads like the site, box by box, with its rows of pictures</li>
-          <li>Fandom: each wiki you follow gets a card with its own banner and logo</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.2-beta.2" date="2026-11-17" type="development">
-      <description>
-        <ul>
-          <li>Fit to Width no longer jumps back to the top of the page while you scroll</li>
-          <li>Turning Fit to Width off and on again brings you back to the same place on the page</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.2.2-beta.1" date="2026-11-03" type="development">
-      <description>
-        <ul>
-          <li>Fandom wikis, if you turn them on: follow the wikis you like and read their main pages, search and articles, with infoboxes, tabs and galleries</li>
+          <li>Fandom wikis, if you turn them on: follow the wikis you like and read their main pages box by box, search and articles, with infoboxes, tabs and galleries; each wiki gets a card with its own banner and logo</li>
           <li>Settings → Library menu: choose which sections the menu shows and in what order</li>
-          <li>Windows: no more black flicker, drawn with Direct3D 12</li>
+          <li>Fit to Width no longer jumps back to the top of the page while you scroll, and turning it off and on again brings you back to the same place</li>
+          <li>Windows: no more black flicker (drawn with Direct3D 12), and Mica or Acrylic behind the window on Windows 11</li>
         </ul>
       </description>
     </release>

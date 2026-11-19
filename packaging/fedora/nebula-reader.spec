@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.2~beta.4
+Version:        0.2.2
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,13 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2-1
+- Fandom wikis (opt-in): follow wikis, main pages, search, articles
+- Settings -> Library menu: order and switch the menu's sections
+- Fit to Width no longer jumps to the top; Space, Space keeps the place
+- Windows: Direct3D 12, and Mica or Acrylic on Windows 11
+- libcosmic updated
+
 * Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2~beta.4-1
 - Windows 11: Mica or Acrylic behind the window (no change on Linux)
 
