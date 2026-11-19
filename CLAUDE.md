@@ -407,7 +407,8 @@ the owner's laptop). Last updated 2026-11-19.
   (`picture_cell`); figures linking to an article or site join picture
   rows (not thumbnails linking to their own file). Hidden: Discord
   widget, ad slots, hub footers (`animangafooter`, `jumpwikis`, and any
-  `mw-parser-output` after the first); empty box sections dropped; a
+  `mw-parser-output` after the first), and the main page's right
+  column (`main-page-tag-rcs`, owner's call: the reading is on the left); empty box sections dropped; a
   section of only pictures doesn't float them. Logos: `Site-logo.png`,
   then `Wiki-wordmark.png` (siteinfo's `Wiki.png` is gone on many wikis,
   e.g. Attack on Titan); `Wiki::banner` = the theme's background
