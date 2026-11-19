@@ -180,7 +180,7 @@ the owner's laptop). Last updated 2026-11-19.
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
 - Beta 0.2.2-beta.3 (2026-11-19): the Fandom main page and card work
-  below (Bleach, Attack on Titan), libcosmic synced (fork ,
+  below (Bleach, Attack on Titan), libcosmic synced (fork `3f47a33`,
   upstream through be7937d: Wayland theme-update fixes, icons follow
   icon theme changes; iced unchanged).
 - Beta 0.2.2-beta.2 (2026-11-17): the Fit to Width fixes below and
@@ -566,8 +566,8 @@ the owner's laptop). Last updated 2026-11-19.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `80dae52` (patches 1–18, see Cargo.toml),
-  merged with upstream through `12ae9ef` (2026-11-17; iced at 115018bf); 0.1.2 was built from
+- libcosmic: fork pinned at `3f47a33` (patches 1–18, see Cargo.toml),
+  merged with upstream through `be7937d` (2026-11-19; iced at 115018bf); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently
   touched chapter); a per-chapter shelf would be an option, not default.
