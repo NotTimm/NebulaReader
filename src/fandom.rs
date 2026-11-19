@@ -517,8 +517,7 @@ mod tests {
         // scripts fill, the chat widget) are left out, as are the ad and
         // the hub's footers after the page.
         let titles: Vec<(u8, &str)> = a.sections.iter().map(|s| (s.level, s.title.as_str())).collect();
-        // The right-hand column (Did You Know?) is skipped.
-        assert_eq!(titles, [(1, ""), (2, "Welcome"), (2, "Affiliated Wikis")]);
+        assert_eq!(titles, [(1, ""), (2, "Welcome"), (2, "Affiliated Wikis"), (2, "Did You Know?")]);
         let all = format!("{:?}", a.sections);
         assert!(!all.contains("JavaScript") && !all.contains("Advertisement") && !all.contains("Jump") && !all.contains("Fall Season"));
 
@@ -538,6 +537,7 @@ mod tests {
         assert_eq!(affiliates.len(), 2);
         assert_eq!(affiliates[0].link.as_deref(), Some("https://onepiece.fandom.com/"));
         assert_eq!(affiliates[1].caption.iter().map(|r| r.text.as_str()).collect::<String>(), "Demon Slayer Wiki");
+        assert!(matches!(&a.sections[3].blocks[0], Block::List { .. }));
     }
 
     #[test]

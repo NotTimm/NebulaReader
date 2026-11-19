@@ -615,10 +615,6 @@ fn hidden(e: &El) -> bool {
         "DiscordIntegrator",
         "animangafooter",
         "jumpwikis",
-        // A Fandom main page's right-hand column (news, trivia, the site's
-        // widgets): beside the page on the site, skipped here (owner's
-        // call); the reading is in the main column.
-        "main-page-tag-rcs",
     ];
     CLASSES.iter().any(|c| e.has_class(c))
 }
