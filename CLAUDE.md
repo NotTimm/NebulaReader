@@ -200,6 +200,12 @@ the owner's laptop). Last updated 2026-11-19.
   Patch 19 also makes iced prefer premultiplied alpha on Windows
   (DirectComposition refuses straight alpha). macOS vibrancy
   (`NSVisualEffectView`) is the owner's possible follow-up.
+- Flatpak job (2026-11-19): it failed at random with "Invalid
+  cross-device link" when flatpak-builder updated the runtimes the
+  build image ships (Docker overlay lower layer, EXDEV on rename). The
+  workflow's "Make the Flatpak installation writable in place" step
+  (copies the installation into the container's own layer first) fixed
+  it; first passed in the 0.2.2-beta.4 run. `packaging/pending/` can go.
 - Beta 0.2.2-beta.3 (2026-11-19): the Fandom main page and card work
   below (Bleach, Attack on Titan), libcosmic synced (fork `3f47a33`,
   upstream through be7937d: Wayland theme-update fixes, icons follow
