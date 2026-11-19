@@ -212,6 +212,7 @@ pub enum Message {
     PointerY(f32),
     ToggleTheater,
     ToggleLayout,
+    ToggleRtl,
     ToggleZoom,
     /// Space: Fit to Width on or off.
     ToggleFitWidth,
@@ -394,6 +395,7 @@ pub struct App {
     theme_error: Option<String>,
     theater_mode: bool,
     layout: Layout,
+    rtl: bool,
     zoom_active: bool,
     /// Fit to Width: the page as wide as the window, read top to bottom.
     /// Never remembered: each comic opens whole.
@@ -1662,6 +1664,7 @@ impl Application for App {
             } else {
                 Layout::Single
             },
+            rtl: settings.rtl,
             zoom_active: false,
             fit_width: false,
             fit_width_leaving: false,
@@ -1998,17 +2001,31 @@ impl Application for App {
                         format!("{} / {}", self.current_page + 1, self.sources.len())
                     };
 
-                    els.push(tip(
-                        widget::button::icon(icon::from_name("go-previous-symbolic"))
-                            .on_press(Message::PrevPage),
-                        fl!("previous-page"),
-                    ));
-                    els.push(tip(widget::text(counter), fl!("page")));
-                    els.push(tip(
-                        widget::button::icon(icon::from_name("go-next-symbolic"))
-                            .on_press(Message::NextPage),
-                        fl!("next-page"),
-                    ));
+                    if self.rtl {
+                        els.push(tip(
+                            widget::button::icon(icon::from_name("go-previous-symbolic"))
+                                .on_press(Message::NextPage),
+                            fl!("next-page-rtl"),
+                        ));
+                        els.push(tip(widget::text(counter), fl!("page")));
+                        els.push(tip(
+                            widget::button::icon(icon::from_name("go-next-symbolic"))
+                                .on_press(Message::PrevPage),
+                            fl!("previous-page-rtl"),
+                        ));
+                    } else {
+                        els.push(tip(
+                            widget::button::icon(icon::from_name("go-previous-symbolic"))
+                                .on_press(Message::PrevPage),
+                            fl!("previous-page"),
+                        ));
+                        els.push(tip(widget::text(counter), fl!("page")));
+                        els.push(tip(
+                            widget::button::icon(icon::from_name("go-next-symbolic"))
+                                .on_press(Message::NextPage),
+                            fl!("next-page"),
+                        ));
+                    }
                     els.push(widget::divider::vertical::light().into());
 
                     // Chapter select (only for multi-chapter series)
@@ -2028,6 +2045,16 @@ impl Application for App {
                             fl!("show-one-page")
                         } else {
                             fl!("show-two-pages")
+                        },
+                    ));
+                    els.push(tip(
+                        widget::button::icon(library_view::rtl_icon())
+                            .selected(self.rtl)
+                            .on_press(Message::ToggleRtl),
+                        if self.rtl {
+                            fl!("reading-ltr-tip")
+                        } else {
+                            fl!("reading-rtl-tip")
                         },
                     ));
                     els.push(tip(
@@ -2294,13 +2321,33 @@ impl App {
             }
         }
         match &key {
-            Key::Named(Named::ArrowRight) | Key::Named(Named::PageDown) => {
+            Key::Named(Named::ArrowRight) => {
+                if self.app_view != AppView::Reader {
+                    return Task::none();
+                }
+                return self.update(if self.rtl {
+                    Message::PrevPage
+                } else {
+                    Message::NextPage
+                });
+            }
+            Key::Named(Named::ArrowLeft) => {
+                if self.app_view != AppView::Reader {
+                    return Task::none();
+                }
+                return self.update(if self.rtl {
+                    Message::NextPage
+                } else {
+                    Message::PrevPage
+                });
+            }
+            Key::Named(Named::PageDown) => {
                 if self.app_view != AppView::Reader {
                     return Task::none();
                 }
                 return self.update(Message::NextPage);
             }
-            Key::Named(Named::ArrowLeft) | Key::Named(Named::PageUp) => {
+            Key::Named(Named::PageUp) => {
                 if self.app_view != AppView::Reader {
                     return Task::none();
                 }
@@ -2367,6 +2414,7 @@ impl App {
                         }
                         return self.refresh_window();
                     }
+                    "r" | "R" => return self.update(Message::ToggleRtl),
                     "m" | "M" => return self.update(Message::ToggleZoom),
                     "i" | "I" => return self.update(Message::ToggleInfo),
                     "s" | "S" => return self.update(Message::ToggleSettings),
@@ -2428,35 +2476,35 @@ impl App {
                             .into()
                     }
                     (Layout::Dual, false) => {
-                        let mut row = widget::Row::new().spacing(4).height(Length::Fill);
-                        if let Some(h) = self.handle(self.current_page) {
-                            row = row.push(
+                        let page_el = |idx: usize| -> Element<'_, Message> {
+                            if let Some(h) = self.handle(idx) {
                                 widget::image(h.clone())
                                     .width(Length::FillPortion(1))
                                     .height(Length::Fill)
-                                    .content_fit(ContentFit::Contain),
-                            );
-                        }
-                        // A spread (or the page before one) is shown alone,
-                        // centred.
-                        let right = self.current_page + 1;
-                        if self.pages_shown_at(self.current_page) == 2 {
-                            if let Some(h) = self.handle(right) {
-                                row = row.push(
-                                    widget::image(h.clone())
-                                        .width(Length::FillPortion(1))
-                                        .height(Length::Fill)
-                                        .content_fit(ContentFit::Contain),
-                                );
+                                    .content_fit(ContentFit::Contain)
+                                    .into()
                             } else {
-                                row = row.push(
-                                    widget::container(widget::indeterminate_circular())
-                                        .width(Length::FillPortion(1))
-                                        .height(Length::Fill)
-                                        .center_x(Length::Fill)
-                                        .center_y(Length::Fill),
-                                );
+                                widget::container(widget::indeterminate_circular())
+                                    .width(Length::FillPortion(1))
+                                    .height(Length::Fill)
+                                    .center_x(Length::Fill)
+                                    .center_y(Length::Fill)
+                                    .into()
                             }
+                        };
+                        let mut row = widget::Row::new().spacing(4).height(Length::Fill);
+                        // A spread (or the page before one) is shown alone,
+                        // centred. In RTL (manga) mode, the next page sits on
+                        // the left and the current page on the right.
+                        if self.pages_shown_at(self.current_page) == 2 {
+                            let (left, right) = if self.rtl {
+                                (self.current_page + 1, self.current_page)
+                            } else {
+                                (self.current_page, self.current_page + 1)
+                            };
+                            row = row.push(page_el(left)).push(page_el(right));
+                        } else if self.handle(self.current_page).is_some() {
+                            row = row.push(page_el(self.current_page));
                         }
                         row.into()
                     }
@@ -2760,6 +2808,10 @@ impl App {
             .add(widget::settings::item(
                 fl!("two-page-spread"),
                 widget::toggler(self.layout == Layout::Dual).on_toggle(|_| Message::ToggleLayout),
+            ))
+            .add(widget::settings::item(
+                fl!("rtl-mode"),
+                widget::toggler(self.rtl).on_toggle(|_| Message::ToggleRtl),
             ))
             .add(widget::settings::item(
                 fl!("fullscreen-status"),
@@ -4279,6 +4331,11 @@ impl App {
                     self.fit_resume = None;
                 }
                 return self.refresh_window();
+            }
+            Message::ToggleRtl => {
+                self.rtl = !self.rtl;
+                self.settings.rtl = self.rtl;
+                self.settings.save();
             }
             Message::ToggleZoom => {
                 // From Fit to Width, back to the whole page.

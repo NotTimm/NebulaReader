@@ -200,6 +200,9 @@ pub struct Settings {
     pub background: Background,
     /// Restore these reader preferences across sessions.
     pub dual_page: bool,
+    /// Read comics right-to-left (manga): dual-page spreads put the next page
+    /// on the left, and Left/Right arrows are flipped.
+    pub rtl: bool,
     pub theater_mode: bool,
     /// Look up metadata online (AniList / ComicVine) when opening a comic.
     pub fetch_metadata: bool,
@@ -255,6 +258,7 @@ impl Default for Settings {
             background_opacity: 1.0,
             background: Background::Theme,
             dual_page: false,
+            rtl: false,
             // A black backdrop suits comics, and saves power on OLED screens.
             theater_mode: true,
             fetch_metadata: true,

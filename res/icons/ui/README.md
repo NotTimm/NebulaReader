@@ -2,7 +2,7 @@
 
 Small icons used inside the app (embedded at build time).
 
-- `all.svg`, `local.svg`, `chevron-down.svg`, `check.svg`, `bolt.svg`, `fandom.svg` (books on a shelf, for the
+- `all.svg`, `local.svg`, `chevron-down.svg`, `check.svg`, `bolt.svg`, `fit-width.svg`, `rtl.svg`, `fandom.svg` (books on a shelf, for the
   Fandom page; Fandom's own logo is its trademark and isn't used), `wikipedia.svg` (a globe,
   for the Wikipedia page; Wikipedia's own puzzle globe and "W" are Wikimedia
   trademarks and aren't used): drawn for Nebula Reader,
