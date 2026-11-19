@@ -144,6 +144,8 @@ pub enum WikiMsg {
     Unfollow(String),
     /// The list of wikis followed.
     Following,
+    /// A followed wiki looked up again (see `WikiState::wikis_refreshed`).
+    Refreshed(Option<Wiki>),
 }
 
 /// Up or Down held on a Wikipedia page: it scrolls at a speed that follows
@@ -345,6 +347,9 @@ pub struct WikiState {
     add_input: String,
     adding: bool,
     add_error: Option<String>,
+    /// The wikis followed were looked up again this run (their logos and
+    /// banners can change, and older versions saved fewer).
+    wikis_refreshed: bool,
 }
 
 impl WikiState {
@@ -907,10 +912,26 @@ impl App {
                 self.set_header_title(fl!("fandom-following"));
                 self.wiki.loading = false;
                 self.wiki.article = None;
-                let logos = self.settings.fandom_wikis.iter().filter_map(|w| w.logo.clone()).map(|l| (l, THUMB)).collect();
+                let logos = self
+                    .settings
+                    .fandom_wikis
+                    .iter()
+                    .flat_map(|w| w.logo.iter().chain(w.banner.iter()).cloned())
+                    .map(|l| (l, THUMB))
+                    .collect();
                 let pictures = self.page_pictures(Vec::new(), logos);
                 let restore = self.wiki_restore();
-                return Task::batch([pictures, if self.wiki.offset > 0.0 { restore } else { top }]);
+                let mut refresh = Vec::new();
+                if !self.wiki.wikis_refreshed {
+                    self.wiki.wikis_refreshed = true;
+                    for w in &self.settings.fandom_wikis {
+                        let address = w.id();
+                        refresh.push(cosmic::task::future(async move {
+                            Message::Wiki(WikiMsg::Refreshed(fandom::find(&address).await.ok()))
+                        }));
+                    }
+                }
+                return Task::batch([pictures, if self.wiki.offset > 0.0 { restore } else { top }, Task::batch(refresh)]);
             }
             Site::Fandom(Some(w)) => Some(w.clone()),
         };
@@ -1462,13 +1483,13 @@ impl App {
                 (Ok(w), None) => {
                     self.wiki.adding = false;
                     self.wiki.add_input.clear();
-                    let logo = w.logo.clone();
+                    let wanted: Vec<String> = w.logo.iter().chain(w.banner.iter()).cloned().collect();
                     match self.settings.fandom_wikis.iter_mut().find(|f| **f == w) {
                         Some(f) => *f = w,
                         None => self.settings.fandom_wikis.push(w),
                     }
                     self.settings.save();
-                    return self.want(logo, THUMB);
+                    return self.want(wanted, THUMB);
                 }
                 (Err(e), None) => {
                     self.wiki.adding = false;
@@ -1503,6 +1524,17 @@ impl App {
                 self.settings.save();
             }
             WikiMsg::Following => return self.wiki_visit(Site::Fandom(None), WikiPage::Home, true),
+            WikiMsg::Refreshed(w) => {
+                let Some(w) = w else { return Task::none() };
+                let Some(f) = self.settings.fandom_wikis.iter_mut().find(|f| **f == w) else { return Task::none() };
+                if f.logo == w.logo && f.banner == w.banner && f.accent == w.accent && f.name == w.name {
+                    return Task::none();
+                }
+                let wanted: Vec<String> = w.logo.iter().chain(w.banner.iter()).cloned().collect();
+                *f = w;
+                self.settings.save();
+                return self.want(wanted, THUMB);
+            }
             WikiMsg::View(url) => {
                 let i = match self.wiki.gallery.iter().position(|(u, _)| *u == url) {
                     Some(i) => i,
@@ -2021,9 +2053,13 @@ impl App {
                     flow = flow.float(self.wiki_table(ib, pal, true));
                 }
             }
+            // A Fandom box that's only a picture ("Featured Image"): it
+            // stays under its heading instead of floating into the next.
+            let only_pictures = wiki.is_some() && s.blocks.iter().all(|b| matches!(b, Block::Figure { .. }));
             for b in blocks {
                 flow = match b {
                     Block::Figure { image, caption } => match self.wiki_figure(image, caption, pal) {
+                        Some(fig) if only_pictures => flow.push(fig),
                         Some(fig) => flow.float(fig),
                         None if !caption.is_empty() => flow.push(self.line_text(caption, pal, TEXT - 2.0)),
                         None => flow,
@@ -2360,21 +2396,71 @@ impl App {
         col.into()
     }
 
-    /// A wiki followed: its colour, logo (or name), address, and a way to
-    /// stop following it.
+    /// A wiki followed: a banner (the wiki's own background picture,
+    /// zoomed to fill and centred, or its colour) with its logo on it, then
+    /// its name, address, and a way to stop following it.
     fn fandom_card<'a>(&'a self, w: &'a Wiki, pal: &Palette) -> Element<'a, Message> {
+        const WIDTH: f32 = 280.0;
+        const BANNER: f32 = 120.0;
         let accent = w.accent.map(|c| Color::from_rgb8(c[0], c[1], c[2])).unwrap_or(pal.link);
-        let band = widget::container(widget::Space::new().height(4.0).width(Length::Fill))
-            .style(move |_: &cosmic::Theme| widget::container::Style { background: Some(Background::Color(accent)), ..Default::default() });
-        let logo: Option<Element<'a, Message>> = w.logo.as_deref().and_then(|l| match self.wiki.pics.get(&pic_key(l, THUMB)) {
-            Some(Pic::Ready(h)) => Some(widget::image(h.clone()).height(Length::Fixed(48.0)).content_fit(ContentFit::Contain).into()),
+        let ready = |url: Option<&String>| match url.and_then(|u| self.wiki.pics.get(&pic_key(u, THUMB))) {
+            Some(Pic::Ready(h)) => Some(h.clone()),
             _ => None,
+        };
+        let banner = ready(w.banner.as_ref());
+        let logo = ready(w.logo.as_ref());
+        let mut layers: Vec<Element<'a, Message>> = Vec::with_capacity(3);
+        // Behind: the picture, or the wiki's colour fading darker.
+        layers.push(match &banner {
+            Some(h) => widget::image(h.clone()).width(Length::Fill).height(Length::Fixed(BANNER)).content_fit(ContentFit::Cover).into(),
+            None => widget::container(widget::Space::new().width(Length::Fill).height(Length::Fixed(BANNER)))
+                .style(move |_: &cosmic::Theme| widget::container::Style {
+                    background: Some(Background::Gradient(cosmic::iced::Gradient::Linear(
+                        cosmic::iced::gradient::Linear::new(std::f32::consts::PI)
+                            .add_stop(0.0, accent)
+                            .add_stop(1.0, Color { r: accent.r * 0.45, g: accent.g * 0.45, b: accent.b * 0.45, a: 1.0 }),
+                    ))),
+                    ..Default::default()
+                })
+                .into(),
         });
-        let body = widget::column::with_capacity(3)
-            .spacing(6)
+        // A light veil over a picture, so the logo stands out from it.
+        if banner.is_some() {
+            layers.push(
+                widget::container(widget::Space::new().width(Length::Fill).height(Length::Fixed(BANNER)))
+                    .style(|_: &cosmic::Theme| widget::container::Style {
+                        background: Some(Background::Color(Color { a: 0.35, ..Color::BLACK })),
+                        ..Default::default()
+                    })
+                    .into(),
+            );
+        }
+        // In front: the logo, centred; without one, the name's first letter.
+        layers.push(
+            widget::container(match logo {
+                Some(h) => Element::from(widget::image(h).width(Length::Fixed(WIDTH - 60.0)).height(Length::Fixed(BANNER - 36.0)).content_fit(ContentFit::Contain)),
+                None => widget::text(w.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default())
+                    .size(48.0)
+                    .font(bold())
+                    .class(cosmic::theme::Text::Color(Color::WHITE))
+                    .into(),
+            })
+            .width(Length::Fill)
+            .height(Length::Fixed(BANNER))
+            .center_x(Length::Fill)
+            .center_y(Length::Fixed(BANNER))
+            .into(),
+        );
+        let top = widget::container(cosmic::iced::widget::Stack::with_children(layers).width(Length::Fill).height(Length::Fixed(BANNER)))
+            .width(Length::Fill)
+            .height(Length::Fixed(BANNER))
+            .clip(true);
+        let band = widget::container(widget::Space::new().height(3.0).width(Length::Fill))
+            .style(move |_: &cosmic::Theme| widget::container::Style { background: Some(Background::Color(accent)), ..Default::default() });
+        let body = widget::column::with_capacity(2)
+            .spacing(2)
             .padding([10, 12])
             .width(Length::Fill)
-            .push(widget::container(logo.unwrap_or_else(|| widget::Space::new().height(Length::Fixed(48.0)).into())).height(Length::Fixed(48.0)).center_y(Length::Fixed(48.0)))
             .push(widget::text(w.name.clone()).size(TEXT + 1.0).font(bold()))
             .push(
                 widget::row::with_capacity(2)
@@ -2385,7 +2471,7 @@ impl App {
                         fl!("fandom-unfollow"),
                     )),
             );
-        let card = boxed(widget::column::with_capacity(2).push(band).push(body), pal.panel, pal.border).width(Length::Fixed(260.0));
+        let card = boxed(widget::column::with_capacity(3).push(top).push(band).push(body), pal.panel, pal.border).width(Length::Fixed(WIDTH));
         widget::mouse_area(card)
             .on_press(Message::Wiki(WikiMsg::OpenWiki(w.id())))
             .interaction(cosmic::iced::mouse::Interaction::Pointer)

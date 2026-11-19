@@ -608,6 +608,13 @@ fn hidden(e: &El) -> bool {
         // (the app has its own) and print-only bits.
         "toc",
         "printonly",
+        // Fandom: ad slots, chat widgets (they need the site's scripts) and
+        // the footers listing a hub's other wikis.
+        "fandom-ad-wrapper",
+        "fandom-ad-placeholder",
+        "DiscordIntegrator",
+        "animangafooter",
+        "jumpwikis",
     ];
     CLASSES.iter().any(|c| e.has_class(c))
 }
@@ -953,6 +960,28 @@ impl Builder {
                 if let Some(fc) = e.find(&|x| x.name == "figcaption") {
                     cap.inlines(fc, Ctx::default());
                 }
+                // On a Fandom wiki, a picture that links to an article or a
+                // site (a main page's boxes of affiliates, games…): a
+                // picture row, with the pictures after it.
+                // Not a thumbnail's link to its own picture file.
+                let link = e
+                    .find(&|x| x.name == "a" && x.find(&|i| i.name == "img").is_some())
+                    .filter(|a| !a.has_class("image") && !a.has_class("mw-file-description"))
+                    .and_then(link_target)
+                    .filter(|l| !l.contains("nocookie.net") && !l.contains("/images/"));
+                if on_fandom() && link.is_some() {
+                    let caption: Line = trim_line(cap.line).into_iter().map(|mut run| { run.link = None; run }).collect();
+                    let item = GalleryItem { image, caption, link };
+                    let joins = self.picture_row.is_some_and(|i| i + 1 == self.blocks.len());
+                    match self.blocks.last_mut() {
+                        Some(Block::Gallery(items)) if joins => items.push(item),
+                        _ => {
+                            self.blocks.push(Block::Gallery(vec![item]));
+                            self.picture_row = Some(self.blocks.len() - 1);
+                        }
+                    }
+                    return;
+                }
                 self.blocks.push(Block::Figure { image, caption: trim_line(cap.line) });
             }
             return;
@@ -1013,22 +1042,22 @@ impl Builder {
                     self.blocks.push(Block::Quote(line));
                 }
             }
-            "table" if self.layout_tables && e.attr("role") == Some("presentation") => {
+            "table" if (self.layout_tables && e.attr("role") == Some("presentation")) || is_layout_table(e) => {
                 self.flush();
-                fn cells<'a>(e: &'a El, out: &mut Vec<&'a El>) {
-                    for k in &e.kids {
-                        if let Node::El(c) = k {
-                            if matches!(c.name.as_str(), "td" | "th") {
-                                out.push(c);
-                            } else {
-                                cells(c, out);
+                for c in table_cells(e) {
+                    // A cell that's a picture with its name (a wiki's main
+                    // page of characters): side by side with the next.
+                    if let Some(item) = picture_cell(c) {
+                        let joins = self.picture_row.is_some_and(|i| i + 1 == self.blocks.len());
+                        match self.blocks.last_mut() {
+                            Some(Block::Gallery(items)) if joins => items.push(item),
+                            _ => {
+                                self.blocks.push(Block::Gallery(vec![item]));
+                                self.picture_row = Some(self.blocks.len() - 1);
                             }
                         }
+                        continue;
                     }
-                }
-                let mut found = Vec::new();
-                cells(e, &mut found);
-                for c in found {
                     self.blocks(c, ctx);
                     self.flush();
                 }
@@ -1049,6 +1078,153 @@ impl Builder {
             _ => self.inline(e, ctx),
         }
     }
+}
+
+/// Reading a page of another MediaWiki site (a Fandom wiki).
+fn on_fandom() -> bool {
+    SITE.with(|s| !s.borrow().server.is_empty())
+}
+
+/// A table's cells in reading order, nested tables left whole.
+fn table_cells(e: &El) -> Vec<&El> {
+    fn cells<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+        for k in &e.kids {
+            if let Node::El(c) = k {
+                if hidden(c) {
+                    continue;
+                }
+                if matches!(c.name.as_str(), "td" | "th") {
+                    out.push(c);
+                } else if c.name != "table" {
+                    cells(c, out);
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    cells(e, &mut found);
+    found
+}
+
+/// On a Fandom wiki, a table that only lays its contents out (boxes side
+/// by side, a grid of character pictures), read as its cells' contents
+/// rather than drawn: one that isn't marked as a data table and is
+/// see-through, borderless, or holds pictures, boxes or other tables.
+fn is_layout_table(e: &El) -> bool {
+    if !on_fandom() || e.name != "table" {
+        return false;
+    }
+    let class = e.attr("class").unwrap_or_default().to_ascii_lowercase();
+    const DATA: &[&str] = &["wikitable", "article-table", "fandom-table", "sortable", "infobox", "navbox"];
+    if class.split_whitespace().any(|c| DATA.iter().any(|d| c.contains(d))) {
+        return false;
+    }
+    let style = e.attr("style").unwrap_or_default().replace(' ', "").to_ascii_lowercase();
+    if style.contains("transparent") || e.attr("border") == Some("0") || class.contains("container") {
+        return true;
+    }
+    let cells = table_cells(e);
+    // One cell a row (a banner, a tab-like link): nothing to line up.
+    let one_column = {
+        fn rows<'a>(el: &'a El, out: &mut Vec<&'a El>) {
+            for k in &el.kids {
+                if let Node::El(x) = k {
+                    match x.name.as_str() {
+                        "tr" => out.push(x),
+                        "tbody" | "thead" | "tfoot" => rows(x, out),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let mut trs = Vec::new();
+        rows(e, &mut trs);
+        trs.iter().all(|tr| tr.kids.iter().filter(|k| matches!(k, Node::El(c) if matches!(c.name.as_str(), "td" | "th"))).count() <= 1)
+    };
+    one_column || cells.iter().any(|c| c.find(&|x| matches!(x.name.as_str(), "img" | "table" | "figure" | "ul" | "ol") || box_header(x).is_some()).is_some())
+}
+
+/// A layout table's cell that's one picture and its name: a gallery item
+/// with the name as caption, going where the picture links.
+fn picture_cell(c: &El) -> Option<GalleryItem> {
+    if !on_fandom() {
+        return None;
+    }
+    fn imgs<'a>(e: &'a El, out: &mut Vec<&'a El>) {
+        for k in &e.kids {
+            if let Node::El(x) = k {
+                if hidden(x) {
+                    continue;
+                }
+                if x.name == "img" { out.push(x) } else { imgs(x, out) }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    imgs(c, &mut found);
+    if found.len() != 1 || c.find(&|x| matches!(x.name.as_str(), "table" | "ul" | "ol" | "p")).is_some() {
+        return None;
+    }
+    let text = clean(&c.text());
+    if text.chars().count() > 60 {
+        return None;
+    }
+    let mut b = Builder::default();
+    b.inlines(c, Ctx::default());
+    let link = c.find(&|x| x.name == "a" && link_target(x).is_some_and(|l| l.starts_with("wiki:"))).and_then(link_target);
+    // The name, plain (it's a caption under the picture).
+    let caption = trim_line(b.line).into_iter().map(|mut run| { run.link = None; run }).collect();
+    Some(GalleryItem { image: image_of(found[0])?, caption, link })
+}
+
+/// A Fandom box's header: the box's first element, when its class names
+/// a header, heading or title (`portal_header`, `mainpage-box-header`…)
+/// and it holds a short line of text. Main pages are made of such boxes.
+fn box_header(e: &El) -> Option<&El> {
+    if !on_fandom() || !matches!(e.name.as_str(), "div" | "section") || e.has_class("portable-infobox") {
+        return None;
+    }
+    let first = e.kids.iter().find_map(|k| match k {
+        Node::El(c) if !hidden(c) => Some(Some(c)),
+        Node::Text(t) if !t.trim().is_empty() => Some(None),
+        _ => None,
+    })??;
+    let class = first.attr("class").unwrap_or_default().to_ascii_lowercase();
+    let named = class.split_whitespace().any(|c| {
+        !c.starts_with("pi-") && c != "mw-headline" && (c.contains("header") || c.contains("heading") || c.contains("title"))
+    });
+    if !named || !matches!(first.name.as_str(), "div" | "span" | "p" | "h2" | "h3" | "h4" | "center") {
+        return None;
+    }
+    // Something after the header: a box, not a lone title line.
+    let rest = e.kids.iter().skip_while(|k| !matches!(k, Node::El(c) if std::ptr::eq(c, first))).skip(1).any(|k| match k {
+        Node::El(c) => !hidden(c),
+        Node::Text(t) => !t.trim().is_empty(),
+    });
+    let text = clean(&first.text());
+    (rest && !text.is_empty() && text.chars().count() <= 80).then_some(first)
+}
+
+/// Whether an element holds a heading or a box further in, so the article
+/// walk has to go into it to give those their sections. Not into what's
+/// read whole (infoboxes, galleries, tabs, data tables).
+fn holds_heading(e: &El) -> bool {
+    !read_whole(e)
+        && e.kids.iter().any(|k| match k {
+            Node::El(c) if read_whole(c) => false,
+            Node::El(c) => matches!(c.name.as_str(), "h2" | "h3" | "h4" | "h5" | "h6") || box_header(c).is_some() || holds_heading(c),
+            _ => false,
+        })
+}
+
+/// What's read as one block, headings inside it and all.
+fn read_whole(e: &El) -> bool {
+    hidden(e)
+        || e.name == "aside"
+        || e.has_class("portable-infobox")
+        || is_gallery(e)
+        || tabber(e).is_some()
+        || (e.name == "table" && !is_layout_table(e))
 }
 
 /// A gallery: Wikipedia's (`ul.gallery`), Fandom's (`div.wikia-gallery`)
@@ -1534,36 +1710,80 @@ pub fn parse_article(html: &str, title: &str) -> Article {
     let mut current = Section { level: 1, ..Default::default() };
     let mut b = Builder { take_infobox: true, ..Default::default() };
 
-    fn walk(el: &El, article: &mut Article, current: &mut Section, b: &mut Builder) {
+    /// A new section: the one before it is done.
+    fn start(article: &mut Article, current: &mut Section, b: &mut Builder, level: u8, title: String) {
+        b.flush();
+        current.blocks.append(&mut b.blocks);
+        let done = std::mem::take(current);
+        if done.level == 1 || !done.blocks.is_empty() || !done.title.is_empty() {
+            article.sections.push(done);
+        }
+        b.take_infobox = false;
+        *current = Section { level, title, blocks: Vec::new() };
+    }
+    // `depth`: how many Fandom boxes in, for their headings' level.
+    fn walk(el: &El, article: &mut Article, current: &mut Section, b: &mut Builder, depth: u8, outputs: &mut usize) {
         for k in &el.kids {
             match k {
-                Node::El(e) if e.name == "section" => walk(e, article, current, b),
+                Node::El(e) if hidden(e) => {}
+                Node::El(e) if e.name == "section" => walk(e, article, current, b, depth, outputs),
                 Node::El(e) if matches!(e.name.as_str(), "h2" | "h3" | "h4" | "h5" | "h6") => {
-                    // A new section: the one before it is done.
-                    b.flush();
-                    current.blocks.append(&mut b.blocks);
-                    let done = std::mem::take(current);
-                    if done.level == 1 || !done.blocks.is_empty() || !done.title.is_empty() {
-                        article.sections.push(done);
-                    }
-                    b.take_infobox = false;
                     let level = e.name[1..].parse().unwrap_or(2);
-                    let title = e.text().split_whitespace().collect::<Vec<_>>().join(" ");
-                    *current = Section { level, title, blocks: Vec::new() };
+                    start(article, current, b, level, clean(&e.text()));
                 }
-                Node::El(e) if e.name == "div" && e.has_class("mw-heading") => walk(e, article, current, b),
+                Node::El(e) if e.name == "div" && e.has_class("mw-heading") => walk(e, article, current, b, depth, outputs),
                 // The action=parse API's wrapper (other MediaWiki sites).
-                Node::El(e) if e.name == "div" && e.has_class("mw-parser-output") => walk(e, article, current, b),
+                // On a Fandom wiki, more of them after the page's own are
+                // footers the wiki adds to every page (its hub's wikis).
+                Node::El(e) if e.name == "div" && e.has_class("mw-parser-output") => {
+                    *outputs += 1;
+                    if *outputs == 1 || !on_fandom() {
+                        walk(e, article, current, b, depth, outputs);
+                    }
+                }
+                // A Fandom box ("Featured Article", "Did You Know?"): its
+                // header is a section's heading, the rest that section.
+                Node::El(e) if box_header(e).is_some() => {
+                    let header = box_header(e).unwrap();
+                    start(article, current, b, (2 + depth).min(4), clean(&header.text()));
+                    let rest = El {
+                        kids: e.kids.iter().filter(|k| !matches!(k, Node::El(c) if std::ptr::eq(c, header))).cloned().collect(),
+                        ..e.clone()
+                    };
+                    walk(&rest, article, current, b, depth + 1, outputs);
+                }
+                // Columns and layout tables around such boxes or headings.
+                Node::El(e) if on_fandom() && holds_heading(e) => {
+                    if e.name == "table" {
+                        for c in table_cells(e) {
+                            walk(c, article, current, b, depth, outputs);
+                        }
+                    } else {
+                        walk(e, article, current, b, depth, outputs);
+                    }
+                }
                 Node::El(e) => b.block(e, &Ctx::default()),
                 Node::Text(t) => b.push_text(t, &Ctx::default(), false),
             }
         }
     }
-    walk(&body, &mut article, &mut current, &mut b);
+    walk(&body, &mut article, &mut current, &mut b, 0, &mut 0);
     b.flush();
     current.blocks.append(&mut b.blocks);
     article.sections.push(current);
     article.infobox = b.infobox.take();
+    // Boxes left empty (a chat widget that needs the site's scripts),
+    // unless a deeper section follows under them.
+    if on_fandom() {
+        let keep: Vec<bool> = (0..article.sections.len())
+            .map(|i| {
+                let s = &article.sections[i];
+                s.level == 1 || !s.blocks.is_empty() || article.sections.get(i + 1).is_some_and(|n| n.level > s.level)
+            })
+            .collect();
+        let mut it = keep.into_iter();
+        article.sections.retain(|_| it.next().unwrap());
+    }
     article
 }
 

@@ -109,7 +109,7 @@ decides whether and how to submit. Research and debugging help is fine.
 ## Where things stand
 
 Keep this short and current; it is the handoff between sessions (cloud or
-the owner's laptop). Last updated 2026-11-17.
+the owner's laptop). Last updated 2026-11-19.
 
 - Released: 0.1.7 (2026-10-19): in-app updates (`src/updater.rs`) for the
   Windows installer, Windows zip and Mac app, and minisign signatures on
@@ -390,6 +390,26 @@ the owner's laptop). Last updated 2026-11-17.
   `NEBULA_FANDOM_LIVE=<wiki> cargo test live_api -- --nocapture` and
   `NEBULA_FANDOM_TEST=page.json` (a saved action=parse answer) for the
   owner to check real wikis.
+  2026-11-19, against the real Bleach wiki (the "Nebula Reader" cloud
+  environment allows bleach.fandom.com, attackontitan.fandom.com and
+  static.wikia.nocookie.net): main pages are boxes (`portal_header` +
+  body, generally a div whose first child's class names a header/
+  heading/title: `box_header`), read as sections; the walk goes into
+  columns and layout tables holding them (`holds_heading`, never into
+  `read_whole` blocks: infoboxes, galleries, tabs, data tables). On
+  Fandom, tables without a data class (`wikitable`, `article-table`…)
+  that are see-through/borderless/one-column or hold pictures/boxes are
+  layout (`is_layout_table`), their picture-and-name cells a gallery
+  (`picture_cell`); figures linking to an article or site join picture
+  rows (not thumbnails linking to their own file). Hidden: Discord
+  widget, ad slots, hub footers (`animangafooter`, `jumpwikis`, and any
+  `mw-parser-output` after the first); empty box sections dropped; a
+  section of only pictures doesn't float them. Logos: `Site-logo.png`,
+  then `Wiki-wordmark.png` (siteinfo's `Wiki.png` is gone on many wikis,
+  e.g. Attack on Titan); `Wiki::banner` = the theme's background
+  picture. "Your wikis" cards: banner (Cover) with the logo on it, or
+  the accent colour; followed wikis are looked up again once a run
+  (`WikiState::wikis_refreshed`, `WikiMsg::Refreshed`).
 - Library menu (2026-11-03, unreleased): Settings → Library menu replaces
   the Wikipedia section: every source after All with up/down arrows and
   a switch (`Settings::menu()` = `menu_order` normalised, new sources

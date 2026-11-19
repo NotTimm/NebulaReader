@@ -41,6 +41,9 @@ pub struct Wiki {
     pub license_url: String,
     /// The wiki's theme colour, for headings.
     pub accent: Option<[u8; 3]>,
+    /// The picture behind the wiki's pages (its theme's background), for
+    /// its card in the list.
+    pub banner: Option<String>,
 }
 
 impl PartialEq for Wiki {
@@ -194,6 +197,7 @@ fn wiki_from_siteinfo(json: &serde_json::Value) -> Option<Wiki> {
         license_name: r["text"].as_str().unwrap_or_default().to_string(),
         license_url: r["url"].as_str().unwrap_or_default().to_string(),
         accent: None,
+        banner: None,
     })
 }
 
@@ -208,22 +212,59 @@ pub async fn find(input: &str) -> Result<Wiki, String> {
         }
         let Ok(json) = resp.json::<serde_json::Value>().await else { continue };
         if let Some(mut wiki) = wiki_from_siteinfo(&json) {
-            wiki.accent = accent(&wiki).await;
+            let (theme, logo) = cosmic::iced::futures::future::join(theme(&wiki), site_logo(&wiki)).await;
+            (wiki.accent, wiki.banner) = theme;
+            // The logo the site's header shows; siteinfo's is an older one
+            // many wikis no longer have (Attack on Titan's is gone).
+            if logo.is_some() {
+                wiki.logo = logo;
+            }
             return Ok(wiki);
         }
     }
     Err(fl!("fandom-not-found", name = input.trim()))
 }
 
-/// A Fandom wiki's theme colour, from the stylesheet variables its pages
-/// load (`--theme-accent-color`). `None` off Fandom or when it can't be read.
-async fn accent(wiki: &Wiki) -> Option<[u8; 3]> {
+/// A Fandom wiki's theme colour and background picture, from the
+/// stylesheet variables its pages load (`--theme-accent-color`,
+/// `--theme-body-background-image-tablets`). Nothing off Fandom or when
+/// it can't be read.
+async fn theme(wiki: &Wiki) -> (Option<[u8; 3]>, Option<String>) {
     if !wiki.on_fandom() {
-        return None;
+        return (None, None);
     }
     let url = format!("{}/wikia.php?controller=ThemeApi&method=themeVariables", wiki.id());
-    let css = wikipedia::get(&url).await.ok()?.text().await.ok()?;
-    css_color(&css, "--theme-accent-color")
+    let Some(css) = async { wikipedia::get(&url).await.ok()?.text().await.ok() }.await else { return (None, None) };
+    let banner = ["--theme-body-background-image-tablets", "--theme-body-background-image-desktop", "--theme-body-background-image-full"]
+        .iter()
+        .find_map(|name| css_url(&css, name));
+    (css_color(&css, "--theme-accent-color"), banner)
+}
+
+/// The address in `name:url(...)` in a stylesheet.
+fn css_url(css: &str, name: &str) -> Option<String> {
+    let at = css.find(&format!("{name}:"))? + name.len() + 1;
+    let v = css[at..].trim_start().strip_prefix("url(")?;
+    let url = v[..v.find(')')?].trim().trim_matches(|c| c == '"' || c == '\'');
+    url.starts_with("https://").then(|| url.to_string())
+}
+
+/// The logo a Fandom wiki's header shows: its `Site-logo.png`, else its
+/// `Wiki-wordmark.png`.
+async fn site_logo(wiki: &Wiki) -> Option<String> {
+    let url = format!(
+        "{}?action=query&titles=File:Site-logo.png%7CFile:Wiki-wordmark.png&prop=imageinfo&iiprop=url&format=json&formatversion=2",
+        wiki.api()
+    );
+    let json: serde_json::Value = wikipedia::get(&url).await.ok()?.json().await.ok()?;
+    let pages = json["query"]["pages"].as_array()?;
+    ["File:Site-logo.png", "File:Wiki-wordmark.png"].iter().find_map(|title| {
+        pages
+            .iter()
+            .find(|p| p["title"].as_str() == Some(title))
+            .and_then(|p| p["imageinfo"][0]["url"].as_str())
+            .map(str::to_string)
+    })
 }
 
 /// `#rrggbb` (or `#rgb`) after `name:` in a stylesheet.
@@ -440,6 +481,80 @@ mod tests {
 
     fn text(l: &wikipedia::Line) -> String {
         l.iter().map(|r| r.text.as_str()).collect()
+    }
+
+    /// Trimmed from the Bleach Wiki's main page as action=parse gives it:
+    /// boxes with headers, a see-through table of character pictures, a
+    /// chat widget, an ad slot, a box of linked pictures and the hub's
+    /// footer after the page.
+    const BLEACH_MAIN: &str = r##"<div class="mw-content-ltr mw-parser-output"><div class="main-page-tag-lcs"><div class="lcs-container">
+<div id="portal&#95;welcome" class="portal&#95;section"><div class="portal&#95;header"><div class="portal&#95;header&#95;text">Welcome</div></div><div class="portal&#95;body">
+<p>Hello and welcome to the <a href="/wiki/Bleach">Bleach</a> Wiki!</p>
+<table width="100%" border="0" style="border: transparent; background: transparent;"><tbody><tr><td><table width="100%" border="0" style="background: transparent; border:transparent;"><tbody><tr>
+<td><center><div><span typeof="mw:File"><a href="/wiki/Ichigo_Kurosaki" title="Ichigo Kurosaki"><img src="data:image/gif;base64,R0lGOD" data-src="https://static.wikia.nocookie.net/bleach/images/8/88/Ichigo.png/revision/latest/scale-to-width-down/98?cb=1" width="98" height="97" class="lazyload" /></a></span></div><a href="/wiki/Ichigo_Kurosaki"><span>Ichigo Kurosaki</span></a></center></td>
+<td><center><div><span typeof="mw:File"><a href="/wiki/Orihime_Inoue" title="Orihime Inoue"><img src="https://static.wikia.nocookie.net/bleach/images/f/f6/Orihime.png/revision/latest/scale-to-width-down/98?cb=1" width="98" height="97" /></a></span></div><a href="/wiki/Orihime_Inoue"><span>Orihime Inoue</span></a></center></td>
+</tr></tbody></table></td></tr></tbody></table></div></div>
+<div id="portal&#95;fq" class="portal&#95;section"><div class="portal&#95;header"><div class="portal&#95;header&#95;text">Featured Quote</div></div><div class="portal&#95;body">
+</div></div>
+<table class="portal&#95;container" width="100%" border="0"><tbody><tr>
+<td><div class="portal&#95;section"><div class="portal&#95;header"><div class="portal&#95;header&#95;text">Bleach Wiki Discord</div></div><div class="portal&#95;body"><span class="DiscordIntegrator" data-id="1">If you see this, your JavaScript might be disabled.</span></div></div></td>
+<td><div class="portal&#95;section"><div class="portal&#95;header"><div class="portal&#95;header&#95;text">Affiliated Wikis</div></div><div class="portal&#95;body"><div class="scrollbox">
+<figure class="mw-halign-center" typeof="mw:File"><a href="https://onepiece.fandom.com/" title="One Piece Wiki"><img src="https://static.wikia.nocookie.net/bleach/images/1/1a/OP.png/revision/latest/scale-to-width-down/250?cb=1" width="250" height="60" /></a><figcaption>The One Piece Wiki</figcaption></figure>
+<figure class="mw-halign-center" typeof="mw:File"><a href="https://kimetsu-no-yaiba.fandom.com/" title="Demon Slayer"><img src="https://static.wikia.nocookie.net/bleach/images/2/2b/KnY.png/revision/latest/scale-to-width-down/250?cb=1" width="250" height="60" /></a><figcaption>Demon Slayer Wiki</figcaption></figure>
+</div></div></div></td></tr></tbody></table>
+</div></div>
+<div class="main-page-tag-rcs"><div class="fandom-ad-placeholder fandom-ad-wrapper"><div class="fandom-ad-label">Advertisement</div></div><div class="rcs-container">
+<div class="portal&#95;section"><div class="portal&#95;header"><div class="portal&#95;header&#95;text">Did You Know?</div></div><div class="portal&#95;body"><ul><li>That <a href="/wiki/Kisuke_Urahara">Kisuke Urahara</a> founded the institute?</li></ul></div></div>
+</div></div>
+<div class="mw-content-ltr mw-parser-output"><table class="animangafooter"><tr><td>Fall Season Anime Wikis</td></tr></table></div></div>
+<div class="mw-content-ltr mw-parser-output"><div><table class="jumpwikis"><tr><td>Weekly Shōnen Jump Wikis</td></tr></table><p>One Piece • Hunter × Hunter</p></div></div>"##;
+
+    #[test]
+    fn a_main_page_of_boxes_reads_as_sections() {
+        let json = serde_json::json!({"parse": {"title": "Bleach Wiki", "text": BLEACH_MAIN}});
+        let a = parse_response(&wiki(), &json, "Bleach_Wiki");
+        // Each box's header is a section; the empty ones (the quote only
+        // scripts fill, the chat widget) are left out, as are the ad and
+        // the hub's footers after the page.
+        let titles: Vec<(u8, &str)> = a.sections.iter().map(|s| (s.level, s.title.as_str())).collect();
+        assert_eq!(titles, [(1, ""), (2, "Welcome"), (2, "Affiliated Wikis"), (2, "Did You Know?")]);
+        let all = format!("{:?}", a.sections);
+        assert!(!all.contains("JavaScript") && !all.contains("Advertisement") && !all.contains("Jump") && !all.contains("Fall Season"));
+
+        // The see-through table of characters: a row of pictures, each
+        // named, going to its article.
+        let welcome = &a.sections[1].blocks;
+        assert!(matches!(&welcome[0], Block::Para(_)));
+        let Block::Gallery(chars) = &welcome[1] else { panic!("{:?}", welcome[1]) };
+        let names: Vec<String> = chars.iter().map(|g| g.caption.iter().map(|r| r.text.as_str()).collect::<String>().trim().to_string()).collect();
+        assert_eq!(names, ["Ichigo Kurosaki", "Orihime Inoue"]);
+        assert_eq!(chars[0].link.as_deref(), Some("wiki:Ichigo Kurosaki"));
+        assert!(chars[0].image.url.contains("Ichigo.png"));
+
+        // Pictures linking to other sites: a row too, captioned, with
+        // their links.
+        let Block::Gallery(affiliates) = &a.sections[2].blocks[0] else { panic!() };
+        assert_eq!(affiliates.len(), 2);
+        assert_eq!(affiliates[0].link.as_deref(), Some("https://onepiece.fandom.com/"));
+        assert_eq!(affiliates[1].caption.iter().map(|r| r.text.as_str()).collect::<String>(), "Demon Slayer Wiki");
+        assert!(matches!(&a.sections[3].blocks[0], Block::List { .. }));
+    }
+
+    #[test]
+    fn a_thumbnail_linking_to_its_own_file_stays_a_figure() {
+        let html = r#"<div class="mw-parser-output"><p>Text.</p><figure class="thumb tright"><a href="https://static.wikia.nocookie.net/bleach/images/1/16/Ep266.png/revision/latest?cb=1" class="image image-thumbnail"><img src="https://static.wikia.nocookie.net/bleach/images/1/16/Ep266.png/revision/latest/scale-to-width-down/180?cb=1" width="180" height="120" /></a><figcaption>Ichigo</figcaption></figure><p>More.</p></div>"#;
+        let json = serde_json::json!({"parse": {"title": "Ichigo", "text": html}});
+        let a = parse_response(&wiki(), &json, "Ichigo");
+        assert!(a.sections[0].blocks.iter().any(|b| matches!(b, Block::Figure { .. })));
+        assert!(!a.sections[0].blocks.iter().any(|b| matches!(b, Block::Gallery(_))));
+    }
+
+    #[test]
+    fn reads_the_theme_background() {
+        let css = ":root{--theme-accent-color:#8b0000;--theme-body-background-image-full:url(https://static.wikia.nocookie.net/x/images/0/08/Bg/revision/latest?cb=1);--theme-body-background-image-tablets:url(https://static.wikia.nocookie.net/x/images/0/08/Bg/revision/latest/scale-to-width-down/1024?cb=1);--theme-body-background-image:none;}";
+        assert_eq!(css_url(css, "--theme-body-background-image-tablets").as_deref(), Some("https://static.wikia.nocookie.net/x/images/0/08/Bg/revision/latest/scale-to-width-down/1024?cb=1"));
+        assert_eq!(css_url(css, "--theme-body-background-image"), None);
+        assert_eq!(css_color(css, "--theme-accent-color"), Some([0x8b, 0, 0]));
     }
 
     #[test]
