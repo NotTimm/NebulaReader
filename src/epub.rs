@@ -1279,11 +1279,18 @@ fn read_zip_text(zip: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Result
 }
 
 fn read_zip_bytes(zip: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Result<Vec<u8>, String> {
-    let mut entry = zip
+    let entry = zip
         .by_name(path)
         .map_err(|e| format!("entry {path} not found in epub: {e}"))?;
-    let mut data = Vec::with_capacity(entry.size() as usize);
-    entry.read_to_end(&mut data).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let cap = usize::try_from(entry.size()).unwrap_or(4 * 1024 * 1024).min(4 * 1024 * 1024);
+    let mut data = Vec::with_capacity(cap);
+    entry
+        .take(crate::comic::MAX_ENTRY_BYTES + 1)
+        .read_to_end(&mut data)
+        .map_err(|e| format!("failed to read {path}: {e}"))?;
+    if data.len() as u64 > crate::comic::MAX_ENTRY_BYTES {
+        return Err(format!("entry {path} exceeds maximum size"));
+    }
     Ok(data)
 }
 

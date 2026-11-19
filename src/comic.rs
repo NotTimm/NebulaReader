@@ -16,6 +16,11 @@ struct ZipCache {
 }
 
 const ZIPS_KEPT_OPEN: usize = 8;
+/// Maximum uncompressed size of a single archive entry (page or ComicInfo).
+/// Guards against corrupted or malicious archives with forged sizes or zip bombs.
+pub(crate) const MAX_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_PREALLOC_BYTES: usize = 4 * 1024 * 1024;
+const MAX_RAR_JOBS: usize = 32;
 
 fn zip_cache() -> &'static Mutex<ZipCache> {
     static CACHE: OnceLock<Mutex<ZipCache>> = OnceLock::new();
@@ -24,7 +29,7 @@ fn zip_cache() -> &'static Mutex<ZipCache> {
 
 fn open_zip(path: &Path) -> Result<Arc<Mutex<zip::ZipArchive<File>>>, String> {
     {
-        let mut cache = zip_cache().lock().unwrap();
+        let mut cache = zip_cache().lock().unwrap_or_else(|e| e.into_inner());
         cache.uses += 1;
         let uses = cache.uses;
         if let Some((archive, used)) = cache.open.get_mut(path) {
@@ -37,7 +42,7 @@ fn open_zip(path: &Path) -> Result<Arc<Mutex<zip::ZipArchive<File>>>, String> {
     let archive = zip::ZipArchive::new(file)
         .map_err(|e| format!("failed to read zip {}: {e}", path.display()))?;
     let archive = Arc::new(Mutex::new(archive));
-    let mut cache = zip_cache().lock().unwrap();
+    let mut cache = zip_cache().lock().unwrap_or_else(|e| e.into_inner());
     let uses = cache.uses;
     let archive = cache.open.entry(path.to_path_buf()).or_insert((archive, uses)).0.clone();
     while cache.open.len() > ZIPS_KEPT_OPEN {
@@ -50,7 +55,7 @@ fn open_zip(path: &Path) -> Result<Arc<Mutex<zip::ZipArchive<File>>>, String> {
 /// Closes `path` if it's open, before it's deleted or moved (Windows
 /// can't delete an open file).
 pub fn forget_zip(path: &Path) {
-    zip_cache().lock().unwrap().open.remove(path);
+    zip_cache().lock().unwrap_or_else(|e| e.into_inner()).open.remove(path);
 }
 
 /// A single decoded page.
@@ -145,7 +150,7 @@ fn decode_image(name: &str, data: &[u8]) -> Result<Page, String> {
 
 fn list_zip_entries(path: &Path) -> Result<Vec<String>, String> {
     let archive = open_zip(path)?;
-    let mut archive = archive.lock().unwrap();
+    let mut archive = archive.lock().unwrap_or_else(|e| e.into_inner());
 
     let mut names: Vec<String> = (0..archive.len())
         .filter_map(|i| {
@@ -163,14 +168,18 @@ fn list_zip_entries(path: &Path) -> Result<Vec<String>, String> {
 fn decode_zip_entry(archive_path: &Path, entry: &str) -> Result<Page, String> {
     let archive = open_zip(archive_path)?;
     let data = {
-        let mut archive = archive.lock().unwrap();
-        let mut zf = archive
+        let mut archive = archive.lock().unwrap_or_else(|e| e.into_inner());
+        let zf = archive
             .by_name(entry)
             .map_err(|e| format!("entry {entry} not found: {e}"))?;
 
-        let mut data = Vec::with_capacity(zf.size() as usize);
-        std::io::Read::read_to_end(&mut zf, &mut data)
+        let cap = usize::try_from(zf.size()).unwrap_or(MAX_PREALLOC_BYTES).min(MAX_PREALLOC_BYTES);
+        let mut data = Vec::with_capacity(cap);
+        std::io::Read::read_to_end(&mut std::io::Read::take(zf, MAX_ENTRY_BYTES + 1), &mut data)
             .map_err(|e| format!("failed to read entry {entry}: {e}"))?;
+        if data.len() as u64 > MAX_ENTRY_BYTES {
+            return Err(format!("entry {entry} exceeds maximum page size"));
+        }
         data
     };
 
@@ -257,45 +266,69 @@ struct RarState {
     error: Option<String>,
 }
 
-fn rar_jobs() -> &'static Mutex<HashMap<PathBuf, Arc<RarJob>>> {
-    static JOBS: OnceLock<Mutex<HashMap<PathBuf, Arc<RarJob>>>> = OnceLock::new();
-    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+struct RarJobEntry {
+    stamp: (u64, i64),
+    used: u64,
+    job: Arc<RarJob>,
+}
+
+struct RarJobs {
+    map: HashMap<PathBuf, RarJobEntry>,
+    uses: u64,
+}
+
+fn rar_jobs() -> &'static Mutex<RarJobs> {
+    static JOBS: OnceLock<Mutex<RarJobs>> = OnceLock::new();
+    JOBS.get_or_init(|| Mutex::new(RarJobs { map: HashMap::new(), uses: 0 }))
 }
 
 /// The extracted file for one page of a RAR archive, waiting for the
 /// background extraction to reach it if need be.
 fn rar_page(archive: &Path, entry: &str) -> Result<PathBuf, String> {
+    let stamp = rar_source_stamp(archive)?;
     let job = {
-        let mut jobs = rar_jobs().lock().unwrap();
-        match jobs.get(archive) {
-            Some(job) => job.clone(),
-            None => {
-                let job = Arc::new(RarJob::default());
-                if let Ok(entries) = cached_rar_entries(archive) {
-                    // Extracted by an earlier run.
-                    let mut state = job.state.lock().unwrap();
-                    state.files = entries.into_iter().collect();
+        let mut jobs = rar_jobs().lock().unwrap_or_else(|e| e.into_inner());
+        jobs.uses += 1;
+        let uses = jobs.uses;
+        if let Some(existing) = jobs.map.get_mut(archive).filter(|j| j.stamp == stamp) {
+            existing.used = uses;
+            existing.job.clone()
+        } else {
+            let job = Arc::new(RarJob::default());
+            if let Ok(entries) = cached_rar_entries(archive) {
+                // Extracted by an earlier run.
+                let mut state = job.state.lock().unwrap_or_else(|e| e.into_inner());
+                state.files = entries.into_iter().collect();
+                state.done = true;
+            } else {
+                let (archive, job) = (archive.to_path_buf(), job.clone());
+                std::thread::spawn(move || {
+                    let result = extract_rar_into(&archive, &job);
+                    if result.is_err() {
+                        // Try again the next time it's opened.
+                        rar_jobs().lock().unwrap_or_else(|e| e.into_inner()).map.remove(&archive);
+                    }
+                    let mut state = job.state.lock().unwrap_or_else(|e| e.into_inner());
                     state.done = true;
-                } else {
-                    let (archive, job) = (archive.to_path_buf(), job.clone());
-                    std::thread::spawn(move || {
-                        let result = extract_rar_into(&archive, &job);
-                        if result.is_err() {
-                            // Try again the next time it's opened.
-                            rar_jobs().lock().unwrap().remove(&archive);
-                        }
-                        let mut state = job.state.lock().unwrap();
-                        state.done = true;
-                        state.error = result.err();
-                        job.ready.notify_all();
-                    });
-                }
-                jobs.insert(archive.to_path_buf(), job.clone());
-                job
+                    state.error = result.err();
+                    job.ready.notify_all();
+                });
             }
+            jobs.map.insert(archive.to_path_buf(), RarJobEntry { stamp, used: uses, job: job.clone() });
+            while jobs.map.len() > MAX_RAR_JOBS {
+                let oldest = jobs
+                    .map
+                    .iter()
+                    .filter(|(p, e)| *p != archive && e.job.state.lock().unwrap_or_else(|g| g.into_inner()).done)
+                    .min_by_key(|(_, e)| e.used)
+                    .map(|(p, _)| p.clone());
+                let Some(oldest) = oldest else { break };
+                jobs.map.remove(&oldest);
+            }
+            job
         }
     };
-    let mut state = job.state.lock().unwrap();
+    let mut state = job.state.lock().unwrap_or_else(|e| e.into_inner());
     loop {
         if let Some(path) = state.files.get(entry) {
             return Ok(path.clone());
@@ -303,7 +336,7 @@ fn rar_page(archive: &Path, entry: &str) -> Result<PathBuf, String> {
         if state.done {
             return Err(state.error.clone().unwrap_or_else(|| format!("{entry} isn't in {}", archive.display())));
         }
-        state = job.ready.wait(state).unwrap();
+        state = job.ready.wait(state).unwrap_or_else(|e| e.into_inner());
     }
 }
 
@@ -336,6 +369,9 @@ fn extract_rar_into(archive: &Path, job: &RarJob) -> Result<(), String> {
             }
             ArchiveContents::DataChunk(chunk) => {
                 if wanted || is_comic_info {
+                    if (current_data.len() as u64).saturating_add(chunk.len() as u64) > MAX_ENTRY_BYTES {
+                        return Err(format!("entry {current_name} exceeds maximum page size"));
+                    }
                     current_data.extend_from_slice(&chunk);
                 }
             }
@@ -347,7 +383,7 @@ fn extract_rar_into(archive: &Path, job: &RarJob) -> Result<(), String> {
                         .and_then(|()| std::fs::rename(&part, &out_path))
                         .map_err(|e| format!("failed to write {}: {e}", out_path.display()))?;
                     names.push(current_name.clone());
-                    job.state.lock().unwrap().files.insert(current_name.clone(), out_path);
+                    job.state.lock().unwrap_or_else(|e| e.into_inner()).files.insert(current_name.clone(), out_path);
                     job.ready.notify_all();
                 } else if is_comic_info {
                     let _ = std::fs::write(cache_dir.join("ComicInfo.xml"), &current_data);

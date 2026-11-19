@@ -61,9 +61,10 @@ impl RemoteZip {
     /// Reads the archive's table of contents and keeps the image entries,
     /// sorted the same way local archives are.
     pub fn open(source: Box<dyn RangeSource>) -> Result<Arc<Self>, String> {
+        const MAX_CD_BYTES: u64 = 64 * 1024 * 1024;
         let (tail, len) = source.tail(TAIL)?;
-        let tail_start = len - tail.len() as u64;
         let corrupt = || "not a valid zip (central directory not found)".to_string();
+        let tail_start = len.checked_sub(tail.len() as u64).ok_or_else(corrupt)?;
 
         // End of central directory record: the last occurrence of its
         // signature (a trailing comment can follow it).
@@ -79,9 +80,11 @@ impl RemoteZip {
             let loc = eocd.checked_sub(20).filter(|&l| u32_at(&tail, l) == Some(ZIP64_LOCATOR_SIG));
             let rec_offset = loc.and_then(|l| u64_at(&tail, l + 8)).ok_or_else(corrupt)?;
             let rec = if rec_offset >= tail_start {
-                tail[(rec_offset - tail_start) as usize..].to_vec()
+                let rel = usize::try_from(rec_offset - tail_start).map_err(|_| corrupt())?;
+                tail.get(rel..).ok_or_else(corrupt)?.to_vec()
             } else {
-                source.range(rec_offset, rec_offset + 56)?
+                let rec_end = rec_offset.checked_add(56).ok_or_else(corrupt)?;
+                source.range(rec_offset, rec_end)?
             };
             if u32_at(&rec, 0) != Some(ZIP64_EOCD_SIG) {
                 return Err(corrupt());
@@ -90,11 +93,20 @@ impl RemoteZip {
             cd_offset = u64_at(&rec, 48).ok_or_else(corrupt)?;
         }
 
+        if cd_size > MAX_CD_BYTES {
+            return Err(corrupt());
+        }
+        let cd_end = cd_offset.checked_add(cd_size).ok_or_else(corrupt)?;
+        if cd_end > len {
+            return Err(corrupt());
+        }
         let cd = if cd_offset >= tail_start {
-            let from = (cd_offset - tail_start) as usize;
-            tail.get(from..from + cd_size as usize).ok_or_else(corrupt)?.to_vec()
+            let from = usize::try_from(cd_offset - tail_start).map_err(|_| corrupt())?;
+            let size = usize::try_from(cd_size).map_err(|_| corrupt())?;
+            let end = from.checked_add(size).ok_or_else(corrupt)?;
+            tail.get(from..end).ok_or_else(corrupt)?.to_vec()
         } else {
-            source.range(cd_offset, cd_offset + cd_size)?
+            source.range(cd_offset, cd_end)?
         };
 
         let mut entries = parse_central_directory(&cd).ok_or_else(corrupt)?;
@@ -106,31 +118,65 @@ impl RemoteZip {
     /// The (decompressed) bytes of entry `index`.
     pub fn read(&self, index: usize) -> Result<Vec<u8>, String> {
         let e = self.entries.get(index).ok_or_else(|| format!("no page {index}"))?;
+        if e.compressed_size > crate::comic::MAX_ENTRY_BYTES {
+            return Err(format!("{}: page exceeds maximum size", e.name));
+        }
+        let avail = self
+            .len
+            .checked_sub(e.local_header_offset)
+            .ok_or_else(|| format!("{}: offset past end of archive", e.name))?;
         // Fetch the local header and the data in one request; the local
         // header's "extra" field is usually small, so allow some slack.
         const SLACK: u64 = 30 + 512;
-        let want = (SLACK + e.name.len() as u64 + e.compressed_size).min(self.len - e.local_header_offset);
-        let mut buf = self.source.range(e.local_header_offset, e.local_header_offset + want)?;
+        let want = SLACK
+            .saturating_add(e.name.len() as u64)
+            .saturating_add(e.compressed_size)
+            .min(avail);
+        let req_end = e
+            .local_header_offset
+            .checked_add(want)
+            .ok_or_else(|| format!("{}: range overflow", e.name))?;
+        let mut buf = self.source.range(e.local_header_offset, req_end)?;
         if u32_at(&buf, 0) != Some(LOCAL_SIG) {
             return Err(format!("{}: bad local header", e.name));
         }
-        let name_len = u16_at(&buf, 26).unwrap_or(0) as usize;
-        let extra_len = u16_at(&buf, 28).unwrap_or(0) as usize;
-        let data_start = 30 + name_len + extra_len;
-        let data_end = data_start + e.compressed_size as usize;
+        let name_len = u16_at(&buf, 26).ok_or_else(|| format!("{}: truncated local header", e.name))? as usize;
+        let extra_len = u16_at(&buf, 28).ok_or_else(|| format!("{}: truncated local header", e.name))? as usize;
+        let comp_len = usize::try_from(e.compressed_size).map_err(|_| format!("{}: page too large", e.name))?;
+        let data_start = 30usize
+            .checked_add(name_len)
+            .and_then(|v| v.checked_add(extra_len))
+            .ok_or_else(|| format!("{}: bad header lengths", e.name))?;
+        let data_end = data_start
+            .checked_add(comp_len)
+            .ok_or_else(|| format!("{}: bad data length", e.name))?;
         if buf.len() < data_end {
             // Unusually large extra field: fetch the rest.
-            let more = self.source.range(e.local_header_offset + buf.len() as u64, e.local_header_offset + data_end as u64)?;
+            let more_start = e
+                .local_header_offset
+                .checked_add(buf.len() as u64)
+                .ok_or_else(|| format!("{}: range overflow", e.name))?;
+            let more_end = e
+                .local_header_offset
+                .checked_add(data_end as u64)
+                .ok_or_else(|| format!("{}: range overflow", e.name))?;
+            let more = self.source.range(more_start, more_end)?;
             buf.extend_from_slice(&more);
         }
-        let data = &buf[data_start..data_end];
+        let data = buf
+            .get(data_start..data_end)
+            .ok_or_else(|| format!("{}: server sent truncated page data", e.name))?;
         match e.method {
             0 => Ok(data.to_vec()),
             8 => {
                 let mut out = Vec::new();
                 flate2::read::DeflateDecoder::new(data)
+                    .take(crate::comic::MAX_ENTRY_BYTES + 1)
                     .read_to_end(&mut out)
                     .map_err(|err| format!("{}: {err}", e.name))?;
+                if out.len() as u64 > crate::comic::MAX_ENTRY_BYTES {
+                    return Err(format!("{}: page exceeds maximum size", e.name));
+                }
                 Ok(out)
             }
             m => Err(format!("{}: unsupported compression method {m}", e.name)),
@@ -266,5 +312,40 @@ mod tests {
     fn rejects_non_zips() {
         let requests = Arc::new(AtomicUsize::new(0));
         assert!(RemoteZip::open(Box::new(Mem(b"Rar!\x1a\x07\x00 not a zip".to_vec(), requests))).is_err());
+    }
+
+    #[test]
+    fn truncated_range_returns_error_instead_of_panicking() {
+        struct ShortRange(Vec<u8>);
+        impl RangeSource for ShortRange {
+            fn tail(&self, n: u64) -> Result<(Vec<u8>, u64), String> {
+                let start = self.0.len().saturating_sub(n as usize);
+                Ok((self.0[start..].to_vec(), self.0.len() as u64))
+            }
+            fn range(&self, start: u64, end: u64) -> Result<Vec<u8>, String> {
+                // Return only the local header, dropping the page bytes.
+                let s = start as usize;
+                let e = (s + 40).min(end as usize).min(self.0.len());
+                Ok(self.0[s..e].to_vec())
+            }
+        }
+        let zip = build_zip(&[("p1.jpg", vec![1u8; 2000], zip::CompressionMethod::Stored)]);
+        let z = RemoteZip::open(Box::new(ShortRange(zip))).unwrap();
+        assert!(z.read(0).is_err());
+    }
+
+    #[test]
+    fn bad_tail_length_returns_error_instead_of_panicking() {
+        struct BadTail;
+        impl RangeSource for BadTail {
+            fn tail(&self, _n: u64) -> Result<(Vec<u8>, u64), String> {
+                // Claims total file length is smaller than the tail returned.
+                Ok((vec![0u8; 64], 10))
+            }
+            fn range(&self, _start: u64, _end: u64) -> Result<Vec<u8>, String> {
+                Ok(Vec::new())
+            }
+        }
+        assert!(RemoteZip::open(Box::new(BadTail)).is_err());
     }
 }

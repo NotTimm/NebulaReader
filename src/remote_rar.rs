@@ -107,12 +107,27 @@ impl RemoteRar {
     /// The unpacked bytes of entry `index`.
     pub fn read(&self, index: usize) -> Result<Vec<u8>, String> {
         let e = self.index.entries.get(index).ok_or_else(|| format!("no page {index}"))?;
-        let bytes = self.source.range(e.header_offset, e.header_offset + e.header_len + e.data_size)?;
-        if (bytes.len() as u64) < e.header_len + e.data_size {
+        if e.data_size > crate::comic::MAX_ENTRY_BYTES {
+            return Err(format!("{}: page exceeds maximum size", e.name));
+        }
+        let span = e
+            .header_len
+            .checked_add(e.data_size)
+            .ok_or_else(|| format!("{}: entry size overflow", e.name))?;
+        let end = e
+            .header_offset
+            .checked_add(span)
+            .ok_or_else(|| format!("{}: entry offset overflow", e.name))?;
+        let bytes = self.source.range(e.header_offset, end)?;
+        if (bytes.len() as u64) < span {
             return Err(format!("{}: the server sent less than asked", e.name));
         }
         if e.stored {
-            return Ok(bytes[e.header_len as usize..].to_vec());
+            let start = usize::try_from(e.header_len).map_err(|_| format!("{}: bad header", e.name))?;
+            return bytes
+                .get(start..)
+                .map(|s| s.to_vec())
+                .ok_or_else(|| format!("{}: truncated stored entry", e.name));
         }
         let archive = one_file_archive(&self.index, &bytes);
         unpack_first(archive).map_err(|err| format!("{}: {err}", e.name))
@@ -144,7 +159,12 @@ fn unpack_first(archive: Vec<u8>) -> Result<Vec<u8>, String> {
     for content in iter {
         match content {
             ArchiveContents::StartOfEntry(..) => {}
-            ArchiveContents::DataChunk(chunk) => data.extend_from_slice(&chunk),
+            ArchiveContents::DataChunk(chunk) => {
+                if (data.len() as u64).saturating_add(chunk.len() as u64) > crate::comic::MAX_ENTRY_BYTES {
+                    return Err("page exceeds maximum size".into());
+                }
+                data.extend_from_slice(&chunk);
+            }
             ArchiveContents::EndOfEntry => return Ok(data),
             ArchiveContents::Err(e) => return Err(e.to_string()),
         }
