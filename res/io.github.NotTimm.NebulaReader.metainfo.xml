@@ -69,6 +69,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.2-beta.3" date="2026-11-19" type="development">
+      <description>
+        <ul>
+          <li>Fandom: a wiki's main page now reads like the site, box by box, with its rows of pictures</li>
+          <li>Fandom: each wiki you follow gets a card with its own banner and logo</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2-beta.2" date="2026-11-17" type="development">
       <description>
         <ul>

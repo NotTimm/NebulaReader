@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.2~beta.2
+Version:        0.2.2~beta.3
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,11 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2~beta.3-1
+- Fandom: main pages read like the site (boxes as sections, picture rows)
+- Fandom: wiki cards with the wiki's own banner and logo
+- libcosmic updated
+
 * Tue Nov 17 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2~beta.2-1
 - Fit to Width no longer jumps back to the top of the page while scrolling
 - Fit to Width off and on again returns to the same place on the page

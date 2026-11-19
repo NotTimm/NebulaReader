@@ -179,6 +179,10 @@ the owner's laptop). Last updated 2026-11-19.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Beta 0.2.2-beta.3 (2026-11-19): the Fandom main page and card work
+  below (Bleach, Attack on Titan), libcosmic synced (fork ,
+  upstream through be7937d: Wayland theme-update fixes, icons follow
+  icon theme changes; iced unchanged).
 - Beta 0.2.2-beta.2 (2026-11-17): the Fit to Width fixes below and
   libcosmic synced (fork `80dae52`, upstream through 12ae9ef: zbus 6,
   iced 115018bf with a large-window crash fix, theme/cosmic-launch
