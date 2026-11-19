@@ -25,12 +25,63 @@ to your Jellyfin server, or add an OPDS server like Komga or Kavita, and
 it builds a library of series with covers, progress and a **Continue
 Reading** shelf. Messy file names are cleaned up and matched online for
 proper titles and descriptions. Browse public collections like Project
-Gutenberg, and, if you like, read Wikipedia and your favourite Fandom
-wikis in the same window. Then it
-gets out of the way so you can read.
+Gutenberg, and then Nebula gets out of the way so you can read. (Optional
+native views for Wikipedia and Fandom wikis are built in too, off by default.)
 
 > Nebula Reader was called **Cosmic Comic** up to 0.1.0-beta.4. Upgrading
 > keeps your library, progress and settings: the first start moves them over.
+
+## Download
+
+Grab a package from the
+[latest release](https://github.com/NotTimm/NebulaReader/releases/latest):
+
+| Your system | Download | Install |
+|-------------|----------|---------|
+| **Fedora** | `nebula-reader-<version>-1.fc<NN>.x86_64.rpm` | `sudo dnf install ./nebula-reader-*.x86_64.rpm` (or via COPR `timbo-slice/nebula-reader`) |
+| **Ubuntu, Pop!_OS, Debian** (24.04+) | `nebula-reader_<version>_amd64.deb` | `sudo apt install ./nebula-reader_*_amd64.deb` |
+| **Any Linux, Flatpak** | `NebulaReader-<version>-x86_64.flatpak` | `flatpak install --user ./NebulaReader-*.flatpak` |
+| **Any Linux, AppImage** | `NebulaReader-<version>-x86_64.AppImage` | `chmod +x NebulaReader-*.AppImage`, then run it |
+| **Windows 10/11** | `NebulaReader-<version>-windows-x64-setup.exe` | Run it. It installs for your user, no admin needed |
+| **Windows, portable** | `NebulaReader-<version>-windows-x64.zip` | Unzip anywhere, run `nebula-reader.exe` |
+| **macOS** (Apple Silicon) | `NebulaReader-<version>-macos-arm64.dmg` | Open it, drag Nebula Reader into Applications |
+
+Coming soon: `winget install NotTimm.NebulaReader`, Homebrew Cask, and Flathub
+(which is also how apps reach the COSMIC Store).
+
+<details>
+<summary>Notes on installing, upgrading and unsigned builds</summary>
+
+- Use `dnf`/`apt` as above rather than `rpm -i`/`dpkg -i`, so the
+  libraries it needs (`libarchive`, `libxkbcommon`, `openssl`, ...) come
+  along. The `.rpm` and `.deb` also replace an old `cosmic-comic` package.
+- **Updates:** Nebula tells you when a new version is out (Settings →
+  About has a switch for the check). From 0.1.7 on, on Windows (installer
+  or zip) and on the Mac, **Update now** downloads it, checks it's signed
+  by the Nebula release key, and restarts into the new version. On the
+  Mac that needs the app in Applications, not opened from the disk image.
+  **Beta versions** (Settings → About, on those same installs) has
+  Nebula follow the betas too; a beta keeps its own copy of your library
+  and settings, and turning it off offers to switch back.
+  Other installs update the usual way for them (see below). The
+  `.app.tar.gz` on each release is what the Mac app downloads to update
+  itself; you don't need it. Every release file also has a `.minisig`
+  signature you can check yourself with
+  `minisign -Vm <file> -P RWQxSx3YOrrlrxqPlxFEY6QXstC2sjcXdOCKJNHI1xtIKT1o8nN41ZIV`.
+- To upgrade a Linux package, install the newer one the same way. To remove,
+  `sudo dnf remove nebula-reader` or `sudo apt remove nebula-reader`. Your
+  library and settings are kept either way.
+- Windows SmartScreen may warn about an unrecognised app because the
+  installer isn't code-signed: **More info → Run anyway**.
+- The Mac app isn't notarized, so the first launch is blocked. Open it
+  once, then **System Settings → Privacy & Security → Open Anyway** (on
+  macOS 14 and older, right-click the app and choose **Open**). Or run
+  `xattr -dr com.apple.quarantine "/Applications/Nebula Reader.app"`.
+- Beta versions such as `0.1.0-beta.1` are packaged as `0.1.0~beta.1`, so
+  they sort before the final release and upgrade cleanly.
+- Another distro? Build from source with `./install.sh` (below).
+
+</details>
 
 ## Highlights
 
@@ -102,8 +153,9 @@ gets out of the way so you can read.
 
 - CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.
 - Single or two pages at a time (a two-page spread shows on its own),
-  theater mode (a black backdrop, on by default), and Fit Page, which
-  sizes the window to the page.
+  **right-to-left (manga) mode** (`R`, flipping arrow navigation and
+  two-page spread order), theater mode (a black backdrop, on by default),
+  and Fit Page, which sizes the window to the page.
 - Full screen hides everything but the page, with the time and battery
   in a corner like an e-reader; move the pointer to the top to bring the
   header bar back.
@@ -163,31 +215,15 @@ with Kavita or others: please
 [report](https://github.com/NotTimm/NebulaReader/issues/new/choose) how
 it goes with yours. [How it works](#opds-catalogs)
 
-### 🌐 Wikipedia, if you want it
+### 🌐 Optional extras: Wikipedia & Fandom wikis
 
-Turn it on in Settings and Wikipedia joins the library's source menu,
-drawn by Nebula rather than a web page: the **main page as the site shows
-it today** (featured article, Did you know, In the news, On this day, the
-featured picture), and articles laid out like the site, with the
-contents beside them, the infobox, pictures beside the text and tables
-that line up. **30 languages**, text you can **select and copy**, smooth
-scrolling, and your place kept when you look at a picture or go back.
-[More](#wikipedia-optional)
-
-### 📚 Fandom wikis you follow
-
-Follow the Fandom wikis you like (Resident Evil, Attack on Titan, Star
-Wars…) by name and read them the same way: each wiki's main page,
-search, random pages and articles with their infoboxes, tabs and
-galleries, in the wiki's own colour. It has its own place in the menu,
-under Wikipedia. [More](#fandom-wikis-optional)
-
-### 🧭 Your menu, your order
-
-Settings → **Library menu** decides which sections the menu at the top
-left shows and in what order: Local, Jellyfin, OPDS, Wikipedia, Fandom,
-or any mix of them. Wikipedia and Fandom stay off until you turn them on
-there.
+Turn them on in **Settings → Library menu** to read **Wikipedia** (30
+languages, live daily main page) and any **Fandom** / MediaWiki wikis you
+follow in the same native window — drawn by Nebula with infoboxes, tabs,
+galleries, selectable text, smooth scrolling and a full-window picture
+viewer. Both stay off until you enable them, and you can reorder or hide
+any section in the library menu. [Wikipedia](#wikipedia-optional) ·
+[Fandom](#fandom-wikis-optional)
 
 ### 🎨 At home on your desktop
 
@@ -242,69 +278,17 @@ language. **Settings → Appearance → Language** picks another one, and the
 whole window switches straight away. More languages are a text file away:
 see [how to translate Nebula](i18n/README.md).
 
-## Download
-
-Grab a package from the
-[latest release](https://github.com/NotTimm/NebulaReader/releases/latest):
-
-| Your system | Download | Install |
-|-------------|----------|---------|
-| **Fedora** | `nebula-reader-<version>-1.fc<NN>.x86_64.rpm` | `sudo dnf install ./nebula-reader-*.x86_64.rpm` |
-| **Ubuntu, Pop!_OS, Debian** (24.04+) | `nebula-reader_<version>_amd64.deb` | `sudo apt install ./nebula-reader_*_amd64.deb` |
-| **Any Linux, Flatpak** | `NebulaReader-<version>-x86_64.flatpak` | `flatpak install --user ./NebulaReader-*.flatpak` |
-| **Any Linux, AppImage** | `NebulaReader-<version>-x86_64.AppImage` | `chmod +x NebulaReader-*.AppImage`, then run it |
-| **Windows 10/11** | `NebulaReader-<version>-windows-x64-setup.exe` | Run it. It installs for your user, no admin needed |
-| **Windows, portable** | `NebulaReader-<version>-windows-x64.zip` | Unzip anywhere, run `nebula-reader.exe` |
-| **macOS** (Apple Silicon) | `NebulaReader-<version>-macos-arm64.dmg` | Open it, drag Nebula Reader into Applications |
-
-Coming soon: `winget install NotTimm.NebulaReader`, and Flathub (which is
-also how apps reach the COSMIC Store).
-
-<details>
-<summary>Notes on installing, upgrading and unsigned builds</summary>
-
-- Use `dnf`/`apt` as above rather than `rpm -i`/`dpkg -i`, so the
-  libraries it needs (`libarchive`, `libxkbcommon`, `openssl`, ...) come
-  along. The `.rpm` and `.deb` also replace an old `cosmic-comic` package.
-- **Updates:** Nebula tells you when a new version is out (Settings →
-  About has a switch for the check). From 0.1.7 on, on Windows (installer
-  or zip) and on the Mac, **Update now** downloads it, checks it's signed
-  by the Nebula release key, and restarts into the new version. On the
-  Mac that needs the app in Applications, not opened from the disk image.
-  **Beta versions** (Settings → About, on those same installs) has
-  Nebula follow the betas too; a beta keeps its own copy of your library
-  and settings, and turning it off offers to switch back.
-  Other installs update the usual way for them (see below). The
-  `.app.tar.gz` on each release is what the Mac app downloads to update
-  itself; you don't need it. Every release file also has a `.minisig`
-  signature you can check yourself with
-  `minisign -Vm <file> -P RWQxSx3YOrrlrxqPlxFEY6QXstC2sjcXdOCKJNHI1xtIKT1o8nN41ZIV`.
-- To upgrade a Linux package, install the newer one the same way. To remove,
-  `sudo dnf remove nebula-reader` or `sudo apt remove nebula-reader`. Your
-  library and settings are kept either way.
-- Windows SmartScreen may warn about an unrecognised app because the
-  installer isn't code-signed: **More info → Run anyway**.
-- The Mac app isn't notarized, so the first launch is blocked. Open it
-  once, then **System Settings → Privacy & Security → Open Anyway** (on
-  macOS 14 and older, right-click the app and choose **Open**). Or run
-  `xattr -dr com.apple.quarantine "/Applications/Nebula Reader.app"`.
-- Beta versions such as `0.1.0-beta.1` are packaged as `0.1.0~beta.1`, so
-  they sort before the final release and upgrade cleanly.
-- Another distro? Build from source with `./install.sh` (below).
-
-</details>
-
 ## Keyboard and mouse
 
 | | Comics | Books |
 |---|---|---|
-| Next / previous page | `→` `←` `Page Down` `Page Up` | `→` `←` `Page Down` `Page Up` `Space` (`Shift Space` back), mouse wheel, or click the page edge |
+| Next / previous page | `→` `←` (flipped in RTL mode), `Page Down` `Page Up` | `→` `←` `Page Down` `Page Up` `Space` (`Shift Space` back), mouse wheel, or click the page edge |
 | Fit to Width | `Space` (scroll down the page; `Space` again for the whole page) | |
 | Scroll down / up | `↓` `↑` (held) while zoomed or fitted to width | `↓` `↑` a line |
 | Contents / chapters | `C` | `C` |
 | Full screen | `F` (`Esc` to leave) | `F` (`Esc` to leave) |
 | Reading settings | `S` | `A`; text size `Ctrl +` / `Ctrl −`, `Ctrl 0` to reset (`Cmd` on a Mac) |
-| Dual page / zoom / theater | `L` / `M` / `T`; `Ctrl 0` resets the zoom | |
+| Dual page / RTL / zoom / theater | `L` / `R` / `M` / `T`; `Ctrl 0` resets the zoom | |
 | Info panel / copy the page | `I` / `P` | |
 | Back | `Esc` leaves full screen, then Fit to Width, zoom or the chapter list, then goes back to the library | same |
 
