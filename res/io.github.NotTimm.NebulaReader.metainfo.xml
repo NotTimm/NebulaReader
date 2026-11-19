@@ -69,6 +69,13 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.2-beta.4" date="2026-11-19" type="development">
+      <description>
+        <ul>
+          <li>Windows 11: the window can show Mica or Acrylic behind it, like Windows' own apps</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2-beta.3" date="2026-11-19" type="development">
       <description>
         <ul>

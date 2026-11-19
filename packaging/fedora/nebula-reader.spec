@@ -8,7 +8,7 @@
 %bcond check 1
 
 Name:           nebula-reader
-Version:        0.2.2~beta.3
+Version:        0.2.2~beta.4
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -121,6 +121,9 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2~beta.4-1
+- Windows 11: Mica or Acrylic behind the window (no change on Linux)
+
 * Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2~beta.3-1
 - Fandom: main pages read like the site (boxes as sections, picture rows)
 - Fandom: wiki cards with the wiki's own banner and logo

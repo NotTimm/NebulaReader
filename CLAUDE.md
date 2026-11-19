@@ -179,8 +179,7 @@ the owner's laptop). Last updated 2026-11-19.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
-- Windows backdrop (2026-11-19, unreleased; owner asked for it in the
-  next beta; **untried on Windows**, type-checked only): Mica (default),
+- Windows backdrop (2026-11-19, in 0.2.2-beta.4; **untried on Windows**, type-checked only): Mica (default),
   Acrylic or Solid behind the window, Windows 11 22H2+ (build 22621)
   with Transparency effects on, Direct3D 12 only. Everything is
   `cfg(windows)`; COSMIC and other Linux desktops are untouched (owner:
