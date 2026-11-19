@@ -398,12 +398,19 @@ pub fn apply(staged: &Staged) -> Result<(), String> {
     match plan.kind {
         Kind::WindowsInstaller => {
             let log = staged.path.with_extension("log");
-            run_after_exit_windows(&installer_script(&staged.path, &log, &plan.exe))
+            run_after_exit_windows(
+                INSTALLER_CMD,
+                &[
+                    ("NEBULA_UPD_SETUP", staged.path.as_os_str()),
+                    ("NEBULA_UPD_LOG", log.as_os_str()),
+                    ("NEBULA_UPD_EXE", plan.exe.as_os_str()),
+                ],
+            )
         }
         Kind::WindowsPortable => {
             swap_in(&staged.path, &plan.app)?;
             let _ = fs::remove_dir_all(&staged.path);
-            run_after_exit_windows(&relaunch_script(&plan.exe))
+            run_after_exit_windows(RELAUNCH_CMD, &[("NEBULA_UPD_EXE", plan.exe.as_os_str())])
                 .map_err(|e| fl!("update-restart-failed", error = e.to_string()))
         }
         Kind::MacApp => {
@@ -417,22 +424,12 @@ pub fn apply(staged: &Staged) -> Result<(), String> {
     }
 }
 
-/// The cmd line that waits a moment for this copy to quit, installs over
-/// it (the installer would close it if it hadn't), then starts the new one.
-fn installer_script(setup: &Path, log: &Path, exe: &Path) -> String {
-    format!(
-        "ping -n 3 127.0.0.1 >nul & \"{}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS \
-         /NORESTARTAPPLICATIONS \"/LOG={}\" & start \"\" \"{}\"",
-        setup.display(),
-        log.display(),
-        exe.display()
-    )
-}
-
-/// The cmd line that starts the swapped-in exe once this copy has quit.
-fn relaunch_script(exe: &Path) -> String {
-    format!("ping -n 2 127.0.0.1 >nul & start \"\" \"{}\"", exe.display())
-}
+/// Static cmd lines run with `/V:ON` (delayed expansion): filesystem paths are
+/// passed through environment variables (`!NEBULA_UPD_*!`) rather than
+/// interpolated into the command string, so spaces, `&`, `%`, `^`, `!`, and
+/// parentheses in user or portable folder names never break updates.
+const INSTALLER_CMD: &str = "ping -n 3 127.0.0.1 >nul & \"!NEBULA_UPD_SETUP!\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS \"/LOG=!NEBULA_UPD_LOG!\" & start \"\" \"!NEBULA_UPD_EXE!\"";
+const RELAUNCH_CMD: &str = "ping -n 2 127.0.0.1 >nul & start \"\" \"!NEBULA_UPD_EXE!\"";
 
 /// A shell that waits for process `pid` to quit (`open` would otherwise just
 /// bring it to the front), clears `staging` away and opens `app`.
@@ -463,21 +460,27 @@ fn swap_bundle(new: &Path, app: &Path, old: &Path) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn run_after_exit_windows(script: &str) -> Result<(), String> {
+fn run_after_exit_windows(script: &str, vars: &[(&str, &std::ffi::OsStr)]) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // cmd strips the outer quotes of what follows /C and keeps the rest.
-    std::process::Command::new("cmd")
+    // `/V:ON` enables `!VAR!` delayed expansion so env-var values aren't
+    // re-parsed by cmd for `&`, `%`, `^`, etc. cmd strips the outer quotes of
+    // what follows `/C` and keeps the rest.
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.raw_arg("/V:ON")
         .raw_arg("/C")
         .raw_arg(format!("\"{script}\""))
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
+        .creation_flags(CREATE_NO_WINDOW);
+    for (k, v) in vars {
+        cmd.env(k, v);
+    }
+    cmd.spawn()
         .map(|_| ())
         .map_err(|e| format!("couldn't start the installer: {e}"))
 }
 
 #[cfg(not(windows))]
-fn run_after_exit_windows(_script: &str) -> Result<(), String> {
+fn run_after_exit_windows(_script: &str, _vars: &[(&str, &std::ffi::OsStr)]) -> Result<(), String> {
     Err("not on Windows".into())
 }
 
@@ -710,7 +713,7 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
     #[cfg(windows)]
     #[test]
     fn windows_installer_script_runs() {
-        let dir = temp_dir("win script").join("Program Files (x86)");
+        let dir = temp_dir("win script").join("Program Files (x86) & Co");
         fs::create_dir_all(&dir).unwrap();
         let (args, started) = (dir.join("setup args.txt"), dir.join("app started.txt"));
         let setup = dir.join("fake setup.bat");
@@ -718,7 +721,15 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
         fs::write(&setup, format!("@echo %* > \"{}\"\r\n", args.display())).unwrap();
         fs::write(&app, format!("@echo ok > \"{}\"\r\n@exit\r\n", started.display())).unwrap();
         let log = dir.join("setup.log");
-        run_after_exit_windows(&installer_script(&setup, &log, &app)).unwrap();
+        run_after_exit_windows(
+            INSTALLER_CMD,
+            &[
+                ("NEBULA_UPD_SETUP", setup.as_os_str()),
+                ("NEBULA_UPD_LOG", log.as_os_str()),
+                ("NEBULA_UPD_EXE", app.as_os_str()),
+            ],
+        )
+        .unwrap();
         assert!(wait_for(&started, 30), "the app wasn't started");
         let args = fs::read_to_string(&args).unwrap();
         assert!(args.contains("/VERYSILENT") && args.contains("/NORESTARTAPPLICATIONS"), "{args}");
@@ -728,12 +739,12 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
     #[cfg(windows)]
     #[test]
     fn windows_relaunch_script_runs() {
-        let dir = temp_dir("win relaunch").join("Nebula Reader");
+        let dir = temp_dir("win relaunch").join("Nebula & Reader");
         fs::create_dir_all(&dir).unwrap();
         let started = dir.join("started.txt");
         let app = dir.join("nebula app.bat");
         fs::write(&app, format!("@echo ok > \"{}\"\r\n@exit\r\n", started.display())).unwrap();
-        run_after_exit_windows(&relaunch_script(&app)).unwrap();
+        run_after_exit_windows(RELAUNCH_CMD, &[("NEBULA_UPD_EXE", app.as_os_str())]).unwrap();
         assert!(wait_for(&started, 30), "the app wasn't started");
     }
 
