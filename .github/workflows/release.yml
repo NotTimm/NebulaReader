@@ -289,6 +289,21 @@ jobs:
           name: cargo-sources
           path: packaging
 
+      # The image ships Flathub's runtimes in a lower layer of Docker's
+      # overlay filesystem. When Flathub has published an update since the
+      # image was built, flatpak-builder updates them first, and renaming
+      # a directory that lives in a lower layer can fail with EXDEV
+      # ("Invalid cross-device link") on some runners. Copying the
+      # installation once puts it all in the container's own layer.
+      - name: Make the Flatpak installation writable in place
+        run: |
+          flatpak --installations || true
+          for dir in /var/lib/flatpak "$HOME/.local/share/flatpak" /root/.local/share/flatpak; do
+            [ -d "$dir" ] || continue
+            echo "copying $dir"
+            cp -a "$dir" "$dir.copy" && rm -rf "$dir" && mv "$dir.copy" "$dir"
+          done
+
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
         with:
           bundle: NebulaReader-${{ needs.version.outputs.version }}-x86_64.flatpak
