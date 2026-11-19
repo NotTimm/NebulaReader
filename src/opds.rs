@@ -361,15 +361,9 @@ impl Accounts {
 
     pub fn save(&self) {
         let path = accounts_path();
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
         if let Ok(json) = serde_json::to_vec_pretty(self) {
-            let _ = std::fs::write(&path, json);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            if let Err(e) = crate::platform::write_atomic(&path, &json, true) {
+                log::warn!("opds: saving accounts: {e}");
             }
         }
     }

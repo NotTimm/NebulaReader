@@ -705,6 +705,9 @@ impl App {
             }
             BookMsg::Link(target) => {
                 if target.contains("://") || target.starts_with("mailto:") {
+                    if !crate::platform::is_safe_web_url(&target) {
+                        return Task::none();
+                    }
                     // Out of the book: ask first, unless this book's links
                     // are always opened.
                     let key = self.open_path.as_ref().map(|p| p.to_string_lossy().into_owned());

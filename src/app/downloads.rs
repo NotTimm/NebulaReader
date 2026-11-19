@@ -289,7 +289,7 @@ impl App {
                 }
             }
             DlMsg::OpenFolder => match self.download_root() {
-                Ok(dir) => crate::platform::open_url(&dir.to_string_lossy()),
+                Ok(dir) => crate::platform::open_path(&dir),
                 Err(e) => self.dl.error = Some(e),
             },
             DlMsg::RemoveAll => {

@@ -362,13 +362,10 @@ impl Settings {
 
     pub fn save(&self) {
         let path = config_path();
-        if let Some(parent) = path.parent() {
-            if std::fs::create_dir_all(parent).is_err() {
-                return;
-            }
-        }
         if let Ok(json) = serde_json::to_vec_pretty(self) {
-            let _ = std::fs::write(path, json);
+            if let Err(e) = crate::platform::write_atomic(&path, &json, false) {
+                log::warn!("settings: saving: {e}");
+            }
         }
     }
 }

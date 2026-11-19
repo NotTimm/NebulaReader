@@ -144,6 +144,8 @@ windows-sys = { version = "0.61", features = [
     # Window backdrop: Mica / Acrylic (src/platform/backdrop.rs).
     "Win32_Graphics_Dwm",
     "Win32_UI_Controls",
+    # Opening URLs and folders via ShellExecuteW without cmd.exe (src/platform/mod.rs).
+    "Win32_UI_Shell",
 ] }
 
 [profile.release]

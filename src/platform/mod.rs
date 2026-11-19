@@ -263,25 +263,126 @@ pub fn gpu_defaults() {
     }
 }
 
-pub fn open_url(url: &str) {
-    #[cfg(windows)]
-    let result = {
-        use std::os::windows::process::CommandExt;
-        // `start` is a cmd built-in; the empty "" is its window title.
-        // CREATE_NO_WINDOW stops a console from flashing up.
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .creation_flags(0x0800_0000)
-            .spawn()
-    };
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(url).spawn();
-    #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(url).spawn();
-
-    if let Err(e) = result {
-        log::warn!("could not open {url}: {e}");
+/// Whether `url` uses an allowed external scheme (`http`, `https`, or
+/// `mailto`) and contains no control characters.
+pub fn is_safe_web_url(url: &str) -> bool {
+    let url = url.trim();
+    if url.is_empty() || url.chars().any(|c| c.is_control()) {
+        return false;
     }
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")
+}
+
+/// Opens an external web or mailto URL in the default browser / mail client.
+/// Refuses non-web schemes so untrusted content (EPUBs, OPDS feeds, wikis)
+/// cannot launch local files or arbitrary protocol handlers.
+pub fn open_url(url: &str) {
+    let url = url.trim();
+    if !is_safe_web_url(url) {
+        log::warn!("refused to open unsupported url: {url}");
+        return;
+    }
+    open_target(std::ffi::OsStr::new(url));
+}
+
+/// Opens a local file or folder in the system's file manager / default handler.
+pub fn open_path(path: &std::path::Path) {
+    open_target(path.as_os_str());
+}
+
+fn open_target(target: &std::ffi::OsStr) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let verb: Vec<u16> = "open\0".encode_utf16().collect();
+        let wide: Vec<u16> = target.encode_wide().chain(std::iter::once(0)).collect();
+        // ShellExecuteW bypasses cmd.exe entirely, so characters like `&`, `%`,
+        // and `^` in query strings or paths are passed verbatim.
+        // SAFETY: `verb` and `wide` are valid NUL-terminated UTF-16 strings.
+        let res = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                wide.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if (res as isize) <= 32 {
+            log::warn!("could not open {} (ShellExecuteW={})", target.to_string_lossy(), res as isize);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = std::process::Command::new("open").arg(target).spawn() {
+            log::warn!("could not open {}: {e}", target.to_string_lossy());
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(e) = std::process::Command::new("xdg-open").arg(target).spawn() {
+            log::warn!("could not open {}: {e}", target.to_string_lossy());
+        }
+    }
+}
+
+/// Writes `data` to `path` atomically (temporary file in the same folder,
+/// synced, then renamed into place). When `secret` is true on Unix, the file
+/// is created with mode `0600` before any bytes are written so credentials
+/// are never briefly world-readable.
+pub fn write_atomic(path: &std::path::Path, data: &[u8], secret: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let pid = std::process::id();
+
+    let (tmp_path, mut file) = loop {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(".{stem}.tmp-{pid}-{n}"));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        if secret {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        match opts.open(&candidate) {
+            Ok(f) => break (candidate, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    };
+
+    let write_res = (|| -> std::io::Result<()> {
+        file.write_all(data)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    drop(file);
+    if let Err(e) = write_res {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    if secret {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600));
+    }
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -313,5 +414,34 @@ mod tests {
         assert_eq!(Desktop::from_xdg_current_desktop("ubuntu:GNOME"), Desktop::Gnome);
         assert_eq!(Desktop::from_xdg_current_desktop("Hyprland"), Desktop::Other);
         assert_eq!(Desktop::from_xdg_current_desktop(""), Desktop::Other);
+    }
+
+    #[test]
+    fn validates_external_web_urls() {
+        assert!(is_safe_web_url("https://example.com/a?x=1&y=2"));
+        assert!(is_safe_web_url("http://192.168.1.5:8096/web/#/quickconnect"));
+        assert!(is_safe_web_url("MAILTO:reader@example.com"));
+        assert!(!is_safe_web_url(""));
+        assert!(!is_safe_web_url("file:///etc/passwd"));
+        assert!(!is_safe_web_url("javascript:alert(1)"));
+        assert!(!is_safe_web_url("cmd:///c/calc"));
+        assert!(!is_safe_web_url("https://example.com/\ncalc"));
+    }
+
+    #[test]
+    fn writes_files_atomically_with_owner_only_secret_mode() {
+        let root = std::env::temp_dir().join(format!("nebula-atomic-{}", std::process::id()));
+        let path = root.join("secret.json");
+        write_atomic(&path, b"first", true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        write_atomic(&path, b"second", true).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

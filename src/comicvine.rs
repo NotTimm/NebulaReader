@@ -116,15 +116,7 @@ pub fn save_api_key(key: &str) -> Result<(), String> {
         let _ = std::fs::remove_file(&path);
         return Ok(());
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&path, key).map_err(|e| format!("save key: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    crate::platform::write_atomic(&path, key.as_bytes(), true).map_err(|e| format!("save key: {e}"))?;
     Ok(())
 }
 

@@ -4069,7 +4069,7 @@ impl App {
             Message::OpenThemesFolder => {
                 let dir = themes::dir();
                 let _ = std::fs::create_dir_all(&dir);
-                crate::platform::open_url(&dir.to_string_lossy());
+                crate::platform::open_path(&dir);
             }
             Message::CheckSystemColors => {
                 return cosmic::task::future(async {

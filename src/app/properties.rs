@@ -139,7 +139,7 @@ impl App {
             CardAction::MarkUnread => return self.mark_series(&key, false),
             CardAction::ShowInFolder => {
                 if let Some(dir) = local_folder(&entry) {
-                    crate::platform::open_url(&dir.to_string_lossy());
+                    crate::platform::open_path(&dir);
                 }
             }
             CardAction::BuildIndex => {
