@@ -64,6 +64,8 @@ struct Labels {
     languages: Vec<String>,
     look: Vec<String>,
     corners: Vec<String>,
+    /// Windows' window backdrops, in `Backdrop::ALL`'s order.
+    backdrop: Vec<String>,
     background: Vec<String>,
     library_source: Vec<String>,
     book_line_spacing: Vec<String>,
@@ -86,6 +88,7 @@ impl Labels {
                 "Windows 11".into(),
                 "GNOME Adwaita".into(),
             ],
+            backdrop: vec![fl!("backdrop-mica"), fl!("backdrop-acrylic"), fl!("backdrop-solid")],
             corners: vec![
                 fl!("corners-auto"),
                 fl!("corners-round"),
@@ -275,6 +278,8 @@ pub enum Message {
     SetBackgroundOpacity(f32),
     SetBackground(usize),
     SetLook(usize),
+    /// Windows: the window backdrop (`Backdrop::ALL` index).
+    SetBackdrop(usize),
     SetCorners(usize),
     /// Index into the Colors dropdown: 0 follows the system, then
     /// `App::themes`.
@@ -2660,6 +2665,18 @@ impl App {
                 (self.look().native_titlebar() != self.native_titlebar)
                     .then(|| widget::text::caption(fl!("title-bar-restart"))),
             )
+            // Windows 11 only: Mica, Acrylic or a solid window.
+            .add_maybe(cfg!(windows).then(|| {
+                widget::settings::item(
+                    fl!("window-backdrop"),
+                    widget::dropdown(
+                        &self.labels.backdrop[..],
+                        crate::settings::Backdrop::ALL.iter().position(|b| *b == s.window_backdrop),
+                        Message::SetBackdrop,
+                    ),
+                )
+            }))
+            .add_maybe(cfg!(windows).then(|| widget::text::caption(fl!("backdrop-note"))))
             .add(widget::settings::item(
                 fl!("colors"),
                 widget::dropdown(
@@ -3969,10 +3986,22 @@ impl App {
                 // `update` re-sends the icon after this.
                 self.icon_open = None;
                 // Touchpad pinches arrive as Ctrl-flagged wheel messages
-                // winit doesn't read the Ctrl from (platform/pinch.rs).
+                // winit doesn't read the Ctrl from (platform/pinch.rs), and
+                // a backdrop needs the frame over the whole window.
                 #[cfg(windows)]
                 if let Some(id) = self.core.main_window_id() {
-                    return crate::platform::pinch::hook(id);
+                    let backdrop = if crate::platform::backdrop::active() {
+                        crate::platform::backdrop::extend_frame(id)
+                    } else {
+                        Task::none()
+                    };
+                    return Task::batch([crate::platform::pinch::hook(id), backdrop]);
+                }
+            }
+            Message::SetBackdrop(idx) => {
+                if let Some(b) = crate::settings::Backdrop::ALL.get(idx).copied() {
+                    self.settings.window_backdrop = b;
+                    self.settings.save();
                 }
             }
             Message::SetLook(idx) => {

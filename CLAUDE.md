@@ -179,6 +179,28 @@ the owner's laptop). Last updated 2026-11-19.
   books) or its header button; `App::fit_width`, never saved. The viewer
   eases in/out (160 ms), the wheel scrolls instead of zooming, new pages
   start at the top. Seen working in Xvfb; untried on real machines.
+- Windows backdrop (2026-11-19, unreleased; owner asked for it in the
+  next beta; **untried on Windows**, type-checked only): Mica (default),
+  Acrylic or Solid behind the window, Windows 11 22H2+ (build 22621)
+  with Transparency effects on, Direct3D 12 only. Everything is
+  `cfg(windows)`; COSMIC and other Linux desktops are untouched (owner:
+  platform-dependent features stay platform-specific).
+  `src/platform/backdrop.rs`: `start` (top of `main`, after
+  `gpu_defaults`) sets `WGPU_DX12_PRESENTATION_SYSTEM=Visual`
+  (DirectComposition, the only see-through D3D12 surface) and returns
+  the window's `PlatformSpecific` (`system_backdrop`,
+  `no_redirection_bitmap`), passed through fork patch 19's
+  `Settings::windows_window`; `look::theme` then makes the window
+  background `BACKGROUND_ALPHA` (0.3) of its colour with
+  `cosmic_theme::Theme::with_background_alpha` (text and controls
+  unchanged); `extend_frame` (on `WindowOpened`) extends the DWM frame
+  over the client area. `platform::backdrop_active()` makes the book
+  view count as frosted. Settings → Appearance → Window background
+  (Windows only, `Settings::window_backdrop`, next start). Way out if
+  the surface misbehaves: `WGPU_DX12_PRESENTATION_SYSTEM=Hwnd`.
+  Patch 19 also makes iced prefer premultiplied alpha on Windows
+  (DirectComposition refuses straight alpha). macOS vibrancy
+  (`NSVisualEffectView`) is the owner's possible follow-up.
 - Beta 0.2.2-beta.3 (2026-11-19): the Fandom main page and card work
   below (Bleach, Attack on Titan), libcosmic synced (fork `3f47a33`,
   upstream through be7937d: Wayland theme-update fixes, icons follow
@@ -566,7 +588,7 @@ the owner's laptop). Last updated 2026-11-19.
   ComicVine; checked against api.github.com. Unreleased. `cargo audit`
   leftovers are all from libcosmic/iced (lru via cryoglyph, memmap2 via
   xkbcommon, and unmaintained notices) or unbuilt (quick-xml 0.39).
-- libcosmic: fork pinned at `3f47a33` (patches 1–18, see Cargo.toml),
+- libcosmic: fork pinned at `7ccf847` (patches 1–19, see Cargo.toml),
   merged with upstream through `be7937d` (2026-11-19; iced at 115018bf); 0.1.2 was built from
   tag `nebula-0.1.2`.
 - Decisions: Continue Reading shows one card per series (the most recently

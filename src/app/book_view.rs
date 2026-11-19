@@ -633,9 +633,9 @@ impl App {
     }
 
     /// Whether the window has frosted glass: COSMIC with frosted windows
-    /// turned on in COSMIC Settings.
+    /// turned on in COSMIC Settings, or Windows 11's Mica or Acrylic.
     fn window_frosted(&self) -> bool {
-        self.core.frosted(cosmic::theme::active().cosmic())
+        self.core.frosted(cosmic::theme::active().cosmic()) || crate::platform::backdrop_active()
     }
 
     /// Whether book pages are frosted: chosen, and the window is frosted

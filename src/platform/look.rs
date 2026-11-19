@@ -150,8 +150,19 @@ pub fn parse_kde_colors(text: &str) -> HostColors {
 }
 
 /// Builds the libcosmic theme for an already-resolved look, with the
-/// colours of a picked theme or, without one, the host's.
+/// colours of a picked theme or, without one, the host's. On Windows with
+/// a backdrop (Mica, Acrylic) the window's background is see-through.
 pub fn theme(look: Look, corners: Corners, colors: Option<&crate::themes::Colors>) -> cosmic::Theme {
+    let theme = built_theme(look, corners, colors);
+    #[cfg(windows)]
+    if crate::platform::backdrop::active() {
+        let see_through = theme.cosmic().clone().with_background_alpha(crate::platform::backdrop::BACKGROUND_ALPHA);
+        return cosmic::Theme::custom(Arc::new(see_through));
+    }
+    theme
+}
+
+fn built_theme(look: Look, corners: Corners, colors: Option<&crate::themes::Colors>) -> cosmic::Theme {
     use crate::themes::Colors;
 
     let preset = match look {

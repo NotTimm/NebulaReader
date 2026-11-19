@@ -22,6 +22,24 @@ impl Background {
     pub const ALL: [Background; 2] = [Background::Theme, Background::Black];
 }
 
+/// Windows 11 only: the material Windows draws behind the window
+/// (`platform::backdrop`). Kept in every build's settings file, but read
+/// and offered only on Windows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Backdrop {
+    /// The wallpaper, blurred and tinted, as in Windows' own apps.
+    #[default]
+    Mica,
+    /// Frosted glass over whatever is behind the window.
+    Acrylic,
+    /// No backdrop: the theme's colour, as before.
+    Solid,
+}
+
+impl Backdrop {
+    pub const ALL: [Backdrop; 3] = [Backdrop::Mica, Backdrop::Acrylic, Backdrop::Solid];
+}
+
 /// Typeface for books. The generic families resolve through fontconfig to
 /// the system's preferred serif/sans (Noto Serif etc.).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +210,9 @@ pub struct Settings {
     pub corners: crate::platform::look::Corners,
     /// Colour theme (`crate::themes::Entry::id`); `None` follows the system.
     pub theme: Option<String>,
+    /// Windows 11: Mica, Acrylic or a solid window (takes effect at the
+    /// next start).
+    pub window_backdrop: Backdrop,
     /// The library's All / Local / Jellyfin switch.
     pub library_source: LibrarySource,
     /// Ask GitHub for a newer release when the app starts.
@@ -241,6 +262,7 @@ impl Default for Settings {
             look: crate::platform::look::Look::Auto,
             corners: crate::platform::look::Corners::Auto,
             theme: None,
+            window_backdrop: Backdrop::default(),
             library_source: LibrarySource::All,
             check_for_updates: true,
             fullscreen_status: true,

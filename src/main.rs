@@ -73,6 +73,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The interface language: the one picked in Settings, or the system's.
     i18n::select(saved.language.as_deref());
     let look = saved.look.resolve(desktop);
+    // Windows 11's Mica or Acrylic behind the window (before the theme is
+    // built, which leaves its background see-through for it).
+    #[cfg(windows)]
+    let windows_window = platform::backdrop::start(saved.window_backdrop);
     platform::look::init(desktop);
     log::info!("desktop {desktop:?}, look {look:?}");
 
@@ -88,6 +92,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .client_decorations(!look.native_titlebar())
         // A native frame doesn't round or shadow libcosmic's content.
         .transparent(!look.native_titlebar());
+    // With a backdrop the window is see-through under the native frame.
+    #[cfg(windows)]
+    let settings = match windows_window {
+        Some(platform) => settings.transparent(true).windows_window(platform),
+        None => settings,
+    };
 
     cosmic::app::run::<app::App>(settings, path)?;
 

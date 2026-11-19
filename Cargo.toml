@@ -93,11 +93,17 @@ rust-embed = "8"
 # 18. In image::Viewer, `resume_at` starts a newly fitted page at a given
 #    place and `on_fit_left` reports where Fit to Width was turned off, so
 #    Space, Space comes back to the same spot on the page.
+# 19. Windows only: see-through windows with a system backdrop (Mica,
+#    Acrylic): Direct3D 12 presents through DirectComposition when
+#    WGPU_DX12_PRESENTATION_SYSTEM=Visual (premultiplied alpha), iced's
+#    Windows window settings take `system_backdrop` and
+#    `no_redirection_bitmap`, libcosmic's `Settings::windows_window` sets
+#    them, and `cosmic_theme::Theme::with_background_alpha`.
 # Kept in sync with upstream by merging (never rebasing): run
 # tools/libcosmic-drift.sh and see "The libcosmic fork" in docs/DEVELOPING.md.
 [dependencies.libcosmic]
 git = "https://github.com/NotTimm/libcosmic.git"
-rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891"
+rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00"
 default-features = false
 features = ["wgpu", "winit", "tokio", "multi-window"]
 
@@ -105,7 +111,7 @@ features = ["wgpu", "winit", "tokio", "multi-window"]
 # Windows/macOS use plain winit windows and native (rfd) file dialogs.
 # Same git/rev as above, so cargo merges these into one libcosmic.
 [target.'cfg(target_os = "linux")'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00", default-features = false, features = ["dbus-config", "wayland", "xdg-portal"] }
 # Settings portal (dark mode / accent colour) for the GNOME and KDE looks.
 ashpd = { version = "0.14", default-features = false, features = ["tokio", "settings"] }
 
@@ -114,7 +120,7 @@ ashpd = { version = "0.14", default-features = false, features = ["tokio", "sett
 libc = "0.2"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891", default-features = false, features = ["rfd"] }
+libcosmic = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00", default-features = false, features = ["rfd"] }
 
 [target.'cfg(windows)'.build-dependencies]
 # Embeds the icon and version info in the .exe (see build.rs).
@@ -135,6 +141,9 @@ windows-sys = { version = "0.61", features = [
     # Touchpad pinch (src/platform/pinch.rs).
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_SystemServices",
+    # Window backdrop: Mica / Acrylic (src/platform/backdrop.rs).
+    "Win32_Graphics_Dwm",
+    "Win32_UI_Controls",
 ] }
 
 [profile.release]
@@ -179,8 +188,8 @@ fluent-syntax = "0.12"
 # tarball) refuses the same crate from two sources. Keep the rev in step
 # with the libcosmic dependency above.
 [patch."https://github.com/pop-os/libcosmic"]
-build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891" }
-cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891" }
-cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891" }
-iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891" }
-iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "3f47a33b7640393a1f30b54fcee6d5994e98e891" }
+build_helpers = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00" }
+cosmic-config = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00" }
+cosmic-config-derive = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00" }
+iced_core = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00" }
+iced_futures = { git = "https://github.com/NotTimm/libcosmic.git", rev = "7ccf84790fb331d4b58b46bc337b67aa3eb37e00" }

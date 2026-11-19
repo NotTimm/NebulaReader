@@ -7,6 +7,22 @@ pub mod disk;
 pub mod status;
 #[cfg(windows)]
 pub mod pinch;
+#[cfg(windows)]
+pub mod backdrop;
+
+/// Whether Windows draws a backdrop (Mica, Acrylic) behind the window this
+/// run, so pages leave their background see-through as they do under
+/// COSMIC's frosted glass. Always false elsewhere.
+pub fn backdrop_active() -> bool {
+    #[cfg(windows)]
+    {
+        backdrop::active()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
 
 use std::path::PathBuf;
 
