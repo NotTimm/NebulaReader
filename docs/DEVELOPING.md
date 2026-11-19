@@ -86,6 +86,14 @@ winget install Microsoft.WingetCreate
 wingetcreate new https://github.com/NotTimm/NebulaReader/releases/download/v<version>/NebulaReader-<version>-windows-x64-setup.exe
 ```
 
+### Homebrew (macOS)
+
+[`packaging/homebrew/`](../packaging/homebrew/) holds the Homebrew Cask
+(`nebula-reader.rb`) and `update-cask.sh` helper for publishing Apple Silicon
+releases through a `NotTimm/homebrew-tap` repository. See
+[`packaging/homebrew/README.md`](../packaging/homebrew/README.md) for setup and
+release updates.
+
 ### Icons
 
 `res/icons/source/` holds two masters: `book` (the app icon) and
