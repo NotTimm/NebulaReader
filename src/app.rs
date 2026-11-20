@@ -403,6 +403,10 @@ pub struct App {
     layout: Layout,
     rtl: bool,
     zoom_active: bool,
+    /// Bumped whenever the app explicitly resets zoom back to 100% (`Esc`,
+    /// `Ctrl+0`, `M`, opening another comic) so `image::Viewer` resets its
+    /// internal scale and pan offset.
+    zoom_reset: u64,
     /// Fit to Width: the page as wide as the window, read top to bottom.
     /// Never remembered: each comic opens whole.
     fit_width: bool,
@@ -1238,6 +1242,12 @@ impl App {
         }
     }
 
+    fn reset_zoom(&mut self) {
+        self.zoom_active = false;
+        self.zoom = 1.0;
+        self.zoom_reset = self.zoom_reset.wrapping_add(1);
+    }
+
     /// Tracks active touch points only to detect the two-finger-down that
     /// bootstraps zoom mode from the fit-to-window view.
     fn handle_touch(&mut self, event: touch::Event) {
@@ -1716,6 +1726,7 @@ impl Application for App {
             },
             rtl: settings.rtl,
             zoom_active: false,
+            zoom_reset: 0,
             fit_width: false,
             fit_width_leaving: false,
             fit_resume: None,
@@ -2432,8 +2443,7 @@ impl App {
                     return self.update(Message::ToggleFitWidth);
                 }
                 if self.zoom_active {
-                    self.zoom_active = false;
-                    self.zoom = 1.0;
+                    self.reset_zoom();
                 } else if self.show_chapter_select {
                     self.show_chapter_select = false;
                 }
@@ -2452,9 +2462,8 @@ impl App {
                     && self.modifiers.command()
                     && c.as_str() == "0" =>
             {
-                self.zoom_active = false;
                 self.fit_width = false;
-                self.zoom = 1.0;
+                self.reset_zoom();
             }
             // Single-letter shortcuts, unless Cmd/Ctrl is held (Cmd+C on a
             // Mac copies, it doesn't open the chapter list).
@@ -2491,72 +2500,83 @@ impl App {
         // ── Page content ──────────────────────────────────────────────────────
         let viewer: Element<'_, Message> =
             if !self.sources.is_empty() && self.handle(self.current_page).is_some() {
-                let use_viewer = self.zoom_active || self.fit_width || self.fit_width_leaving;
-                match (&self.layout, use_viewer) {
-                    (_, true) => {
-                        let h = self.handle(self.current_page).unwrap();
-                        widget::image::viewer(h.clone())
-                            .fit_width(self.fit_width)
-                            .resume_at(
-                                self.fit_resume
-                                    .filter(|(page, _)| *page == self.current_page)
-                                    .map(|(_, place)| place),
-                            )
-                            .on_fit_left(Message::FitLeft)
-                            .content_fit(ContentFit::Contain)
-                            .min_scale(MIN_ZOOM)
-                            .max_scale(MAX_ZOOM)
-                            .on_zoom(Message::ZoomChanged)
-                            // Keep the zoom across page turns but start
-                            // each new page at its top.
-                            .page(self.current_page as u64)
-                            // A spread is shown whole, then the zoom
-                            // comes back on the next page.
-                            .whole_page(self.is_spread(self.current_page))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .into()
-                    }
-                    (Layout::Single, false) => {
-                        widget::image(self.handle(self.current_page).unwrap().clone())
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .content_fit(ContentFit::Contain)
-                            .into()
-                    }
-                    (Layout::Dual, false) => {
-                        let page_el = |idx: usize| -> Element<'_, Message> {
-                            if let Some(h) = self.handle(idx) {
-                                widget::image(h.clone())
-                                    .width(Length::FillPortion(1))
-                                    .height(Length::Fill)
-                                    .content_fit(ContentFit::Contain)
-                                    .into()
-                            } else {
-                                widget::container(widget::indeterminate_circular())
-                                    .width(Length::FillPortion(1))
-                                    .height(Length::Fill)
-                                    .center_x(Length::Fill)
-                                    .center_y(Length::Fill)
-                                    .into()
-                            }
-                        };
-                        let mut row = widget::Row::new().spacing(4).height(Length::Fill);
-                        // A spread (or the page before one) is shown alone,
-                        // centred. In RTL (manga) mode, the next page sits on
-                        // the left and the current page on the right.
-                        if self.pages_shown_at(self.current_page) == 2 {
-                            let (left, right) = if self.rtl {
-                                (self.current_page + 1, self.current_page)
-                            } else {
-                                (self.current_page, self.current_page + 1)
-                            };
-                            row = row.push(page_el(left)).push(page_el(right));
-                        } else if self.handle(self.current_page).is_some() {
-                            row = row.push(page_el(self.current_page));
+                let dual_pair = if self.layout == Layout::Dual
+                    && self.pages_shown_at(self.current_page) == 2
+                {
+                    // In RTL (manga) mode, the next page sits on the left and
+                    // the current page on the right.
+                    let (left, right) = if self.rtl {
+                        (self.current_page + 1, self.current_page)
+                    } else {
+                        (self.current_page, self.current_page + 1)
+                    };
+                    Some((left, right))
+                } else {
+                    None
+                };
+
+                let keep_viewer = self.zoom_active || self.fit_width || self.fit_width_leaving;
+                let bound_handles = match dual_pair {
+                    Some((left, right)) => match (self.handle(left), self.handle(right)) {
+                        (Some(l), Some(r)) => Some((l, Some(r.clone()))),
+                        // While zoomed or fitted, keep the viewer mounted on the
+                        // already-decoded page so zoom/pan state isn't reset while
+                        // the partner page finishes decoding.
+                        (Some(l), None) if keep_viewer => Some((l, None)),
+                        (None, Some(r)) if keep_viewer => Some((r, None)),
+                        _ => None,
+                    },
+                    None => Some((self.handle(self.current_page).unwrap(), None)),
+                };
+
+                if let Some((primary, secondary)) = bound_handles {
+                    widget::image::viewer(primary.clone())
+                        .second(secondary)
+                        .reset(self.zoom_reset)
+                        .fit_width(self.fit_width)
+                        .resume_at(
+                            self.fit_resume
+                                .filter(|(page, _)| *page == self.current_page)
+                                .map(|(_, place)| place),
+                        )
+                        .on_fit_left(Message::FitLeft)
+                        .content_fit(ContentFit::Contain)
+                        .min_scale(MIN_ZOOM)
+                        .max_scale(MAX_ZOOM)
+                        .on_zoom(Message::ZoomChanged)
+                        // Keep the zoom across page turns but start
+                        // each new page at its top.
+                        .page(self.current_page as u64)
+                        // A spread is shown whole, then the zoom
+                        // comes back on the next page.
+                        .whole_page(self.is_spread(self.current_page))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                } else {
+                    let (left, right) = dual_pair.unwrap();
+                    let page_el = |idx: usize| -> Element<'_, Message> {
+                        if let Some(h) = self.handle(idx) {
+                            widget::image(h.clone())
+                                .width(Length::FillPortion(1))
+                                .height(Length::Fill)
+                                .content_fit(ContentFit::Contain)
+                                .into()
+                        } else {
+                            widget::container(widget::indeterminate_circular())
+                                .width(Length::FillPortion(1))
+                                .height(Length::Fill)
+                                .center_x(Length::Fill)
+                                .center_y(Length::Fill)
+                                .into()
                         }
-                        row.into()
-                    }
+                    };
+                    widget::Row::new()
+                        .spacing(4)
+                        .height(Length::Fill)
+                        .push(page_el(left))
+                        .push(page_el(right))
+                        .into()
                 }
             } else if !self.sources.is_empty() {
                 // A page is still decoding — show the nearest already-decoded
@@ -3609,9 +3629,8 @@ impl App {
                 self.clear_pages();
                 self.chapter_covers.clear();
                 self.covers_pending.clear();
-                self.zoom_active = false;
                 self.fit_width = false;
-                self.zoom = 1.0;
+                self.reset_zoom();
                 self.comic_info = None;
                 self.epub_book = None;
                 self.book_image = None;
@@ -3732,9 +3751,8 @@ impl App {
                         self.clear_pages();
                         self.chapter_covers.clear();
                         self.covers_pending.clear();
-                        self.zoom_active = false;
                         self.fit_width = false;
-                        self.zoom = 1.0;
+                        self.reset_zoom();
                         self.comic_info = None;
                         self.start_chapter = None;
                         self.show_chapter_select = false;
@@ -4548,8 +4566,12 @@ impl App {
                 if self.fit_width {
                     return self.update(Message::ToggleFitWidth);
                 }
-                self.zoom_active = !self.zoom_active;
-                self.zoom = 1.0;
+                if self.zoom_active || self.zoom > MIN_ZOOM + 1e-4 {
+                    self.reset_zoom();
+                } else {
+                    self.zoom_active = true;
+                    self.zoom = 1.0;
+                }
             }
             Message::ToggleFitWidth => {
                 self.fit_width = !self.fit_width;
@@ -4728,6 +4750,9 @@ impl App {
             }
             Message::ZoomChanged(scale) => {
                 self.zoom = scale.clamp(MIN_ZOOM, MAX_ZOOM);
+                if !self.fit_width {
+                    self.zoom_active = self.zoom > MIN_ZOOM + 1e-4;
+                }
             }
             Message::Touch(event) => self.handle_touch(event),
             Message::FilesDropped(paths) => {
