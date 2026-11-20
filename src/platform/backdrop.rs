@@ -34,6 +34,10 @@ use crate::settings::Backdrop;
 /// How much of the theme's window colour stays over the backdrop: enough
 /// to keep a colour theme's look, little enough for Mica to show.
 pub const BACKGROUND_ALPHA: f32 = 0.3;
+/// Translucent alpha for elevated card surfaces (wiki cards, OPDS cards,
+/// banners) layered over the Windows 11 Mica/Acrylic backdrop.
+pub const CARD_ALPHA_DARK: f32 = 0.45;
+pub const CARD_ALPHA_LIGHT: f32 = 0.58;
 
 /// The first Windows 11 build with system backdrops (22H2).
 const FIRST_BUILD: u32 = 22621;

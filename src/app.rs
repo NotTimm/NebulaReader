@@ -3448,8 +3448,46 @@ fn notice_banner<'a>(
     )
     .padding([8, 12])
     .width(Length::Fill)
-    .class(cosmic::theme::Container::Card)
+    .class(glass_card_class())
     .into()
+}
+
+/// Elevated card surface class: uses COSMIC's native `Container::Card`, or
+/// layered translucent glass on Windows 11 when Mica/Acrylic is active so
+/// cards don't draw as opaque slabs over the backdrop.
+pub(super) fn glass_card_class() -> cosmic::theme::Container<'static> {
+    if crate::platform::backdrop_active() {
+        cosmic::theme::Container::custom(|theme: &cosmic::Theme| {
+            let c = theme.cosmic();
+            let base: Color = c.bg_component_color().into();
+            #[cfg(windows)]
+            let alpha = if c.is_dark {
+                crate::platform::backdrop::CARD_ALPHA_DARK
+            } else {
+                crate::platform::backdrop::CARD_ALPHA_LIGHT
+            };
+            #[cfg(not(windows))]
+            let alpha = if c.is_dark { 0.45 } else { 0.58 };
+            let border = if c.is_dark {
+                Color::from_rgba(1.0, 1.0, 1.0, 0.10)
+            } else {
+                Color::from_rgba(0.0, 0.0, 0.0, 0.09)
+            };
+            widget::container::Style {
+                icon_color: Some(c.on_bg_color().into()),
+                text_color: Some(c.on_bg_color().into()),
+                background: Some(Background::Color(Color { a: alpha, ..base })),
+                border: cosmic::iced::Border {
+                    color: border,
+                    width: 1.0,
+                    radius: c.corner_radii.radius_s.into(),
+                },
+                ..Default::default()
+            }
+        })
+    } else {
+        cosmic::theme::Container::Card
+    }
 }
 
 pub(super) fn error_banner(msg: &str) -> Element<'_, Message> {

@@ -1108,7 +1108,7 @@ impl App {
                 widget::container(card)
                     .padding(12)
                     .width(Length::Fixed(360.0))
-                    .class(cosmic::theme::Container::Card)
+                    .class(super::glass_card_class())
                     .into(),
             );
         }
@@ -1642,7 +1642,7 @@ fn add_as_choice<'a>(account: &opds::Account) -> Element<'a, Message> {
             .align_y(cosmic::iced::Alignment::Center)
             .push(content)
             .push(widget::icon::from_name("go-next-symbolic").size(16));
-        let card = widget::container(row).padding([4, 12, 4, 4]).class(cosmic::theme::Container::Card);
+        let card = widget::container(row).padding([4, 12, 4, 4]).class(super::glass_card_class());
         widget::button::custom(card)
             .class(cosmic::theme::Button::ListItem(radius))
             .padding(0)
@@ -1702,7 +1702,7 @@ fn confirm_banner<'a>(c: &Confirm) -> Element<'a, Message> {
             ),
     )
     .padding(12)
-    .class(cosmic::theme::Container::Card)
+    .class(super::glass_card_class())
     .width(Length::Fill)
     .into()
 }

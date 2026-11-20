@@ -748,29 +748,97 @@ struct Palette {
     muted: Color,
     link: Color,
     border: Color,
-    /// Infoboxes and figure frames.
+    /// Infoboxes, main-page cards, Fandom cards, and figure frames.
     panel: Color,
+    /// Corner radius for cards/boxes (follows the theme when frosted).
+    radius: [f32; 4],
     dark: bool,
+    frosted: bool,
 }
 
-fn palette() -> Palette {
+fn palette(frosted: bool) -> Palette {
     let theme = cosmic::theme::active();
-    let dark = theme.cosmic().is_dark;
+    let cosmic = theme.cosmic();
+    let dark = cosmic.is_dark;
     let rgb = |r, g, b| Color::from_rgb8(r, g, b);
+    let win_backdrop = crate::platform::backdrop_active();
+
+    let (panel, border, radius) = if frosted {
+        // Layered glass: lift the theme's elevated surface tint above the
+        // frosted window background while keeping it translucent so the
+        // blurred backdrop shines through.
+        let base: Color = cosmic.bg_component_color().into();
+        let panel_alpha = if win_backdrop {
+            #[cfg(windows)]
+            {
+                if dark {
+                    crate::platform::backdrop::CARD_ALPHA_DARK
+                } else {
+                    crate::platform::backdrop::CARD_ALPHA_LIGHT
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                if dark { 0.45 } else { 0.58 }
+            }
+        } else if dark {
+            0.44
+        } else {
+            0.55
+        };
+        let panel = if dark {
+            // Gently lift dark card RGB so elevated cards read clearly above
+            // the dark frosted window behind them.
+            Color::from_rgba(
+                (base.r + 0.06).min(1.0),
+                (base.g + 0.06).min(1.0),
+                (base.b + 0.07).min(1.0),
+                panel_alpha,
+            )
+        } else {
+            Color::from_rgba(
+                (base.r + 0.04).min(1.0),
+                (base.g + 0.04).min(1.0),
+                (base.b + 0.04).min(1.0),
+                panel_alpha,
+            )
+        };
+        let border = if dark {
+            Color::from_rgba(1.0, 1.0, 1.0, if win_backdrop { 0.10 } else { 0.14 })
+        } else {
+            Color::from_rgba(0.0, 0.0, 0.0, if win_backdrop { 0.09 } else { 0.14 })
+        };
+        (panel, border, cosmic.corner_radii.radius_s)
+    } else {
+        (
+            if dark { rgb(0x20, 0x21, 0x22) } else { rgb(0xf8, 0xf9, 0xfa) },
+            if dark { rgb(0x54, 0x59, 0x5d) } else { rgb(0xa2, 0xa9, 0xb1) },
+            [0.0; 4],
+        )
+    };
+
     Palette {
         muted: if dark { rgb(0xa2, 0xa9, 0xb1) } else { rgb(0x54, 0x59, 0x5d) },
         link: if dark { rgb(0x88, 0xa3, 0xe8) } else { rgb(0x33, 0x66, 0xcc) },
-        border: if dark { rgb(0x54, 0x59, 0x5d) } else { rgb(0xa2, 0xa9, 0xb1) },
-        panel: if dark { rgb(0x20, 0x21, 0x22) } else { rgb(0xf8, 0xf9, 0xfa) },
+        border,
+        panel,
+        radius,
         dark,
+        frosted,
     }
 }
 
 impl Palette {
-    /// A colour the page gives (an infobox header), toned for dark themes.
+    /// A colour the page gives (an infobox or main-page header), toned for
+    /// dark themes and layered as translucent glass when the window is frosted.
     fn page_color(&self, rgb: [u8; 3]) -> Color {
         let c = Color::from_rgb8(rgb[0], rgb[1], rgb[2]);
-        if self.dark { Color { r: c.r * 0.35, g: c.g * 0.35, b: c.b * 0.4, a: 1.0 } } else { c }
+        match (self.dark, self.frosted) {
+            (true, true) => Color { r: c.r * 0.45, g: c.g * 0.45, b: c.b * 0.50, a: 0.62 },
+            (true, false) => Color { r: c.r * 0.35, g: c.g * 0.35, b: c.b * 0.40, a: 1.0 },
+            (false, true) => Color { a: 0.68, ..c },
+            (false, false) => c,
+        }
     }
 }
 
@@ -864,12 +932,14 @@ fn rule<'a>(color: Color) -> Element<'a, Message> {
         .into()
 }
 
-fn boxed<'a>(content: impl Into<Element<'a, Message>>, bg: Color, border: Color) -> widget::Container<'a, Message, cosmic::Theme> {
-    widget::container(content).style(move |_: &cosmic::Theme| widget::container::Style {
-        background: Some(Background::Color(bg)),
-        border: Border { color: border, width: 1.0, radius: 0.0.into() },
-        ..Default::default()
-    })
+fn boxed<'a>(content: impl Into<Element<'a, Message>>, bg: Color, border: Color, radius: [f32; 4]) -> widget::Container<'a, Message, cosmic::Theme> {
+    widget::container(content)
+        .clip(radius.iter().any(|&r| r > 0.0))
+        .style(move |_: &cosmic::Theme| widget::container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border { color: border, width: 1.0, radius: radius.into() },
+            ..Default::default()
+        })
 }
 
 fn muted<'a>(text: String, size: f32, pal: &Palette) -> Element<'a, Message> {
@@ -1704,7 +1774,7 @@ impl App {
     pub(super) fn view_wiki(&self) -> Element<'_, Message> {
         // Texts take their keys afresh as the page is laid out.
         self.wiki.texts.borrow_mut().clear();
-        let pal = palette();
+        let pal = palette(self.window_frosted());
         if let Some(i) = self.wiki.viewer {
             return self.view_wiki_viewer(i, &pal);
         }
@@ -1809,7 +1879,7 @@ impl App {
             .padding([4, 8])
             .width(Length::Fill)
             .style(move |_: &cosmic::Theme| widget::container::Style { background: Some(Background::Color(bg)), ..Default::default() });
-        boxed(widget::column::with_capacity(2).push(head).push(widget::container(content).padding([8, 10])), pal.panel, pal.border)
+        boxed(widget::column::with_capacity(2).push(head).push(widget::container(content).padding([8, 10])), pal.panel, pal.border, pal.radius)
             .width(Length::Fill)
             .into()
     }
@@ -2161,6 +2231,7 @@ impl App {
                     .push_maybe((!caption.is_empty()).then(|| self.line_text(caption, pal, TEXT - 2.0))),
                 pal.panel,
                 pal.border,
+                pal.radius,
             )
             .padding(4)
             .into(),
@@ -2238,9 +2309,9 @@ impl App {
             col = col.push(row);
         }
         if infobox {
-            boxed(col, pal.panel, pal.border).padding(6).width(Length::Fixed(INFOBOX_WIDTH)).into()
+            boxed(col, pal.panel, pal.border, pal.radius).padding(6).width(Length::Fixed(INFOBOX_WIDTH)).into()
         } else {
-            boxed(col, Color::TRANSPARENT, pal.border).width(Length::Fill).into()
+            boxed(col, Color::TRANSPARENT, pal.border, [0.0; 4]).width(Length::Fill).into()
         }
     }
 
@@ -2471,7 +2542,7 @@ impl App {
                         fl!("fandom-unfollow"),
                     )),
             );
-        let card = boxed(widget::column::with_capacity(3).push(top).push(band).push(body), pal.panel, pal.border).width(Length::Fixed(WIDTH));
+        let card = boxed(widget::column::with_capacity(3).push(top).push(band).push(body), pal.panel, pal.border, pal.radius).width(Length::Fixed(WIDTH));
         widget::mouse_area(card)
             .on_press(Message::Wiki(WikiMsg::OpenWiki(w.id())))
             .interaction(cosmic::iced::mouse::Interaction::Pointer)
