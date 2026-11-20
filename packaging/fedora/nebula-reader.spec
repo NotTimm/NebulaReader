@@ -4,8 +4,17 @@
 # packaging/build-rpm.sh instead. Keep Version in step with Cargo.toml
 # (the release workflow checks).
 
-# Tests read and write archives in temporary folders only; no network.
-%bcond check 1
+# CI already runs `cargo test --release --locked` on every push and before
+# COPR is triggered; keep `%cargo_test` off by default so COPR doesn't link
+# the full test binary a second time per chroot (pass `--with check` to run).
+%bcond check 0
+
+# Fedora's defaults (-Cdebuginfo=2 -Ccodegen-units=1) combined with LTO over
+# libcosmic/wgpu/iced turn COPR builds into multi-hour jobs. Line-table
+# debuginfo keeps crash backtraces intact while parallel codegen cuts build
+# time dramatically.
+%global rustflags_debuginfo 1
+%global rustflags_codegen_units 16
 
 Name:           nebula-reader
 Version:        0.2.2

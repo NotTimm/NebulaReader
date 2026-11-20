@@ -149,7 +149,9 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [profile.release]
-lto = true
+# Parallel ThinLTO: nearly identical speed and binary size to fat LTO,
+# while cutting release and Fedora COPR link times and RAM use dramatically.
+lto = "thin"
 
 # Image decoders and inflating are 10-50x slower unoptimised, which makes
 # debug builds page far slower than the real app; optimise just those.
