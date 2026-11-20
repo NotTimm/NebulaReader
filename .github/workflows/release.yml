@@ -304,7 +304,7 @@ jobs:
             cp -a "$dir" "$dir.copy" && rm -rf "$dir" && mv "$dir.copy" "$dir"
           done
 
-      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: NebulaReader-${{ needs.version.outputs.version }}-x86_64.flatpak
           manifest-path: packaging/io.github.NotTimm.NebulaReader.yml
