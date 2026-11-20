@@ -200,6 +200,9 @@ pub struct Settings {
     pub background: Background,
     /// Restore these reader preferences across sessions.
     pub dual_page: bool,
+    /// Show the cover (first page of each chapter) alone in two-page mode so
+    /// following spreads stay aligned.
+    pub dual_cover_solo: bool,
     /// Read comics right-to-left (manga): dual-page spreads put the next page
     /// on the left, and Left/Right arrows are flipped.
     pub rtl: bool,
@@ -258,6 +261,7 @@ impl Default for Settings {
             background_opacity: 1.0,
             background: Background::Theme,
             dual_page: false,
+            dual_cover_solo: true,
             rtl: false,
             // A black backdrop suits comics, and saves power on OLED screens.
             theater_mode: true,

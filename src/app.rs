@@ -212,6 +212,7 @@ pub enum Message {
     PointerY(f32),
     ToggleTheater,
     ToggleLayout,
+    SetDualCoverSolo(bool),
     ToggleRtl,
     ToggleZoom,
     /// Space: Fit to Width on or off.
@@ -1157,28 +1158,60 @@ impl App {
             .is_some_and(|(_, p)| p.width as f32 > p.height as f32 * 1.05)
     }
 
-    /// Pages on screen from `idx` on: two in two-page mode, except that a
-    /// spread is shown alone, and so is the page just before one.
-    fn pages_shown_at(&self, idx: usize) -> usize {
-        let pair = self.layout == Layout::Dual
-            && idx + 1 < self.sources.len()
-            && !self.is_spread(idx)
-            && !self.is_spread(idx + 1);
-        if pair {
-            2
+    /// Whether `idx` is the start of a chapter (or page 0 when there is no
+    /// chapter list).
+    fn is_chapter_start(&self, idx: usize) -> bool {
+        if self.chapters.is_empty() {
+            idx == 0
         } else {
-            1
+            self.chapters.iter().any(|ch| ch.start == idx)
         }
     }
 
-    /// Where the view before `current_page` starts: two pages back when
-    /// they make a pair, one when that page is a spread (or stands alone).
+    /// Start page of the chapter that contains `idx` (0 when unknown).
+    fn chapter_start_of(&self, idx: usize) -> usize {
+        self.chapters
+            .iter()
+            .rfind(|ch| ch.start <= idx)
+            .map_or(0, |ch| ch.start)
+    }
+
+    /// Pages on screen from `idx` on: two in two-page mode, except that a
+    /// solo cover, a spread, the page just before one, or the last page before
+    /// a new chapter is shown alone.
+    fn pages_shown_at(&self, idx: usize) -> usize {
+        pages_shown_in_dual(
+            idx,
+            self.sources.len(),
+            self.layout == Layout::Dual,
+            self.settings.dual_cover_solo,
+            |i| self.is_chapter_start(i),
+            |i| self.is_spread(i),
+        )
+    }
+
+    /// Where the view before `current_page` starts, stepping from the chapter
+    /// start so Back is always the exact inverse of Forward (even around solo
+    /// covers, spreads, and chapter boundaries).
     fn prev_view_start(&self) -> usize {
         let p = self.current_page;
-        if p >= 2 && self.pages_shown_at(p - 2) == 2 {
-            p - 2
-        } else {
-            p.saturating_sub(1)
+        if p == 0 {
+            return 0;
+        }
+        let start = self.chapter_start_of(p - 1);
+        prev_view_from(start, p, |i| self.pages_shown_at(i))
+    }
+
+    /// Aligns `current_page` to the start of the dual-page view that contains it.
+    fn align_current_dual_page(&mut self) {
+        if self.layout != Layout::Dual {
+            return;
+        }
+        let start = self.chapter_start_of(self.current_page);
+        let aligned = align_view_from(start, self.current_page, |i| self.pages_shown_at(i));
+        if aligned != self.current_page {
+            self.current_page = aligned;
+            self.fit_resume = None;
         }
     }
 
@@ -2400,20 +2433,7 @@ impl App {
                 match c.as_str() {
                     "f" | "F" => return self.update(Message::ToggleFullscreen),
                     "t" | "T" => self.theater_mode = !self.theater_mode,
-                    "l" | "L" => {
-                        self.layout = match self.layout {
-                            Layout::Single => Layout::Dual,
-                            Layout::Dual => Layout::Single,
-                        };
-                        if self.layout == Layout::Dual
-                            && self.current_page % 2 != 0
-                            && !self.is_spread(self.current_page - 1)
-                        {
-                            self.current_page = self.current_page.saturating_sub(1);
-                            self.fit_resume = None;
-                        }
-                        return self.refresh_window();
-                    }
+                    "l" | "L" => return self.update(Message::ToggleLayout),
                     "r" | "R" => return self.update(Message::ToggleRtl),
                     "m" | "M" => return self.update(Message::ToggleZoom),
                     "i" | "I" => return self.update(Message::ToggleInfo),
@@ -2808,6 +2828,10 @@ impl App {
             .add(widget::settings::item(
                 fl!("two-page-spread"),
                 widget::toggler(self.layout == Layout::Dual).on_toggle(|_| Message::ToggleLayout),
+            ))
+            .add(widget::settings::item(
+                fl!("cover-page-solo"),
+                widget::toggler(s.dual_cover_solo).on_toggle(Message::SetDualCoverSolo),
             ))
             .add(widget::settings::item(
                 fl!("rtl-mode"),
@@ -4323,13 +4347,13 @@ impl App {
                 };
                 self.settings.dual_page = self.layout == Layout::Dual;
                 self.settings.save();
-                if self.layout == Layout::Dual
-                    && self.current_page % 2 != 0
-                    && !self.is_spread(self.current_page - 1)
-                {
-                    self.current_page = self.current_page.saturating_sub(1);
-                    self.fit_resume = None;
-                }
+                self.align_current_dual_page();
+                return self.refresh_window();
+            }
+            Message::SetDualCoverSolo(on) => {
+                self.settings.dual_cover_solo = on;
+                self.settings.save();
+                self.align_current_dual_page();
                 return self.refresh_window();
             }
             Message::ToggleRtl => {
@@ -4587,4 +4611,112 @@ fn fit_note(note: &str) -> Element<'_, Message> {
     .align_y(Alignment::End)
     .padding([0, 0, 24, 0])
     .into()
+}
+
+/// How many pages appear on screen starting at `idx` in single or dual-page
+/// mode. A solo cover, a two-page spread, the page before a spread, or the
+/// last page before a new chapter always stands alone.
+fn pages_shown_in_dual(
+    idx: usize,
+    total: usize,
+    dual: bool,
+    cover_solo: bool,
+    is_chapter_start: impl Fn(usize) -> bool,
+    is_spread: impl Fn(usize) -> bool,
+) -> usize {
+    let pair = dual
+        && idx + 1 < total
+        && !(cover_solo && is_chapter_start(idx))
+        && !is_chapter_start(idx + 1)
+        && !is_spread(idx)
+        && !is_spread(idx + 1);
+    if pair { 2 } else { 1 }
+}
+
+/// Walks forward from `chapter_start` by `step(cur)` until reaching `page`,
+/// returning the start of the view right before `page`.
+fn prev_view_from(chapter_start: usize, page: usize, step: impl Fn(usize) -> usize) -> usize {
+    if page <= chapter_start {
+        return page.saturating_sub(1);
+    }
+    let mut cur = chapter_start;
+    loop {
+        let s = step(cur).max(1);
+        if cur + s >= page {
+            return cur;
+        }
+        cur += s;
+    }
+}
+
+/// Walks forward from `chapter_start` to find the view start that contains `page`.
+fn align_view_from(chapter_start: usize, page: usize, step: impl Fn(usize) -> usize) -> usize {
+    if page <= chapter_start {
+        return page;
+    }
+    let mut cur = chapter_start;
+    loop {
+        let s = step(cur).max(1);
+        if cur + s > page {
+            return cur;
+        }
+        cur += s;
+    }
+}
+
+#[cfg(test)]
+mod dual_page_tests {
+    use super::*;
+
+    #[test]
+    fn solo_cover_keeps_spreads_aligned_forward_and_back() {
+        let chapters = [0usize, 6];
+        let total = 12;
+        let is_start = |i| chapters.contains(&i);
+        let no_spread = |_| false;
+        let step = |i| pages_shown_in_dual(i, total, true, true, is_start, no_spread);
+
+        // Chapter 1 (0..6): [0], [1, 2], [3, 4], [5]
+        // Chapter 2 (6..12): [6], [7, 8], [9, 10], [11]
+        let mut forward = vec![0];
+        let mut cur = 0;
+        while cur + step(cur) < total {
+            cur += step(cur);
+            forward.push(cur);
+        }
+        assert_eq!(forward, vec![0, 1, 3, 5, 6, 7, 9, 11]);
+
+        // Stepping backwards visits the exact reverse sequence.
+        let mut back = vec![cur];
+        while cur > 0 {
+            let start = chapters.iter().copied().rfind(|&s| s <= cur - 1).unwrap_or(0);
+            cur = prev_view_from(start, cur, step);
+            back.push(cur);
+        }
+        back.reverse();
+        assert_eq!(back, forward);
+
+        // Switching to dual mode on page 2 aligns to [1, 2]; page 0 stays [0].
+        assert_eq!(align_view_from(0, 0, step), 0);
+        assert_eq!(align_view_from(0, 1, step), 1);
+        assert_eq!(align_view_from(0, 2, step), 1);
+        assert_eq!(align_view_from(0, 5, step), 5);
+        assert_eq!(align_view_from(6, 8, step), 7);
+    }
+
+    #[test]
+    fn spreads_and_cover_off_step_cleanly() {
+        let total = 7;
+        let is_start = |i| i == 0;
+        let is_spread = |i| i == 3;
+        // Cover solo OFF, spread at page 3: [0, 1], [2], [3], [4, 5], [6]
+        let step = |i| pages_shown_in_dual(i, total, true, false, is_start, is_spread);
+        assert_eq!(step(0), 2);
+        assert_eq!(step(2), 1);
+        assert_eq!(step(3), 1);
+        assert_eq!(step(4), 2);
+        assert_eq!(prev_view_from(0, 4, step), 3);
+        assert_eq!(prev_view_from(0, 3, step), 2);
+        assert_eq!(prev_view_from(0, 2, step), 0);
+    }
 }

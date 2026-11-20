@@ -101,6 +101,7 @@ background-opacity = Opacidad del fondo  ({ $percent } %)
 theater-mode = Modo cine
 reading = Lectura
 two-page-spread = Doble página
+cover-page-solo = Mostrar la portada sola en doble página
 rtl-mode = De derecha a izquierda (manga)
 fullscreen-status = Reloj y batería en pantalla completa
 metadata = Metadatos
