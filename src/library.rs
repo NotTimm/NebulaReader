@@ -77,6 +77,9 @@ pub struct SeriesEntry {
     pub creators: String,
     /// Last year of publication, for finished series ("2018–2020").
     pub end_year: Option<u32>,
+    /// Per-series right-to-left (manga) preference; `None` follows the global
+    /// setting (`Settings::rtl`).
+    pub rtl: Option<bool>,
 }
 
 impl SeriesEntry {
@@ -448,7 +451,7 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
 
 /// Current expected schema version. Bump this and add a matching arm in
 /// [`run_migrations`] whenever the schema changes.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// Brings an existing database up to [`SCHEMA_VERSION`] without touching
 /// user data. Uses SQLite's `user_version` pragma as the version marker, so
@@ -556,6 +559,12 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
     // v6 -> v7: `downloads` (Jellyfin chapters kept for reading offline)
     // and `pending_progress` (progress that couldn't reach the server yet)
     // come from the CREATE TABLE IF NOT EXISTS above.
+
+    // v7 -> v8: per-series right-to-left (manga) reading preference (`NULL`
+    // inherits the global default).
+    if current < 8 {
+        let _ = conn.execute("ALTER TABLE series ADD COLUMN rtl INTEGER", []);
+    }
 
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
         .map_err(|e| format!("set schema version: {e}"))?;
@@ -1200,7 +1209,8 @@ const SERIES_COLS: &str = "s.id, s.path, s.title, s.display_title, s.description
     (SELECT CASE WHEN i.number != '' THEN i.number ELSE i.name END
        FROM issues i WHERE i.series_path = s.path AND i.path = s.last_issue_path),
     s.creators, s.end_year,
-    (SELECT COUNT(*) FROM issues i WHERE i.series_path = s.path AND NOT i.completed AND i.last_page > 0)";
+    (SELECT COUNT(*) FROM issues i WHERE i.series_path = s.path AND NOT i.completed AND i.last_page > 0),
+    s.rtl";
 
 /// Single files that are also an issue of a folder/group series are hidden
 /// from the shelf — that series already represents them.
@@ -1277,9 +1287,20 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<SeriesEntry> {
         creators: row.get(28)?,
         end_year: row.get::<_, Option<i64>>(29)?.map(|v| v as u32),
         issues_in_progress: row.get::<_, i64>(30)? as usize,
+        rtl: row.get::<_, Option<i64>>(31)?.map(|v| v != 0),
         path,
         is_epub,
     })
+}
+
+/// Persists a per-series right-to-left (manga) reading preference.
+pub fn set_series_rtl(conn: &Connection, path: &str, rtl: bool) -> Result<(), String> {
+    conn.execute(
+        "UPDATE series SET rtl = ?2 WHERE path = ?1",
+        params![path, i64::from(rtl)],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("set_series_rtl: {e}"))
 }
 
 // ── Downloads (Jellyfin chapters kept for offline reading) ─────────────────
@@ -1544,5 +1565,18 @@ mod download_tests {
         clear_pending_progress(&conn, "jellyfin://a/i1", at);
         assert!(pending_progress(&conn, "jellyfin://a/").is_empty());
         assert_eq!(pending_progress(&conn, "jellyfin://").len(), 1);
+    }
+
+    #[test]
+    fn series_rtl_preference_persists_per_series() {
+        let conn = db();
+        conn.execute("INSERT INTO series (path, title) VALUES ('/comics/manga', 'Manga')", []).unwrap();
+        conn.execute("INSERT INTO series (path, title) VALUES ('/comics/west', 'West')", []).unwrap();
+        assert_eq!(get_series(&conn, "/comics/manga").unwrap().rtl, None);
+        set_series_rtl(&conn, "/comics/manga", true).unwrap();
+        assert_eq!(get_series(&conn, "/comics/manga").unwrap().rtl, Some(true));
+        assert_eq!(get_series(&conn, "/comics/west").unwrap().rtl, None);
+        set_series_rtl(&conn, "/comics/manga", false).unwrap();
+        assert_eq!(get_series(&conn, "/comics/manga").unwrap().rtl, Some(false));
     }
 }

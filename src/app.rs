@@ -214,6 +214,7 @@ pub enum Message {
     ToggleLayout,
     SetDualCoverSolo(bool),
     ToggleRtl,
+    SetDefaultRtl(bool),
     ToggleZoom,
     /// Space: Fit to Width on or off.
     ToggleFitWidth,
@@ -1422,6 +1423,16 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// Applies the open series' saved RTL preference, falling back to the
+    /// global default in Settings.
+    fn sync_reader_rtl(&mut self) {
+        self.rtl = self
+            .reader_entry
+            .as_ref()
+            .and_then(|e| e.rtl)
+            .unwrap_or(self.settings.rtl);
+    }
+
     /// Re-reads DB-backed state for whatever's on screen.
     fn refresh_views(&mut self) -> Task<Message> {
         let mut tasks = vec![self.reload_library()];
@@ -1434,6 +1445,7 @@ impl App {
             let key = key.to_string_lossy();
             self.reader_entry = library::get_series(db, &key);
             self.reader_issues = library::issues_for(db, &key);
+            self.sync_reader_rtl();
         }
         tasks.push(Task::none());
         Task::batch(tasks)
@@ -2848,7 +2860,7 @@ impl App {
             ))
             .add(widget::settings::item(
                 fl!("rtl-mode"),
-                widget::toggler(self.rtl).on_toggle(|_| Message::ToggleRtl),
+                widget::toggler(s.rtl).on_toggle(Message::SetDefaultRtl),
             ))
             .add(widget::settings::item(
                 fl!("fullscreen-status"),
@@ -3585,6 +3597,7 @@ impl App {
                     let _ = library::touch_opened(db, &key);
                     self.reader_entry = library::get_series(db, &key);
                     self.reader_issues = library::issues_for(db, &key);
+                    self.sync_reader_rtl();
                 } else if let Some(db) = &self.db {
                     let raw_name = path
                         .file_name()
@@ -3605,6 +3618,7 @@ impl App {
                     let _ = library::touch_opened(db, &key);
                     self.reader_entry = library::get_series(db, &key);
                     self.reader_issues = library::issues_for(db, &key);
+                    self.sync_reader_rtl();
 
                     if !library::chapter_cover_path(&key, 0).exists() {
                         if let Some(source) = self.sources.first().cloned() {
@@ -4470,8 +4484,22 @@ impl App {
             }
             Message::ToggleRtl => {
                 self.rtl = !self.rtl;
-                self.settings.rtl = self.rtl;
+                if let Some(entry) = self.reader_entry.as_mut() {
+                    entry.rtl = Some(self.rtl);
+                    if let Some(db) = &self.db {
+                        let _ = library::set_series_rtl(db, &entry.path, self.rtl);
+                    }
+                } else {
+                    self.settings.rtl = self.rtl;
+                    self.settings.save();
+                }
+            }
+            Message::SetDefaultRtl(on) => {
+                self.settings.rtl = on;
                 self.settings.save();
+                if self.reader_entry.as_ref().and_then(|e| e.rtl).is_none() {
+                    self.rtl = on;
+                }
             }
             Message::ToggleZoom => {
                 // From Fit to Width, back to the whole page.
