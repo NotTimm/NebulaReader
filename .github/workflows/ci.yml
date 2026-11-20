@@ -33,8 +33,13 @@ jobs:
             libxkbcommon-dev libwayland-dev libarchive-dev libssl-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Check clippy correctness lints
+        run: cargo clippy --all-targets --locked -- -D clippy::correctness
 
       - name: Run tests
         run: cargo test --release --locked

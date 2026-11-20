@@ -94,6 +94,13 @@ releases through a `NotTimm/homebrew-tap` repository. See
 [`packaging/homebrew/README.md`](../packaging/homebrew/README.md) for setup and
 release updates.
 
+### Arch Linux (AUR)
+
+[`packaging/aur/`](../packaging/aur/) holds the Arch `PKGBUILD`, `.SRCINFO`,
+and `update-aur.sh` helper for publishing `nebula-reader` to the AUR. See
+[`packaging/aur/README.md`](../packaging/aur/README.md) for first-time setup
+and release updates.
+
 ### Icons
 
 `res/icons/source/` holds two masters: `book` (the app icon) and

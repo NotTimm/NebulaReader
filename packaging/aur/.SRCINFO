@@ -1,0 +1,22 @@
+pkgbase = nebula-reader
+	pkgdesc = Comic, manga and ebook reader for COSMIC and other desktops
+	pkgver = 0.2.2
+	pkgrel = 1
+	url = https://github.com/NotTimm/NebulaReader
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-only
+	makedepends = cargo
+	makedepends = git
+	makedepends = pkgconf
+	depends = gcc-libs
+	depends = glibc
+	depends = libarchive
+	depends = libxkbcommon
+	depends = openssl
+	depends = wayland
+	options = !lto
+	source = nebula-reader-0.2.2.tar.gz::https://github.com/NotTimm/NebulaReader/archive/refs/tags/v0.2.2.tar.gz
+	sha256sums = SKIP
+
+pkgname = nebula-reader
