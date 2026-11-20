@@ -33,6 +33,7 @@ finish-args:
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
+  no-debuginfo: true
   env:
     CARGO_HOME: /run/build/nebula-reader/cargo
     CARGO_NET_OFFLINE: 'true'
@@ -41,8 +42,7 @@ modules:
   - name: nebula-reader
     buildsystem: simple
     build-commands:
-      - cargo --offline fetch --manifest-path Cargo.toml --verbose
-      - cargo --offline build --release --verbose
+      - cargo --offline build --release --locked
       - install -Dm0755 target/release/nebula-reader /app/bin/nebula-reader
       - install -Dm0644 res/io.github.NotTimm.NebulaReader.desktop
         /app/share/applications/io.github.NotTimm.NebulaReader.desktop
