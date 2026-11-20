@@ -312,6 +312,9 @@ pub enum Message {
     UpdateProgress(crate::updater::Progress),
     RestartToUpdate,
     DismissUpdatedBanner,
+    CopyDiagnostics,
+    DiagnosticsCopied(Result<(), String>),
+    ClearDiagCopied(u64),
     // Keys / pointer / touch
     Key(Key),
     ModifiersChanged(keyboard::Modifiers),
@@ -473,6 +476,9 @@ pub struct App {
     update_job: UpdateJob,
     /// Betas are turned on (the update channel, read at start).
     beta_channel: bool,
+    /// Brief "Copied" confirmation on Settings → About → Copy diagnostic info.
+    diag_copied: Option<u64>,
+    diag_counter: u64,
     /// The All / Local / Jellyfin switch above the library.
     library_covers: HashMap<i64, widget::image::Handle>,
     library_dirs: Vec<PathBuf>,
@@ -1741,6 +1747,8 @@ impl Application for App {
             just_updated,
             update_job: UpdateJob::Idle,
             beta_channel: crate::updates::channel() == crate::updates::Channel::Beta,
+            diag_copied: None,
+            diag_counter: 0,
             library_covers: HashMap::new(),
             library_dirs: library_dirs.clone(),
             library_path_input: String::new(),
@@ -2949,6 +2957,65 @@ impl App {
     }
 
     /// Settings → About: version and build, who made it, and updates.
+    /// Privacy-safe summary of the app and environment for bug reports
+    /// (never includes tokens, server URLs, API keys, or local paths).
+    fn diagnostic_info(&self) -> String {
+        use crate::updates;
+        let install = updates::Install::detect();
+        let desktop = Desktop::detect();
+        let look = self.look();
+        let build = updates::build_commit()
+            .map(|c| format!(" (build {c})"))
+            .unwrap_or_default();
+        let theme = self.settings.theme.as_deref().unwrap_or("system");
+        let gpu_vars: Vec<String> = [
+            "WGPU_BACKEND",
+            "WGPU_POWER_PREF",
+            "WGPU_DX12_PRESENTATION_SYSTEM",
+            "ICED_PRESENT_MODE",
+        ]
+        .into_iter()
+        .filter_map(|k| std::env::var(k).ok().map(|v| format!("{k}={v}")))
+        .collect();
+        let gpu = if gpu_vars.is_empty() {
+            "default".to_string()
+        } else {
+            gpu_vars.join(", ")
+        };
+        #[allow(unused_mut)]
+        let mut lines = vec![
+            format!("Nebula Reader {}{build}", updates::VERSION),
+            format!(
+                "Install: {} | Channel: {} (beta data: {})",
+                install.label(),
+                if self.beta_channel { "beta" } else { "regular" },
+                if updates::beta_data() { "yes" } else { "no" },
+            ),
+            format!("OS: {} ({})", std::env::consts::OS, std::env::consts::ARCH),
+            format!(
+                "Desktop: {desktop:?} | Look: {:?} -> {look:?} | Native titlebar: {}",
+                self.settings.look, self.native_titlebar
+            ),
+            format!(
+                "Theme: {theme} | Frosted/backdrop: {}",
+                self.window_frosted()
+            ),
+            format!("Graphics env: {gpu}"),
+            format!(
+                "Sources: {} local folder(s), {} Jellyfin, {} OPDS | Wikipedia: {} | Fandom: {} | Entries: {}",
+                self.library_dirs.len(),
+                self.jellyfin.accounts.len(),
+                self.opds.accounts.len(),
+                self.settings.wikipedia,
+                self.settings.fandom,
+                self.library_entries.len(),
+            ),
+        ];
+        #[cfg(windows)]
+        lines.push(format!("Windows backdrop: {:?}", self.settings.window_backdrop));
+        lines.join("\n")
+    }
+
     fn build_about_section(&self) -> Element<'_, Message> {
         use crate::updates::{self, Install};
         let install = Install::detect();
@@ -2980,6 +3047,14 @@ impl App {
                         widget::button::standard(fl!("release-notes"))
                             .on_press(Message::OpenUrl(updates::RELEASES_URL.into())),
                     ),
+            )
+            .add(
+                widget::button::standard(if self.diag_copied.is_some() {
+                    fl!("diagnostics-copied")
+                } else {
+                    fl!("copy-diagnostics")
+                })
+                .on_press(Message::CopyDiagnostics),
             );
 
         if !install.checks_github() {
@@ -4199,6 +4274,38 @@ impl App {
                 }
             }
             Message::DismissUpdatedBanner => self.just_updated = false,
+            Message::CopyDiagnostics => {
+                let text = self.diagnostic_info();
+                return cosmic::task::future(async move {
+                    let res = tokio::task::spawn_blocking(move || {
+                        let mut cb =
+                            arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
+                        cb.set_text(text).map_err(|e| format!("clipboard: {e}"))
+                    })
+                    .await;
+                    Message::DiagnosticsCopied(match res {
+                        Ok(r) => r,
+                        Err(e) => Err(format!("clipboard panicked: {e}")),
+                    })
+                });
+            }
+            Message::DiagnosticsCopied(Ok(())) => {
+                self.diag_counter += 1;
+                let id = self.diag_counter;
+                self.diag_copied = Some(id);
+                return cosmic::task::future(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                    Message::ClearDiagCopied(id)
+                });
+            }
+            Message::DiagnosticsCopied(Err(e)) => {
+                self.error = Some(e);
+            }
+            Message::ClearDiagCopied(id) => {
+                if self.diag_copied == Some(id) {
+                    self.diag_copied = None;
+                }
+            }
             Message::UpdateNow => {
                 let plan = match &self.update {
                     UpdateStatus::Available(release) => crate::updater::Plan::for_release(
