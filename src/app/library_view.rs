@@ -1143,6 +1143,7 @@ const CHEVRON_DOWN: &[u8] = include_bytes!("../../res/icons/ui/chevron-down.svg"
 const CHECK: &[u8] = include_bytes!("../../res/icons/ui/check.svg");
 const BOLT: &[u8] = include_bytes!("../../res/icons/ui/bolt.svg");
 const FIT_WIDTH: &[u8] = include_bytes!("../../res/icons/ui/fit-width.svg");
+const LTR_ICON: &[u8] = include_bytes!("../../res/icons/ui/ltr.svg");
 const RTL_ICON: &[u8] = include_bytes!("../../res/icons/ui/rtl.svg");
 
 /// A single-colour icon of ours, drawn in the theme's text colour.
@@ -1157,7 +1158,12 @@ pub(super) fn fit_width_icon() -> widget::icon::Handle {
     ui_icon(FIT_WIDTH)
 }
 
-/// Right-to-left (manga) reading direction toggle in the reader's header.
+/// Left-to-right reading direction indicator in the reader's header.
+pub(super) fn ltr_icon() -> widget::icon::Handle {
+    ui_icon(LTR_ICON)
+}
+
+/// Right-to-left (manga) reading direction indicator in the reader's header.
 pub(super) fn rtl_icon() -> widget::icon::Handle {
     ui_icon(RTL_ICON)
 }

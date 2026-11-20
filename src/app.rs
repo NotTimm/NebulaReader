@@ -2086,7 +2086,11 @@ impl Application for App {
                         },
                     ));
                     els.push(tip(
-                        widget::button::icon(library_view::rtl_icon())
+                        widget::button::icon(if self.rtl {
+                            library_view::rtl_icon()
+                        } else {
+                            library_view::ltr_icon()
+                        })
                             .selected(self.rtl)
                             .on_press(Message::ToggleRtl),
                         if self.rtl {
