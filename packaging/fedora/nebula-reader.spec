@@ -17,7 +17,7 @@
 %global rustflags_codegen_units 16
 
 Name:           nebula-reader
-Version:        0.2.2
+Version:        0.2.3
 # The release tag and file names use the upstream form (0.2.0-beta.1).
 %global upstream_version %(echo %{version} | tr "~" "-")
 Release:        1%{?dist}
@@ -130,6 +130,16 @@ export ZSTD_SYS_USE_PKG_CONFIG=1
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png
 
 %changelog
+* Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.3-1
+- Right-to-left (manga) reading mode (R), remembered per series
+- Dual-page cover-page solo toggle and chapter-aware spread alignment
+- Local CB7 and CBT archive support
+- Layered frosted glass cards for Wikipedia, Fandom, OPDS, and banners
+- Faster big libraries: off-thread reloads and cached sorted shelves
+- Copy diagnostic info button in Settings -> About
+- Security and archive hardening (Windows ShellExecuteW, atomic secret writes, archive bounds)
+- Faster RPM/COPR builds with ThinLTO and parallel codegen
+
 * Thu Nov 19 2026 Tim Singel <gamer.tdogtim@gmail.com> - 0.2.2-1
 - Fandom wikis (opt-in): follow wikis, main pages, search, articles
 - Settings -> Library menu: order and switch the menu's sections

@@ -81,6 +81,20 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.3" date="2026-11-19">
+      <description>
+        <p>Right-to-left manga reading, cover-page spread alignment, CB7/CBT archives, layered frosted glass, and faster big libraries.</p>
+        <ul>
+          <li>Right-to-left (manga) mode (R): flips Left/Right arrow navigation and two-page spread order, and remembers your choice per series</li>
+          <li>Two-page cover alignment: show each chapter's cover alone in two-page mode so spreads stay paired cleanly (toggleable in Settings → Reading)</li>
+          <li>Local CB7 and CBT comic archives are now scanned and opened alongside CBZ and CBR</li>
+          <li>Layered frosted glass surfaces for Wikipedia and Fandom cards, infoboxes, and Windows 11 Mica/Acrylic cards</li>
+          <li>Faster libraries: database reloads and cover checks now run off the UI thread, and shelf sections are cached instead of re-sorted on every redraw</li>
+          <li>Settings → About now has a Copy diagnostic info button for easier bug reports</li>
+          <li>Security and stability fixes: safe URL launching on Windows without cmd.exe, atomic secret/config writes, and bounds checks for malformed or truncated archives</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-11-19">
       <description>
         <p>Fandom wikis, your own menu order, and Fit to Width that stays put.</p>
