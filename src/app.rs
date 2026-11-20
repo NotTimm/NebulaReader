@@ -254,6 +254,7 @@ pub enum Message {
     },
     // Library
     LibrarySearchChanged(String),
+    LibraryReloaded(u64, Vec<SeriesEntry>, Vec<(i64, PathBuf)>),
     LibrarySource(usize),
     /// Settings → Library menu: a section moved up (-1) or down (1).
     MenuMove(LibrarySource, i32),
@@ -465,6 +466,9 @@ pub struct App {
     // library
     db: Option<rusqlite::Connection>,
     library_entries: Vec<SeriesEntry>,
+    library_layout: library_view::LibraryLayout,
+    library_gen: u64,
+    startup_library_done: bool,
     library_search: String,
     /// The All / Local / Jellyfin menu is open.
     library_menu: bool,
@@ -1548,30 +1552,25 @@ impl App {
         }
     }
 
+    /// Queries the library and checks for new cover thumbnails off the UI
+    /// thread; stale results (e.g. from earlier search keystrokes) are dropped
+    /// via `library_gen`.
     fn reload_library(&mut self) -> Task<Message> {
-        let Some(db) = &self.db else {
+        if self.db.is_none() {
             return Task::none();
-        };
-
-        let entries = if self.library_search.is_empty() {
-            library::all_series(db)
-        } else {
-            library::search_series(db, &self.library_search)
-        };
-
-        for entry in &entries {
-            if self.library_covers.contains_key(&entry.id) {
-                continue;
-            }
-            let cover_path = library::chapter_cover_path(&entry.path, 0);
-            if cover_path.exists() {
-                self.library_covers
-                    .insert(entry.id, widget::image::Handle::from_path(cover_path));
-            }
         }
-
-        self.library_entries = entries;
-        Task::none()
+        self.library_gen += 1;
+        let gen = self.library_gen;
+        let query = self.library_search.clone();
+        let known_covers: HashSet<i64> = self.library_covers.keys().copied().collect();
+        cosmic::task::future(async move {
+            let (entries, new_covers) = tokio::task::spawn_blocking(move || {
+                library::query_library_with_covers(&query, &known_covers)
+            })
+            .await
+            .unwrap_or_default();
+            Message::LibraryReloaded(gen, entries, new_covers)
+        })
     }
 }
 
@@ -1741,6 +1740,9 @@ impl Application for App {
             covers_pending: HashSet::new(),
             db,
             library_entries: Vec::new(),
+            library_layout: library_view::LibraryLayout::default(),
+            library_gen: 0,
+            startup_library_done: false,
             library_search: String::new(),
             library_menu: false,
             update: UpdateStatus::NotChecked,
@@ -1806,27 +1808,10 @@ impl Application for App {
         }
 
         // Rescan every library folder in the background (cheap for
-        // anything already known), and hide one-off entries whose files
-        // have since disappeared.
+        // anything already known). One-off missing-file checks and pending
+        // metadata retries kick off once the initial async reload completes.
         for dir in library_dirs {
             tasks.push(app.scan_root(dir));
-        }
-        let one_offs: Vec<String> = app
-            .library_entries
-            .iter()
-            .filter(|e| e.library_root.is_empty())
-            .map(|e| e.path.clone())
-            .collect();
-        tasks.push(missing_check_task(one_offs));
-        // Retry lookups for anything never matched (e.g. added offline).
-        let pending: Vec<String> = app
-            .library_entries
-            .iter()
-            .filter(|e| e.meta_fetched_at == 0 && !e.is_epub && !e.title.is_empty())
-            .map(|e| e.path.clone())
-            .collect();
-        for key in pending {
-            tasks.push(app.enqueue_meta(key));
         }
 
         app.refresh_themes();
@@ -2223,7 +2208,27 @@ impl Application for App {
 
     #[allow(clippy::too_many_lines)]
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        let affects_library_layout = matches!(
+            &message,
+            Message::LibraryReloaded(..)
+                | Message::LibrarySource(..)
+                | Message::MenuMove(..)
+                | Message::MenuShow(..)
+                | Message::HideMissing(..)
+                | Message::RootDiscovered(..)
+                | Message::RemoveLibraryFolder(..)
+                | Message::LibraryFolderSelected(..)
+                | Message::LibraryPathInputSubmitted
+                | Message::Jf(..)
+                | Message::Opds(..)
+        ) || matches!(
+            &message,
+            Message::Dl(m) if !matches!(m, DlMsg::Tick)
+        );
         let task = self.handle_message(message);
+        if affects_library_layout {
+            self.rebuild_library_layout();
+        }
         // libcosmic pads the content area with the window colour, which
         // shows as a strip beside the black in theater mode; drop that frame
         // while reading a comic in theater mode.
@@ -4555,6 +4560,38 @@ impl App {
             Message::LibrarySearchChanged(q) => {
                 self.library_search = q;
                 return self.reload_library();
+            }
+            Message::LibraryReloaded(gen, entries, new_covers) => {
+                if gen != self.library_gen {
+                    return Task::none();
+                }
+                for (id, path) in new_covers {
+                    self.library_covers
+                        .entry(id)
+                        .or_insert_with(|| widget::image::Handle::from_path(path));
+                }
+                self.library_entries = entries;
+                if !self.startup_library_done {
+                    self.startup_library_done = true;
+                    let mut tasks = Vec::new();
+                    let one_offs: Vec<String> = self
+                        .library_entries
+                        .iter()
+                        .filter(|e| e.library_root.is_empty())
+                        .map(|e| e.path.clone())
+                        .collect();
+                    tasks.push(missing_check_task(one_offs));
+                    let pending: Vec<String> = self
+                        .library_entries
+                        .iter()
+                        .filter(|e| e.meta_fetched_at == 0 && !e.is_epub && !e.title.is_empty())
+                        .map(|e| e.path.clone())
+                        .collect();
+                    for key in pending {
+                        tasks.push(self.enqueue_meta(key));
+                    }
+                    return Task::batch(tasks);
+                }
             }
             Message::MenuMove(src, by) => {
                 self.settings.move_in_menu(src, by);

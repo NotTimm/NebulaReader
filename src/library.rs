@@ -1,7 +1,7 @@
-use rusqlite::{Connection, params};
-use std::collections::HashMap;
+use rusqlite::{Connection, OpenFlags, params};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -338,10 +338,51 @@ pub fn open_db() -> Result<Connection, String> {
     std::fs::create_dir_all(path.parent().unwrap())
         .map_err(|e| format!("failed to create data dir: {e}"))?;
     let conn = Connection::open(&path).map_err(|e| format!("open db: {e}"))?;
+    let _ = conn.busy_timeout(Duration::from_secs(2));
     init_schema(&conn)?;
     migrate_legacy_cache();
     run_migrations(&conn)?;
     Ok(conn)
+}
+
+/// Opens an existing library database read-only for background queries (WAL
+/// lets readers run concurrently without blocking the UI thread).
+pub fn open_db_readonly() -> Result<Connection, String> {
+    let path = db_path();
+    let conn = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| format!("open db readonly: {e}"))?;
+    let _ = conn.busy_timeout(Duration::from_secs(2));
+    Ok(conn)
+}
+
+/// Queries the library and checks which cover thumbnails exist on disk for
+/// entries not yet in `known_covers`. Runs off the UI thread.
+pub fn query_library_with_covers(
+    query: &str,
+    known_covers: &HashSet<i64>,
+) -> (Vec<SeriesEntry>, Vec<(i64, PathBuf)>) {
+    let Ok(conn) = open_db_readonly() else {
+        return (Vec::new(), Vec::new());
+    };
+    let entries = if query.is_empty() {
+        all_series(&conn)
+    } else {
+        search_series(&conn, query)
+    };
+    let mut new_covers = Vec::new();
+    for entry in &entries {
+        if known_covers.contains(&entry.id) {
+            continue;
+        }
+        let cover_path = chapter_cover_path(&entry.path, 0);
+        if cover_path.exists() {
+            new_covers.push((entry.id, cover_path));
+        }
+    }
+    (entries, new_covers)
 }
 
 /// Creates the tables a new database needs (a no-op for existing ones,

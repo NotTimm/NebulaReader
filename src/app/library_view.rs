@@ -12,6 +12,17 @@ use crate::library::{IssueEntry, SeriesEntry};
 use crate::scan::{THUMB_H, THUMB_W};
 use crate::settings::LibrarySource;
 
+/// Pre-filtered and pre-sorted view of the library (indices into
+/// `App::library_entries`), rebuilt only when the library, filters, or
+/// visibility change instead of on every `view()` frame.
+#[derive(Default)]
+pub(super) struct LibraryLayout {
+    pub sources_present: Vec<LibrarySource>,
+    pub has_visible: bool,
+    pub continue_reading: Vec<usize>,
+    pub sections: Vec<(String, Vec<usize>)>,
+}
+
 /// Shelf cards are shown at half the thumbnail resolution (crisp on HiDPI).
 const CARD_W: f32 = THUMB_W as f32 / 2.0;
 const CARD_H: f32 = THUMB_H as f32 / 2.0;
@@ -199,17 +210,31 @@ impl App {
         picker.into()
     }
 
-    /// Whether the library has both local and Jellyfin series, which is
-    /// when the All / Local / Jellyfin dropdown shows.
     /// The places the library has series from (Local, Jellyfin, OPDS), for
-    /// the source dropdown.
-    fn sources_present(&self) -> Vec<LibrarySource> {
-        let entries: Vec<&SeriesEntry> = self
+    /// the source dropdown (cached in `self.library_layout`).
+    fn sources_present(&self) -> &[LibrarySource] {
+        &self.library_layout.sources_present
+    }
+
+    /// Whether the library has series from more than one place, so the
+    /// All / Local / Jellyfin / OPDS dropdown is worth having.
+    pub(super) fn has_local_and_remote(&self) -> bool {
+        self.library_layout.sources_present.len() > 1
+    }
+
+    /// Recomputes `self.library_layout` (sources menu, Continue Reading, and
+    /// sorted shelf sections) whenever the library or its filters change.
+    pub(super) fn rebuild_library_layout(&mut self) {
+        let visible_all: Vec<usize> = self
             .library_entries
             .iter()
-            .filter(|e| self.is_visible(e))
+            .enumerate()
+            .filter(|(_, e)| self.is_visible(e))
+            .map(|(i, _)| i)
             .collect();
-        self.settings
+
+        let sources_present: Vec<LibrarySource> = self
+            .settings
             .menu()
             .into_iter()
             .filter(|src| self.settings.shown(*src))
@@ -219,15 +244,128 @@ impl App {
                 // A catalog has its shelf (search and sections) under OPDS
                 // even before anything is downloaded from it.
                 LibrarySource::Opds if !self.opds.accounts.is_empty() => true,
-                src => entries.iter().any(|e| src.includes(&e.path, &e.library_root)),
+                src => visible_all.iter().any(|&i| {
+                    let e = &self.library_entries[i];
+                    src.includes(&e.path, &e.library_root)
+                }),
             })
-            .collect()
-    }
+            .collect();
 
-    /// Whether the library has series from more than one place, so the
-    /// All / Local / Jellyfin / OPDS dropdown is worth having.
-    pub(super) fn has_local_and_remote(&self) -> bool {
-        self.sources_present().len() > 1
+        let visible: Vec<usize> = if sources_present.len() > 1 {
+            let src = self.settings.library_source;
+            visible_all
+                .into_iter()
+                .filter(|&i| {
+                    let e = &self.library_entries[i];
+                    src.includes(&e.path, &e.library_root)
+                })
+                .collect()
+        } else {
+            visible_all
+        };
+
+        let has_visible = !visible.is_empty();
+
+        // ── Continue Reading ──────────────────────────────────────────────
+        let mut continue_reading = Vec::new();
+        if self.library_search.is_empty() && has_visible {
+            let mut recent: Vec<usize> = visible
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let e = &self.library_entries[i];
+                    e.has_progress() && !e.is_finished() && e.last_opened > 0
+                })
+                .collect();
+            recent.sort_by_key(|&i| std::cmp::Reverse(self.library_entries[i].last_opened));
+            recent.truncate(10);
+            continue_reading = recent;
+        }
+
+        // ── Sections per library folder, then everything else ─────────────
+        let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
+        if has_visible {
+            for dir in &self.library_dirs {
+                let root = dir.to_string_lossy().into_owned();
+                let mut items: Vec<usize> = visible
+                    .iter()
+                    .copied()
+                    .filter(|&i| {
+                        let e = &self.library_entries[i];
+                        e.library_root == root
+                            || (e.library_root.is_empty() && Path::new(&e.path).starts_with(dir))
+                    })
+                    .collect();
+                if items.is_empty() {
+                    continue;
+                }
+                items.sort_by_cached_key(|&i| self.library_entries[i].name().to_lowercase());
+                let name = dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or(root);
+                sections.push((name, items));
+            }
+            // One section per remote library ("Manga · deepdish").
+            let mut remote_roots: Vec<&str> = visible
+                .iter()
+                .map(|&i| self.library_entries[i].library_root.as_str())
+                .filter(|r| crate::remote::is_key(r))
+                .collect();
+            remote_roots.sort_unstable();
+            remote_roots.dedup();
+            for root in remote_roots {
+                let mut items: Vec<usize> = visible
+                    .iter()
+                    .copied()
+                    .filter(|&i| self.library_entries[i].library_root == root)
+                    .collect();
+                items.sort_by_cached_key(|&i| self.library_entries[i].name().to_lowercase());
+                let fallback = if crate::opds::is_key(root) {
+                    "OPDS"
+                } else {
+                    "Jellyfin"
+                };
+                let name = self
+                    .jf
+                    .library_names
+                    .get(root)
+                    .cloned()
+                    .unwrap_or_else(|| fallback.into());
+                sections.push((name, items));
+            }
+
+            let mut other: Vec<usize> = visible
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let e = &self.library_entries[i];
+                    e.library_root.is_empty()
+                        && !self
+                            .library_dirs
+                            .iter()
+                            .any(|d| Path::new(&e.path).starts_with(d))
+                })
+                .collect();
+            if !other.is_empty() {
+                other.sort_by_key(|&i| std::cmp::Reverse(self.library_entries[i].last_opened));
+                sections.push((
+                    if sections.is_empty() {
+                        fl!("library")
+                    } else {
+                        fl!("opened-elsewhere")
+                    },
+                    other,
+                ));
+            }
+        }
+
+        self.library_layout = LibraryLayout {
+            sources_present,
+            has_visible,
+            continue_reading,
+            sections,
+        };
     }
 
     /// Settings → Library menu: each section of the menu at the top left,
@@ -369,30 +507,13 @@ impl App {
             col = col.push(status);
         }
 
-        let visible: Vec<&SeriesEntry> = self
-            .library_entries
-            .iter()
-            .filter(|e| self.is_visible(e))
-            .collect();
-
-        // Narrowed by the All / Local / Jellyfin dropdown in the header.
-        let visible: Vec<&SeriesEntry> = if self.has_local_and_remote() {
-            let src = self.settings.library_source;
-            visible
-                .into_iter()
-                .filter(|e| src.includes(&e.path, &e.library_root))
-                .collect()
-        } else {
-            visible
-        };
-
         // OPDS catalog shelves (compact, side-by-side) on the OPDS shelf;
         // with catalogs, that's the page even before anything's downloaded.
         let opds_shelf = self.settings.library_source == LibrarySource::Opds
             || (!self.has_local_and_remote() && self.has_catalogs());
         let shelf_only = opds_shelf && self.library_search.is_empty() && self.has_catalogs();
 
-        if visible.is_empty() && !shelf_only {
+        if !self.library_layout.has_visible && !shelf_only {
             let msg = if self.library_search.is_empty() {
                 fl!("library-empty-hint")
             } else {
@@ -460,112 +581,34 @@ impl App {
         }
 
         // ── Continue Reading ──────────────────────────────────────────────
-        if self.library_search.is_empty() {
-            let mut recent: Vec<&SeriesEntry> = visible
-                .iter()
-                .copied()
-                .filter(|e| e.has_progress() && !e.is_finished() && e.last_opened > 0)
-                .collect();
-            recent.sort_by_key(|e| std::cmp::Reverse(e.last_opened));
-            if !recent.is_empty() {
-                let mut row = widget::Row::new().spacing(16);
-                for e in recent.into_iter().take(10) {
+        if !self.library_layout.continue_reading.is_empty() {
+            let mut row = widget::Row::new().spacing(16);
+            for &i in &self.library_layout.continue_reading {
+                if let Some(e) = self.library_entries.get(i) {
                     row = row.push(self.series_card(e, true));
                 }
-                body = body
-                    .push(widget::text::title3(fl!("continue-reading")))
-                    .push(widget::scrollable::horizontal(row.padding([0, 0, 12, 0])));
             }
+            body = body
+                .push(widget::text::title3(fl!("continue-reading")))
+                .push(widget::scrollable::horizontal(row.padding([0, 0, 12, 0])));
         }
 
-        // ── Sections per library folder, then everything else ─────────────
-        let mut sections: Vec<(String, Vec<&SeriesEntry>)> = Vec::new();
-        for dir in &self.library_dirs {
-            let root = dir.to_string_lossy().into_owned();
-            let mut items: Vec<&SeriesEntry> = visible
-                .iter()
-                .copied()
-                .filter(|e| {
-                    e.library_root == root
-                        || (e.library_root.is_empty() && Path::new(&e.path).starts_with(dir))
-                })
-                .collect();
-            if items.is_empty() {
-                continue;
-            }
-            items.sort_by_cached_key(|e| e.name().to_lowercase());
-            let name = dir
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or(root);
-            sections.push((name, items));
-        }
-        // One section per Jellyfin library ("Manga · deepdish").
-        let mut remote_roots: Vec<&str> = visible
-            .iter()
-            .map(|e| e.library_root.as_str())
-            .filter(|r| crate::remote::is_key(r))
-            .collect();
-        remote_roots.sort_unstable();
-        remote_roots.dedup();
-        for root in remote_roots {
-            let mut items: Vec<&SeriesEntry> = visible
-                .iter()
-                .copied()
-                .filter(|e| e.library_root == root)
-                .collect();
-            items.sort_by_cached_key(|e| e.name().to_lowercase());
-            let fallback = if crate::opds::is_key(root) {
-                "OPDS"
-            } else {
-                "Jellyfin"
-            };
-            let name = self
-                .jf
-                .library_names
-                .get(root)
-                .cloned()
-                .unwrap_or_else(|| fallback.into());
-            sections.push((name, items));
-        }
-
-        let mut other: Vec<&SeriesEntry> = visible
-            .iter()
-            .copied()
-            .filter(|e| {
-                e.library_root.is_empty()
-                    && !self
-                        .library_dirs
-                        .iter()
-                        .any(|d| Path::new(&e.path).starts_with(d))
-            })
-            .collect();
-        if !other.is_empty() {
-            other.sort_by_key(|e| std::cmp::Reverse(e.last_opened));
-            sections.push((
-                if sections.is_empty() {
-                    fl!("library")
-                } else {
-                    fl!("opened-elsewhere")
-                },
-                other,
-            ));
-        }
-
-        for (name, items) in sections {
+        // ── Cached sections (per library folder, remote roots, other) ─────
+        for (name, items) in &self.library_layout.sections {
             let count = items.len();
             body = body
                 .push(
                     widget::Row::new()
                         .spacing(8)
                         .align_y(Alignment::End)
-                        .push(widget::text::title3(name))
+                        .push(widget::text::title3(name.as_str()))
                         .push(widget::text::caption(format!("{count}"))),
                 )
                 .push(
                     widget::flex_row(
                         items
-                            .into_iter()
+                            .iter()
+                            .filter_map(|&i| self.library_entries.get(i))
                             .map(|e| self.series_card(e, false))
                             .collect(),
                     )
