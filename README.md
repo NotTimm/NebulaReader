@@ -151,7 +151,7 @@ Coming soon: `winget install NotTimm.NebulaReader`, Homebrew Cask, and Flathub
   <img src="res/screenshots/reader.png" width="820" alt="Look Back open in theater mode, streamed from a Jellyfin server, with the server name and its online dot in the title bar">
 </p>
 
-- CBZ, CBR and folders of images, with embedded `ComicInfo.xml`.
+- CBZ, CBR, CB7, CBT and folders of images, with embedded `ComicInfo.xml`.
 - Single or two pages at a time (a two-page spread shows on its own),
   **right-to-left (manga) mode** (`R`, flipping arrow navigation and
   two-page spread order), theater mode (a black backdrop, on by default),

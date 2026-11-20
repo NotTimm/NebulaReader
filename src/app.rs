@@ -944,7 +944,7 @@ fn battery_glyph<'a>(b: crate::platform::status::Battery) -> Element<'a, Message
 }
 
 fn comic_file_filter() -> FileFilter {
-    const EXTENSIONS: [&str; 5] = ["cbz", "cbr", "zip", "rar", "epub"];
+    const EXTENSIONS: [&str; 9] = ["cbz", "cbr", "cb7", "cbt", "zip", "rar", "7z", "tar", "epub"];
     let mut filter = FileFilter::new(&fl!("file-filter-comics"));
     for ext in EXTENSIONS {
         #[cfg(target_os = "linux")]

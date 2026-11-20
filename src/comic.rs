@@ -115,9 +115,14 @@ fn is_zip_name(name: &str) -> bool {
     !is_mac_junk(name) && (lower.ends_with(".cbz") || lower.ends_with(".zip"))
 }
 
+/// Archives read through `libarchive` (`compress-tools`): RAR/CBR, 7z/CB7,
+/// and TAR/CBT.
 fn is_rar_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    !is_mac_junk(name) && (lower.ends_with(".cbr") || lower.ends_with(".rar"))
+    !is_mac_junk(name)
+        && [".cbr", ".rar", ".cb7", ".7z", ".cbt", ".tar"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
 }
 
 pub(crate) fn natural_key(name: &str) -> Vec<(String, u64)> {
@@ -702,12 +707,13 @@ fn rar_image_names(path: &Path) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-/// Whether a plain `.zip`/`.rar` is actually a comic: mostly images, a
-/// few of them. (`.cbz`/`.cbr` are trusted by extension.) Keeps game
-/// ROMs, firmware and other archives out of a library folder's shelf.
+/// Whether a plain `.zip`/`.rar`/`.7z`/`.tar` is actually a comic: mostly
+/// images, a few of them. (`.cbz`/`.cbr`/`.cb7`/`.cbt` are trusted by
+/// extension.) Keeps game ROMs, firmware and other archives out of a library
+/// folder's shelf.
 pub fn looks_like_comic(path: &Path) -> bool {
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    if name.ends_with(".cbz") || name.ends_with(".cbr") {
+    if [".cbz", ".cbr", ".cb7", ".cbt"].iter().any(|ext| name.ends_with(ext)) {
         return true;
     }
     let all: Vec<String> = if is_zip_name(&name) {
@@ -753,9 +759,14 @@ pub fn first_page(issue: &Path) -> Result<Page, String> {
         let first = zip_image_names_uncached(issue)?.into_iter().next().ok_or("no pages")?;
         let file = File::open(issue).map_err(|e| format!("open: {e}"))?;
         let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("zip: {e}"))?;
-        let mut entry = archive.by_name(&first).map_err(|e| format!("entry: {e}"))?;
-        let mut data = Vec::with_capacity(entry.size() as usize);
-        std::io::Read::read_to_end(&mut entry, &mut data).map_err(|e| format!("read: {e}"))?;
+        let entry = archive.by_name(&first).map_err(|e| format!("entry: {e}"))?;
+        let cap = usize::try_from(entry.size()).unwrap_or(MAX_PREALLOC_BYTES).min(MAX_PREALLOC_BYTES);
+        let mut data = Vec::with_capacity(cap);
+        std::io::Read::read_to_end(&mut std::io::Read::take(entry, MAX_ENTRY_BYTES + 1), &mut data)
+            .map_err(|e| format!("read: {e}"))?;
+        if data.len() as u64 > MAX_ENTRY_BYTES {
+            return Err(format!("entry {first} exceeds maximum page size"));
+        }
         return decode_image(&first, &data);
     }
     if is_rar_name(&name) {
@@ -794,7 +805,7 @@ pub fn find_comic_info(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_string_lossy();
     if is_zip_name(&name) {
         let archive = open_zip(path).ok()?;
-        let mut archive = archive.lock().unwrap();
+        let mut archive = archive.lock().unwrap_or_else(|e| e.into_inner());
         let idx = (0..archive.len()).find(|&i| {
             archive
                 .by_index_raw(i)
@@ -872,7 +883,64 @@ mod name_tests {
         assert!(is_zip_name("Issue 01.cbz"));
         assert!(!is_zip_name("._Issue 01.cbz"));
         assert!(!is_rar_name("._Issue 01.cbr"));
+        assert!(is_rar_name("Issue 01.cb7"));
+        assert!(is_rar_name("Issue 01.cbt"));
+        assert!(is_rar_name("Issue 01.7z"));
+        assert!(is_rar_name("Issue 01.tar"));
+        assert!(!is_rar_name("._Issue 01.cb7"));
         // A name that merely starts with an underscore is fine.
         assert!(is_image_name("_cover.png"));
+    }
+
+    #[test]
+    fn reads_cbt_tar_comics_end_to_end() {
+        // Minimal 1x1 PNG image.
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(1, 1, image::Rgba([10, 20, 30, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        // Build a minimal POSIX ustar archive (.cbt) in memory with two pages.
+        let mut tar = Vec::new();
+        for name in ["page_02.png", "page_01.png"] {
+            let mut hdr = [0u8; 512];
+            hdr[..name.len()].copy_from_slice(name.as_bytes());
+            hdr[100..107].copy_from_slice(b"0000644");
+            hdr[108..115].copy_from_slice(b"0000000");
+            hdr[116..123].copy_from_slice(b"0000000");
+            let size = format!("{:011o}", png.len());
+            hdr[124..135].copy_from_slice(size.as_bytes());
+            hdr[136..147].copy_from_slice(b"00000000000");
+            hdr[148..156].fill(b' ');
+            hdr[156] = b'0';
+            hdr[257..263].copy_from_slice(b"ustar\0");
+            hdr[263..265].copy_from_slice(b"00");
+            let cksum: u32 = hdr.iter().map(|&b| u32::from(b)).sum();
+            let ck = format!("{cksum:06o}\0 ");
+            hdr[148..156].copy_from_slice(ck.as_bytes());
+            tar.extend_from_slice(&hdr);
+            tar.extend_from_slice(&png);
+            let pad = (512 - (png.len() % 512)) % 512;
+            tar.resize(tar.len() + pad, 0);
+        }
+        tar.resize(tar.len() + 1024, 0);
+
+        let dir = std::env::temp_dir().join(format!("nebula-cbt-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Sample #1.cbt");
+        std::fs::write(&path, &tar).unwrap();
+
+        assert!(looks_like_comic(&path));
+        assert_eq!(count_pages(&path).unwrap(), 2);
+        let (pages, chapters) = collect_sources(&path).unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(chapters.len(), 1);
+        let decoded = first_page(&path).unwrap();
+        assert_eq!((decoded.width, decoded.height), (1, 1));
+        let p0 = decode_source(&pages[0]).unwrap();
+        assert_eq!((p0.width, p0.height), (1, 1));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

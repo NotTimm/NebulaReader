@@ -37,7 +37,7 @@ fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
 /// Strips a file extension if it's one we open.
 fn strip_ext(raw: &str) -> &str {
     let lower = raw.to_ascii_lowercase();
-    for ext in [".cbz", ".cbr", ".zip", ".rar", ".epub", ".pdf"] {
+    for ext in [".cbz", ".cbr", ".cb7", ".cbt", ".zip", ".rar", ".7z", ".tar", ".epub", ".pdf"] {
         if lower.ends_with(ext) {
             return &raw[..raw.len() - ext.len()];
         }

@@ -39,7 +39,9 @@ fn lower_name(p: &Path) -> String {
 
 fn is_comic_file(p: &Path) -> bool {
     let n = lower_name(p);
-    [".cbz", ".cbr", ".zip", ".rar"].iter().any(|e| n.ends_with(e))
+    [".cbz", ".cbr", ".cb7", ".cbt", ".zip", ".rar", ".7z", ".tar"]
+        .iter()
+        .any(|e| n.ends_with(e))
 }
 
 fn is_image(p: &Path) -> bool {
