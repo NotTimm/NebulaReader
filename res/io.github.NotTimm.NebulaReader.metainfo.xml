@@ -5,20 +5,32 @@
   <project_license>GPL-3.0-only</project_license>
 
   <name>Nebula Reader</name>
-  <summary>Read comic books and ebooks</summary>
+  <summary>Read comics, manga and books</summary>
 
   <description>
     <p>
-      A native COSMIC desktop reader for comic book archives (.cbz/.cbr),
-      manga and comic series folders, and .epub books.
+      Nebula Reader is a comic, manga and EPUB book reader built for the COSMIC
+      desktop and at home on KDE Plasma and GNOME. Point it at your local
+      folders, sign in to a Jellyfin server, or add an OPDS server like Komga,
+      Kavita or Project Gutenberg to build one library with covers, reading
+      progress and a Continue Reading shelf.
+    </p>
+    <p>
+      Messy folder and file names are cleaned up offline and matched online
+      against AniList for manga and, with a free API key, ComicVine for Western
+      comics. Books turn pages like an e-reader with adjustable typography and
+      paper themes, and the app adapts to your desktop look or your own COSMIC
+      and KDE colour themes.
     </p>
     <ul>
-      <li>Library view with covers, search, and a Continue Reading shelf</li>
-      <li>Scan whole library folders and group them automatically</li>
-      <li>Chapter-aware series folders with fast archive extraction</li>
-      <li>Single and dual page layouts, theater mode, fullscreen</li>
-      <li>Zoom and pan with trackpad or touchscreen pinch</li>
-      <li>Metadata and cover art from ComicVine and AniList</li>
+      <li>Local libraries, Jellyfin book libraries and OPDS catalogs in one place</li>
+      <li>CBZ, CBR, CB7, CBT, image folders and EPUB books, with ComicInfo.xml support</li>
+      <li>HTTP range streaming and offline downloads for Jellyfin and OPDS servers</li>
+      <li>Single or two-page spreads, cover-page solo alignment, right-to-left manga mode, Fit to Width, theater mode and fullscreen</li>
+      <li>Zoom and pan with mouse wheel, trackpad or touchscreen pinch</li>
+      <li>Paginated EPUB books with single or facing pages, adjustable type, themes and table of contents</li>
+      <li>Online series matching via AniList and ComicVine, plus creator and release-date details</li>
+      <li>Adapts to COSMIC, KDE Breeze and GNOME Adwaita, with built-in and importable themes</li>
     </ul>
   </description>
 
