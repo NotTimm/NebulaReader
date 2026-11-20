@@ -424,12 +424,20 @@ pub fn apply(staged: &Staged) -> Result<(), String> {
     }
 }
 
-/// Static cmd lines run with `/V:ON` (delayed expansion): filesystem paths are
-/// passed through environment variables (`!NEBULA_UPD_*!`) rather than
-/// interpolated into the command string, so spaces, `&`, `%`, `^`, `!`, and
+/// Static PowerShell commands for post-exit update actions: filesystem paths
+/// are passed via environment variables (`$env:NEBULA_UPD_*`) rather than
+/// interpolated into a shell string, so spaces, `&`, `%`, `^`, `!`, `$`, and
 /// parentheses in user or portable folder names never break updates.
-const INSTALLER_CMD: &str = "ping -n 3 127.0.0.1 >nul & \"!NEBULA_UPD_SETUP!\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NORESTARTAPPLICATIONS \"/LOG=!NEBULA_UPD_LOG!\" & start \"\" \"!NEBULA_UPD_EXE!\"";
-const RELAUNCH_CMD: &str = "ping -n 2 127.0.0.1 >nul & start \"\" \"!NEBULA_UPD_EXE!\"";
+const INSTALLER_CMD: &str = concat!(
+    "$q=[string][char]34; ",
+    "Start-Sleep -Seconds 2; ",
+    "Start-Process -FilePath $env:NEBULA_UPD_SETUP ",
+    "-ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',",
+    "'/CLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',",
+    "($q + '/LOG=' + $env:NEBULA_UPD_LOG + $q) -Wait; ",
+    "Start-Process -FilePath $env:NEBULA_UPD_EXE"
+);
+const RELAUNCH_CMD: &str = "Start-Sleep -Seconds 2; Start-Process -FilePath $env:NEBULA_UPD_EXE";
 
 /// A shell that waits for process `pid` to quit (`open` would otherwise just
 /// bring it to the front), clears `staging` away and opens `app`.
@@ -463,13 +471,11 @@ fn swap_bundle(new: &Path, app: &Path, old: &Path) -> Result<(), String> {
 fn run_after_exit_windows(script: &str, vars: &[(&str, &std::ffi::OsStr)]) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // `/V:ON` enables `!VAR!` delayed expansion so env-var values aren't
-    // re-parsed by cmd for `&`, `%`, `^`, etc. cmd strips the outer quotes of
-    // what follows `/C` and keeps the rest.
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.raw_arg("/V:ON")
-        .raw_arg("/C")
-        .raw_arg(format!("\"{script}\""))
+    let mut cmd = std::process::Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .creation_flags(CREATE_NO_WINDOW);
     for (k, v) in vars {
         cmd.env(k, v);
@@ -708,18 +714,53 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
         false
     }
 
-    /// Runs the installer line the way `apply` does, with a batch file
-    /// standing in for the setup and for the app, in folders with spaces.
+    /// Compiles a tiny native .exe stub that records its parsed argv (one per
+    /// line) to `<exe>.out`. Using a real .exe avoids `cmd.exe`'s quote-stripping
+    /// quirks on `.bat` paths containing `&` and matches what the updater runs.
+    #[cfg(windows)]
+    fn build_windows_test_exe(out_exe: &Path) {
+        const STUB_CS: &str = r#"public class P {
+            public static void Main(string[] args) {
+                System.IO.File.WriteAllText(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location + ".out",
+                    string.Join("\n", args)
+                );
+            }
+        }"#;
+        let out = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Add-Type -TypeDefinition $env:NEBULA_TEST_SRC -OutputAssembly $env:NEBULA_TEST_EXE -OutputType ConsoleApplication",
+            ])
+            .env("NEBULA_TEST_SRC", STUB_CS)
+            .env("NEBULA_TEST_EXE", out_exe.as_os_str())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "failed to build test exe: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Runs the installer command the way `apply` does, with real .exe stubs
+    /// standing in for setup and the app in folders with spaces, parens, and `&`.
     #[cfg(windows)]
     #[test]
     fn windows_installer_script_runs() {
-        let dir = temp_dir("win script").join("Program Files (x86) & Co");
+        let base = temp_dir("win script");
+        let stub = base.join("stub.exe");
+        build_windows_test_exe(&stub);
+        let dir = base.join("Program Files (x86) & Co");
         fs::create_dir_all(&dir).unwrap();
-        let (args, started) = (dir.join("setup args.txt"), dir.join("app started.txt"));
-        let setup = dir.join("fake setup.bat");
-        let app = dir.join("fake app.bat");
-        fs::write(&setup, format!("@echo %* > \"{}\"\r\n", args.display())).unwrap();
-        fs::write(&app, format!("@echo ok > \"{}\"\r\n@exit\r\n", started.display())).unwrap();
+        let setup = dir.join("fake setup.exe");
+        let app = dir.join("fake app.exe");
+        fs::copy(&stub, &setup).unwrap();
+        fs::copy(&stub, &app).unwrap();
+        let args_out = PathBuf::from(format!("{}.out", setup.display()));
+        let started = PathBuf::from(format!("{}.out", app.display()));
         let log = dir.join("setup.log");
         run_after_exit_windows(
             INSTALLER_CMD,
@@ -731,19 +772,23 @@ tMyn56UY13CC1txxh1gU5Xkbzir0lN5ReQ3tEZe8A8ZgeY50tO/rJqGYplHlTYhkpkP2jq75ZMBf3zWc
         )
         .unwrap();
         assert!(wait_for(&started, 30), "the app wasn't started");
-        let args = fs::read_to_string(&args).unwrap();
-        assert!(args.contains("/VERYSILENT") && args.contains("/NORESTARTAPPLICATIONS"), "{args}");
-        assert!(args.contains(&format!("\"/LOG={}\"", log.display())), "{args}");
+        let args = fs::read_to_string(&args_out).unwrap();
+        let lines: Vec<&str> = args.lines().collect();
+        assert!(lines.contains(&"/VERYSILENT") && lines.contains(&"/NORESTARTAPPLICATIONS"), "{args}");
+        assert!(lines.contains(&format!("/LOG={}", log.display()).as_str()), "{args}");
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_relaunch_script_runs() {
-        let dir = temp_dir("win relaunch").join("Nebula & Reader");
+        let base = temp_dir("win relaunch");
+        let stub = base.join("stub.exe");
+        build_windows_test_exe(&stub);
+        let dir = base.join("Nebula & Reader");
         fs::create_dir_all(&dir).unwrap();
-        let started = dir.join("started.txt");
-        let app = dir.join("nebula app.bat");
-        fs::write(&app, format!("@echo ok > \"{}\"\r\n@exit\r\n", started.display())).unwrap();
+        let app = dir.join("nebula app.exe");
+        fs::copy(&stub, &app).unwrap();
+        let started = PathBuf::from(format!("{}.out", app.display()));
         run_after_exit_windows(RELAUNCH_CMD, &[("NEBULA_UPD_EXE", app.as_os_str())]).unwrap();
         assert!(wait_for(&started, 30), "the app wasn't started");
     }

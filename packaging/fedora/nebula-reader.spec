@@ -5,7 +5,7 @@
 # (the release workflow checks).
 
 # CI already runs `cargo test --release --locked` on every push and before
-# COPR is triggered; keep `%cargo_test` off by default so COPR doesn't link
+# COPR is triggered; keep `%%cargo_test` off by default so COPR doesn't link
 # the full test binary a second time per chroot (pass `--with check` to run).
 %bcond check 0
 
